@@ -1,26 +1,75 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
-import { resolveRestaurant } from './src/services/restaurantService';
+/**
+ * App.js
+ * Root of the app. Wires together all Phase 6 providers.
+ *
+ * Dependency order (outermost → innermost):
+ *   SafeAreaProvider
+ *     NavigationContainer
+ *       RestaurantContext  ← loads restaurant from DB
+ *         ThemeProvider    ← derives theme from restaurant colors
+ *           PaperProvider  ← Paper uses our brand theme
+ *             AuthContext
+ *               RootNavigator
+ */
 
-// Expose resolveRestaurant to window for console testing
-if (typeof window !== 'undefined') {
-  window.resolveRestaurant = resolveRestaurant;
-}
+import React from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { NavigationContainer } from '@react-navigation/native';
+import { PaperProvider } from 'react-native-paper';
+
+import { RestaurantProvider, useRestaurantContext } from './src/context/RestaurantContext';
+import { AuthProvider } from './src/context/AuthContext';
+import { ThemeProvider, buildPaperTheme, useTheme } from './src/theme';
+import RootNavigator from './src/navigation/RootNavigator';
+
+// ─── Inner shell ──────────────────────────────────────────────────────────────
+// Separated so it can consume RestaurantContext before building the Paper theme.
+
+const ThemedApp = () => {
+  const { restaurant, loading } = useRestaurantContext();
+
+  // Don't render until we know the restaurant — prevents a flash of
+  // default brand colors before the real ones load.
+  if (loading) {
+    // Replace with your actual SplashScreen or a skeleton if preferred.
+    return null;
+  }
+
+  return (
+    // ThemeProvider derives our internal theme from the restaurant's colors.
+    <ThemeProvider restaurant={restaurant}>
+      <PaperAdapter>
+        <AuthProvider>
+          <NavigationContainer>
+            <RootNavigator />
+          </NavigationContainer>
+        </AuthProvider>
+      </PaperAdapter>
+    </ThemeProvider>
+  );
+};
+
+// PaperAdapter sits inside ThemeProvider so it can access the derived theme
+// and forward it to PaperProvider in the shape Paper expects.
+const PaperAdapter = ({ children }) => {
+  const theme = useTheme();
+  const paperTheme = buildPaperTheme(theme);
+
+  return (
+    <PaperProvider theme={paperTheme}>
+      {children}
+    </PaperProvider>
+  );
+};
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <RestaurantProvider>
+        <ThemedApp />
+      </RestaurantProvider>
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
