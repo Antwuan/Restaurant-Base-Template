@@ -3,18 +3,6 @@ import { generateTheme } from './colors';
 
 const ThemeContext = createContext(null);
 
-/**
- * ThemeProvider
- * Wraps the app and provides dynamic branding based on the loaded restaurant.
- *
- * Usage:
- *   <ThemeProvider restaurant={restaurant}>
- *     <YourApp />
- *   </ThemeProvider>
- *
- * Consuming:
- *   const theme = useTheme();
- */
 export const ThemeProvider = ({ restaurant, children }) => {
   const theme = useMemo(() => {
     return generateTheme({
@@ -30,8 +18,16 @@ export const ThemeProvider = ({ restaurant, children }) => {
     restaurant?.logo_url,
   ]);
 
+  const value = useMemo(
+    () => ({
+      theme,
+      restaurant,
+    }),
+    [theme, restaurant],
+  );
+
   return (
-    <ThemeContext.Provider value={theme}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );
@@ -39,7 +35,7 @@ export const ThemeProvider = ({ restaurant, children }) => {
 
 /**
  * useTheme
- * Returns the current restaurant theme. Must be used inside <ThemeProvider>.
+ * Returns the current theme + restaurant. Must be used inside <ThemeProvider>.
  */
 export const useTheme = () => {
   const context = useContext(ThemeContext);

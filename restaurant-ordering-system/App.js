@@ -49,10 +49,8 @@ const ThemedApp = () => {
   );
 };
 
-// PaperAdapter sits inside ThemeProvider so it can access the derived theme
-// and forward it to PaperProvider in the shape Paper expects.
 const PaperAdapter = ({ children }) => {
-  const theme = useTheme();
+  const { theme } = useTheme();
   const paperTheme = buildPaperTheme(theme);
 
   return (
