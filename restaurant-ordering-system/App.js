@@ -1,73 +1,86 @@
-/**
- * App.js
- * Root of the app. Wires together all Phase 6 providers.
- *
- * Dependency order (outermost → innermost):
- *   SafeAreaProvider
- *     NavigationContainer
- *       RestaurantContext  ← loads restaurant from DB
- *         ThemeProvider    ← derives theme from restaurant colors
- *           PaperProvider  ← Paper uses our brand theme
- *             AuthContext
- *               RootNavigator
- */
-
 import React from 'react';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
-import { PaperProvider } from 'react-native-paper';
+import { Provider as PaperProvider } from 'react-native-paper';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 
 import { RestaurantProvider, useRestaurantContext } from './src/context/RestaurantContext';
 import { AuthProvider } from './src/context/AuthContext';
-import { ThemeProvider, buildPaperTheme, useTheme } from './src/theme';
+import { ThemeProvider, useTheme, buildPaperTheme } from './src/theme';
 import RootNavigator from './src/navigation/RootNavigator';
 
-// ─── Inner shell ──────────────────────────────────────────────────────────────
-// Separated so it can consume RestaurantContext before building the Paper theme.
-
-const ThemedApp = () => {
-  const { restaurant, loading } = useRestaurantContext();
-
-  // Don't render until we know the restaurant — prevents a flash of
-  // default brand colors before the real ones load.
-  if (loading) {
-    // Replace with your actual SplashScreen or a skeleton if preferred.
-    return null;
-  }
-
-  return (
-    // ThemeProvider derives our internal theme from the restaurant's colors.
-    <ThemeProvider restaurant={restaurant}>
-      <PaperAdapter>
-        <AuthProvider>
-          <NavigationContainer>
-            <RootNavigator />
-          </NavigationContainer>
-        </AuthProvider>
-      </PaperAdapter>
-    </ThemeProvider>
-  );
-};
-
-const PaperAdapter = ({ children }) => {
+// Inner app wrapper that has access to theme + restaurant context
+const AppContent = () => {
+  const { restaurant, loading, error } = useRestaurantContext();
   const { theme } = useTheme();
   const paperTheme = buildPaperTheme(theme);
 
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  if (error || !restaurant) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>Restaurant not found.</Text>
+        <Text style={styles.errorSub}>Please check the URL or contact support.</Text>
+      </View>
+    );
+  }
+
   return (
     <PaperProvider theme={paperTheme}>
-      {children}
+      <NavigationContainer>
+        <RootNavigator />
+      </NavigationContainer>
     </PaperProvider>
   );
 };
 
-// ─── Root ─────────────────────────────────────────────────────────────────────
+// Theme-aware wrapper (needs restaurant from context)
+const ThemedApp = () => {
+  const { restaurant } = useRestaurantContext();
+
+  return (
+    <ThemeProvider restaurant={restaurant}>
+      <AppContent />
+    </ThemeProvider>
+  );
+};
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <RestaurantProvider>
-        <ThemedApp />
-      </RestaurantProvider>
+      <AuthProvider>
+        <RestaurantProvider>
+          <ThemedApp />
+        </RestaurantProvider>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  errorSub: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+});
