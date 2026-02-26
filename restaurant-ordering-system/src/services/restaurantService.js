@@ -90,3 +90,16 @@ export async function resolveRestaurant() {
 export function clearRestaurantCache() {
   _cache = null;
 }
+
+export async function updateRestaurant(id, updates) {
+  const { data, error } = await supabase
+    .from('restaurants')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  clearRestaurantCache();
+  return data;
+}

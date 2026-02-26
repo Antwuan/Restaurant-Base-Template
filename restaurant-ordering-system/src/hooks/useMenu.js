@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { menuService } from '../services/menuService';
+import * as menuService from '../services/menuService';
 
 export const useMenu = (restaurantId) => {
   const [categories, setCategories] = useState([]);
