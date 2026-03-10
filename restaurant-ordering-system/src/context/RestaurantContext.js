@@ -5,24 +5,43 @@ import { supabase } from '../config/supabase';
 const RestaurantContext = createContext(null);
 
 /**
- * Resolves the restaurant identifier from:
- * - Web: window.location.hostname (e.g. "myrestaurant.com" or "slug.yourplatform.com")
- * - Mobile: EXPO_PUBLIC_RESTAURANT_SLUG env variable set per app config
+ * Resolves the restaurant identifier using this priority order:
+ *
+ * WEB:
+ *   1. ?restaurant=<slug> query param  — dev convenience / override
+ *   2. EXPO_PUBLIC_RESTAURANT_SLUG env — local dev default (set in .env.development)
+ *   3. window.location.hostname        — production (e.g. "order.pizzapalace.com")
+ *
+ * NATIVE:
+ *   4. EXPO_PUBLIC_RESTAURANT_SLUG env — set per restaurant build in app.config.js
  */
 const resolveRestaurantIdentifier = () => {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    // 1. Query param override — works on any environment
+    //    Usage: localhost:8081?restaurant=pizza-palace
+    const params = new URLSearchParams(window.location.search);
+    const slugParam = params.get('restaurant');
+    if (slugParam) return slugParam;
+
     const hostname = window.location.hostname;
-    // Strip www. prefix if present
+
+    // 2. Local dev fallback — avoids needing the query param every time
+    if (hostname === 'localhost' || hostname.startsWith('127.')) {
+      return process.env.EXPO_PUBLIC_RESTAURANT_SLUG || null;
+    }
+
+    // 3. Production — match hostname against restaurants.domain in Supabase
     return hostname.replace(/^www\./, '');
   }
-  // Mobile: use env variable set per restaurant build
+
+  // 4. Native builds — set EXPO_PUBLIC_RESTAURANT_SLUG per restaurant in app.config.js
   return process.env.EXPO_PUBLIC_RESTAURANT_SLUG || null;
 };
 
 const fetchRestaurant = async (identifier) => {
   if (!identifier) return null;
 
-  // First try matching by custom domain (web)
+  // Try matching by custom domain first (production web)
   if (Platform.OS === 'web' && identifier.includes('.')) {
     const { data, error } = await supabase
       .from('restaurants')
