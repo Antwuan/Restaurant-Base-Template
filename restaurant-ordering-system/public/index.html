@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+
+    <!--
+      viewport: width=device-width is required for mobile responsiveness.
+      initial-scale=1 prevents iOS auto-zoom on input focus.
+      viewport-fit=cover extends content into iPhone notch/safe area.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+
+    <!-- SEO / social meta — Expo will inject the app name from app.json -->
+    <meta name="description" content="Order food online from your favourite restaurant." />
+
+    <!--
+      theme-color: Controls the browser chrome colour on mobile.
+      This default will be overridden at runtime once the restaurant's
+      primary_color is loaded from Supabase.
+    -->
+    <meta name="theme-color" content="#007AFF" />
+
+    <!-- PWA: makes the site installable on Android home screens -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Apple PWA meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Order" />
+
+    <!-- Favicon — replace with your actual icon at build time -->
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/logo192.png" />
+
+    <title>Restaurant Ordering</title>
+
+    <!--
+      Prevent a flash of unstyled content (FOUC).
+      Sets a neutral background while React hydrates.
+    -->
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background-color: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      Expo's webpack plugin injects the bundled JS here automatically.
+      You do NOT need a <script> tag — Expo adds it during the build.
+    -->
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
