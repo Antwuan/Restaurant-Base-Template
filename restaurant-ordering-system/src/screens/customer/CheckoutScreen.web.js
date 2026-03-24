@@ -1,20 +1,8 @@
 /**
- * CheckoutScreen
- * - Full checkout form with name/phone/email fields, pickup vs delivery toggle,
- *   ready‑time chips, special instructions, inline OrderSummary, and Stripe CardField.
- * - Validates required fields, then runs:
- *   stripeService.createPaymentIntent → confirmPayment → orderService.createOrder,
- *   and finally navigates to Confirmation on success.
- *
- * Depends on:
- * - hooks: useCart
- * - services: stripeService, orderService
- * - context: RestaurantContext
- * - theme: useTheme from ../../theme
- * - components: OrderSummary
- * - Stripe SDK: @stripe/stripe-react-native
+ * Web checkout: Stripe.js Card Element + confirmCardPayment.
+ * (stripe-react-native has no native module on web.)
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -27,7 +15,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
 } from 'react-native';
-import { CardField, useStripe } from '@stripe/stripe-react-native';
+import { loadStripe } from '@stripe/stripe-js';
 import { useCart } from '../../hooks/useCart';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
@@ -49,7 +37,9 @@ export default function CheckoutScreen({ navigation }) {
     clearCart,
   } = useCart(restaurant?.id);
 
-  const { confirmPayment } = useStripe();
+  const mountRef = useRef(null);
+  const stripeRef = useRef(null);
+  const cardRef = useRef(null);
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -60,6 +50,54 @@ export default function CheckoutScreen({ navigation }) {
   const [cardComplete, setCardComplete] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [stripeReady, setStripeReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let card;
+
+    (async () => {
+      const pk = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+      if (!pk) {
+        return;
+      }
+      const stripe = await loadStripe(pk);
+      if (cancelled || !stripe || !mountRef.current) {
+        return;
+      }
+      stripeRef.current = stripe;
+      const elements = stripe.elements();
+      card = elements.create('card', {
+        style: {
+          base: {
+            fontSize: '16px',
+            color: '#111',
+            '::placeholder': { color: '#999' },
+          },
+          invalid: { color: '#cc2222' },
+        },
+      });
+      card.mount(mountRef.current);
+      card.on('change', (event) => {
+        setCardComplete(!!event.complete);
+      });
+      cardRef.current = card;
+      setStripeReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+      if (card) {
+        try {
+          card.unmount();
+        } catch {
+          // ignore
+        }
+      }
+      cardRef.current = null;
+      stripeRef.current = null;
+    };
+  }, []);
 
   const validate = () => {
     const errs = {};
@@ -78,17 +116,33 @@ export default function CheckoutScreen({ navigation }) {
     setErrors({});
     setLoading(true);
 
+    const stripe = stripeRef.current;
+    const card = cardRef.current;
+    if (!stripe || !card) {
+      Alert.alert(
+        'Payment unavailable',
+        'Stripe could not load. Check EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY and try again.',
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
-      // 1. Create payment intent on backend
       const clientSecret = await createPaymentIntent(total, restaurant.id);
 
-      // 2. Confirm payment with card details
-      const { error: paymentError } = await confirmPayment(clientSecret, {
-        paymentMethodType: 'Card',
-        paymentMethodData: {
-          billingDetails: { name, phone, email },
+      const { error: paymentError, paymentIntent } = await stripe.confirmCardPayment(
+        clientSecret,
+        {
+          payment_method: {
+            card,
+            billing_details: {
+              name,
+              phone,
+              email: email || undefined,
+            },
+          },
         },
-      });
+      );
 
       if (paymentError) {
         Alert.alert('Payment Failed', paymentError.message);
@@ -96,7 +150,6 @@ export default function CheckoutScreen({ navigation }) {
         return;
       }
 
-      // 3. Create order in Supabase
       const order = await createOrder({
         restaurantId: restaurant.id,
         customerName: name,
@@ -117,6 +170,7 @@ export default function CheckoutScreen({ navigation }) {
         orderType,
         scheduledTime: scheduledTime === 'ASAP' ? null : scheduledTime,
         notes: notes || null,
+        paymentIntentId: paymentIntent?.id,
       });
 
       clearCart();
@@ -140,7 +194,6 @@ export default function CheckoutScreen({ navigation }) {
         style={styles.container}
         contentContainerStyle={{ paddingBottom: 120 }}
       >
-        {/* Customer Info */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Your Info</Text>
 
@@ -152,9 +205,7 @@ export default function CheckoutScreen({ navigation }) {
             onChangeText={setName}
             autoCapitalize="words"
           />
-          {errors.name && (
-            <Text style={styles.errorText}>{errors.name}</Text>
-          )}
+          {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
 
           <Text style={styles.label}>Phone *</Text>
           <TextInput
@@ -164,9 +215,7 @@ export default function CheckoutScreen({ navigation }) {
             onChangeText={setPhone}
             keyboardType="phone-pad"
           />
-          {errors.phone && (
-            <Text style={styles.errorText}>{errors.phone}</Text>
-          )}
+          {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
 
           <Text style={styles.label}>Email (optional)</Text>
           <TextInput
@@ -179,7 +228,6 @@ export default function CheckoutScreen({ navigation }) {
           />
         </View>
 
-        {/* Order Type */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Type</Text>
           <View style={styles.toggleRow}>
@@ -211,7 +259,6 @@ export default function CheckoutScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Scheduled Time */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Ready Time</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -245,7 +292,6 @@ export default function CheckoutScreen({ navigation }) {
           </ScrollView>
         </View>
 
-        {/* Special Instructions */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Special Instructions</Text>
           <TextInput
@@ -258,7 +304,6 @@ export default function CheckoutScreen({ navigation }) {
           />
         </View>
 
-        {/* Order Summary */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
           <OrderSummary
@@ -270,23 +315,30 @@ export default function CheckoutScreen({ navigation }) {
           />
         </View>
 
-        {/* Payment */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment</Text>
-          <CardField
-            postalCodeEnabled={false}
-            placeholders={{ number: '4242 4242 4242 4242' }}
-            cardStyle={{ backgroundColor: '#f8f8f8', textColor: '#111' }}
-            style={styles.cardField}
-            onCardChange={(details) => setCardComplete(details.complete)}
-          />
-          {errors.card && (
-            <Text style={styles.errorText}>{errors.card}</Text>
+          {!process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ? (
+            <Text style={styles.errorText}>
+              Set EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY to accept cards on web.
+            </Text>
+          ) : (
+            <>
+              <View
+                ref={mountRef}
+                collapsable={false}
+                style={styles.cardMount}
+              />
+              {!stripeReady && (
+                <ActivityIndicator style={{ marginTop: 8 }} />
+              )}
+              {errors.card && (
+                <Text style={styles.errorText}>{errors.card}</Text>
+              )}
+            </>
           )}
         </View>
       </ScrollView>
 
-      {/* Fixed bottom CTA */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={[
@@ -389,10 +441,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#555',
   },
-  cardField: {
-    height: 50,
+  cardMount: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#ddd',
     borderRadius: 8,
-    overflow: 'hidden',
+    padding: 12,
+    backgroundColor: '#fafafa',
   },
   bottomBar: {
     position: 'absolute',
@@ -416,4 +471,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
