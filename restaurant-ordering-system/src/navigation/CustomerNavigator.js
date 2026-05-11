@@ -19,6 +19,13 @@ export default function CustomerNavigator() {
   const { restaurant } = useRestaurantContext();
   const primaryColor = restaurant?.primary_color || '#007AFF';
 
+  // #region agent log
+  try {
+    console.log('[agent-log] CustomerNavigator.js:19 render');
+    fetch('http://127.0.0.1:7261/ingest/be8b971d-14d5-4da3-b2c6-a65e02c108c0',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'8a29dc',hypothesisId:'C',location:'CustomerNavigator.js:19',message:'CustomerNavigator render',data:{restaurant:restaurant?.slug||null},timestamp:Date.now()})}).catch(()=>{});
+  } catch(_) {}
+  // #endregion
+
   return (
     // StripeProvider must wrap any screen that uses Stripe (CardField, useStripe, etc.)
     <StripeProvider

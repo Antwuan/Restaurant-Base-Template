@@ -39,26 +39,41 @@ const resolveRestaurantIdentifier = () => {
 };
 
 const fetchRestaurant = async (identifier) => {
+  // #region agent log
+  console.log('[agent-log] fetchRestaurant called with identifier:', JSON.stringify(identifier), 'type:', typeof identifier);
+  // #endregion
   if (!identifier) return null;
 
   // Try matching by custom domain first (production web)
   if (Platform.OS === 'web' && identifier.includes('.')) {
+    // #region agent log
+    console.log('[agent-log] fetchRestaurant trying DOMAIN match for', identifier);
+    // #endregion
     const { data, error } = await supabase
       .from('restaurants')
       .select('*')
       .eq('domain', identifier)
       .single();
 
+    // #region agent log
+    console.log('[agent-log] DOMAIN query result', {hasData:!!data, errorCode:error?.code, errorMessage:error?.message, errorDetails:error?.details, errorHint:error?.hint, status:error?.status});
+    // #endregion
     if (!error && data) return data;
   }
 
   // Fallback: match by slug
+  // #region agent log
+  console.log('[agent-log] fetchRestaurant trying SLUG match for', identifier);
+  // #endregion
   const { data, error } = await supabase
     .from('restaurants')
     .select('*')
     .eq('slug', identifier)
     .single();
 
+  // #region agent log
+  console.log('[agent-log] SLUG query result', {hasData:!!data, errorCode:error?.code, errorMessage:error?.message, errorDetails:error?.details, errorHint:error?.hint, status:error?.status});
+  // #endregion
   if (error) throw error;
   return data;
 };
@@ -73,9 +88,18 @@ export const RestaurantProvider = ({ children }) => {
       setLoading(true);
       setError(null);
       const identifier = resolveRestaurantIdentifier();
+      // #region agent log
+      console.log('[agent-log] loadRestaurant resolved identifier:', JSON.stringify(identifier), 'hostname:', typeof window !== 'undefined' ? window.location.hostname : '(no window)', 'search:', typeof window !== 'undefined' ? window.location.search : '(no window)', 'envSlug:', process.env.EXPO_PUBLIC_RESTAURANT_SLUG || '(unset)');
+      // #endregion
       const data = await fetchRestaurant(identifier);
+      // #region agent log
+      console.log('[agent-log] loadRestaurant fetchRestaurant returned:', data ? 'restaurant ' + (data.slug || data.id) : '(null)');
+      // #endregion
       setRestaurant(data);
     } catch (err) {
+      // #region agent log
+      console.error('[agent-log] loadRestaurant caught error:', {message:err?.message, code:err?.code, details:err?.details, hint:err?.hint, status:err?.status, name:err?.name});
+      // #endregion
       console.error('Failed to load restaurant:', err);
       setError(err.message || 'Failed to load restaurant');
     } finally {

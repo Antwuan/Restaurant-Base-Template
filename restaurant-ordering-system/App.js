@@ -1,5 +1,4 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
@@ -32,11 +31,16 @@ const AppContent = () => {
     );
   }
 
+  // #region agent log
+  try {
+    console.log('[agent-log] App.js:37 OUTER NavigationContainer about to render');
+    fetch('http://127.0.0.1:7261/ingest/be8b971d-14d5-4da3-b2c6-a65e02c108c0',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'8a29dc',hypothesisId:'A',location:'App.js:37',message:'OUTER NavigationContainer about to render in App.js',data:{hasRestaurant:!!restaurant,loading,error:error||null},timestamp:Date.now()})}).catch(()=>{});
+  } catch(_) {}
+  // #endregion
+
   return (
     <PaperProvider theme={paperTheme}>
-      <NavigationContainer>
-        <RootNavigator />
-      </NavigationContainer>
+      <RootNavigator />
     </PaperProvider>
   );
 };
