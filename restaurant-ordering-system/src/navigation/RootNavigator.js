@@ -43,6 +43,13 @@ const RootNavigator = () => {
     );
   }
 
+  // #region agent log
+  try {
+    console.log('[agent-log] RootNavigator.js:47 INNER NavigationContainer about to render', {isAdmin,isLoading});
+    fetch('http://127.0.0.1:7261/ingest/be8b971d-14d5-4da3-b2c6-a65e02c108c0',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'8a29dc',hypothesisId:'A',location:'RootNavigator.js:47',message:'INNER NavigationContainer about to render in RootNavigator',data:{isAdmin,isLoading,platform:Platform.OS},timestamp:Date.now()})}).catch(()=>{});
+  } catch(_) {}
+  // #endregion
+
   return (
     <NavigationContainer linking={linking}>
       {isAdmin ? <AdminNavigator /> : <CustomerNavigator />}
