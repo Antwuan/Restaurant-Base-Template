@@ -91,6 +91,16 @@ export function clearRestaurantCache() {
   _cache = null;
 }
 
+/** Namespace object for `import { restaurantService }` consumers */
+export const restaurantService = {
+  getRestaurantByDomain,
+  getRestaurantBySlug,
+  getRestaurantById,
+  resolveRestaurant,
+  clearRestaurantCache,
+  updateRestaurant,
+};
+
 export async function updateRestaurant(id, updates) {
   const { data, error } = await supabase
     .from('restaurants')
