@@ -19,7 +19,6 @@ import {
   RefreshControl,
   ActivityIndicator,
   StyleSheet,
-  Platform,
   ScrollView,
 } from 'react-native';
 import { useRestaurantContext } from '../../context/RestaurantContext';
@@ -56,6 +55,8 @@ export default function MenuScreen({ navigation }) {
     setRefreshing(false);
   }, [refetch]);
 
+  const isEmpty = !loading && !error && categoriesWithItems.length === 0;
+
   if (loading && !refreshing) {
     return (
       <View style={styles.centered}>
@@ -82,6 +83,7 @@ export default function MenuScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <ScrollView
+        contentContainerStyle={isEmpty ? styles.scrollEmpty : undefined}
         refreshControl={(
           <RefreshControl
             refreshing={refreshing}
@@ -92,8 +94,8 @@ export default function MenuScreen({ navigation }) {
       >
         <RestaurantHeader restaurant={restaurant} />
 
-        {categoriesWithItems.length === 0 ? (
-          <View style={styles.centered}>
+        {isEmpty ? (
+          <View style={styles.emptyBlock}>
             <Text style={styles.emptyText}>No menu items available right now.</Text>
           </View>
         ) : (
@@ -139,6 +141,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  scrollEmpty: {
+    flexGrow: 1,
+  },
+  emptyBlock: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    minHeight: 200,
+  },
   loadingText: {
     marginTop: 12,
     fontSize: 15,
@@ -166,7 +178,7 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 34 : 20,
+    bottom: 20,
     left: 24,
     right: 24,
     borderRadius: 14,

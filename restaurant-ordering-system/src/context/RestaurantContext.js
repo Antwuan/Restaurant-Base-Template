@@ -1,134 +1,166 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Platform } from 'react-native';
-import { supabase } from '../config/supabase';
+/**
+ * RestaurantContext — web-only restaurant resolution.
+ *
+ * Priority:
+ *   1. ?restaurant=<slug>
+ *   2. sessionStorage restaurant_slug (survives /menu navigation)
+ *   3. EXPO_PUBLIC_RESTAURANT_SLUG on localhost
+ *   4. First URL path segment (not a reserved app route)
+ *   5. Hostname → restaurants.domain (non-localhost)
+ */
+
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { restaurantService } from '../services/restaurantService';
 
 const RestaurantContext = createContext(null);
 
+const SESSION_SLUG_KEY = 'restaurant_slug';
+
+const RESERVED_PATH_SEGMENTS = new Set([
+  'menu',
+  'cart',
+  'checkout',
+  'confirmation',
+  'admin',
+]);
+
+function isLocalhost(hostname) {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.startsWith('192.168.') ||
+    hostname.endsWith('.local')
+  );
+}
+
 /**
- * Resolves the restaurant identifier using this priority order:
- *
- * WEB:
- *   1. ?restaurant=<slug> query param  — dev convenience / override
- *   2. EXPO_PUBLIC_RESTAURANT_SLUG env — local dev default (set in .env.development)
- *   3. window.location.hostname        — production (e.g. "order.pizzapalace.com")
- *
- * NATIVE:
- *   4. EXPO_PUBLIC_RESTAURANT_SLUG env — set per restaurant build in app.config.js
+ * @returns {{ type: 'slug' | 'domain', value: string } | null}
  */
-const resolveRestaurantIdentifier = () => {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    // 1. Query param override — works on any environment
-    //    Usage: localhost:8081?restaurant=pizza-palace
-    const params = new URLSearchParams(window.location.search);
-    const slugParam = params.get('restaurant');
-    if (slugParam) return slugParam;
+function getRestaurantIdentifierFromURL() {
+  if (typeof window === 'undefined') return null;
 
-    const hostname = window.location.hostname;
+  const hostname = window.location.hostname;
+  const params = new URLSearchParams(window.location.search);
+  const slugParam = params.get('restaurant');
 
-    // 2. Local dev fallback — avoids needing the query param every time
-    if (hostname === 'localhost' || hostname.startsWith('127.')) {
-      return process.env.EXPO_PUBLIC_RESTAURANT_SLUG || null;
+  if (slugParam) {
+    return { type: 'slug', value: slugParam };
+  }
+
+  try {
+    const stored = sessionStorage.getItem(SESSION_SLUG_KEY);
+    if (stored) {
+      return { type: 'slug', value: stored };
     }
-
-    // 3. Production — match hostname against restaurants.domain in Supabase
-    return hostname.replace(/^www\./, '');
+  } catch {
+    // sessionStorage unavailable
   }
 
-  // 4. Native builds — set EXPO_PUBLIC_RESTAURANT_SLUG per restaurant in app.config.js
-  return process.env.EXPO_PUBLIC_RESTAURANT_SLUG || null;
-};
-
-const fetchRestaurant = async (identifier) => {
-  // #region agent log
-  console.log('[agent-log] fetchRestaurant called with identifier:', JSON.stringify(identifier), 'type:', typeof identifier);
-  // #endregion
-  if (!identifier) return null;
-
-  // Try matching by custom domain first (production web)
-  if (Platform.OS === 'web' && identifier.includes('.')) {
-    // #region agent log
-    console.log('[agent-log] fetchRestaurant trying DOMAIN match for', identifier);
-    // #endregion
-    const { data, error } = await supabase
-      .from('restaurants')
-      .select('*')
-      .eq('domain', identifier)
-      .single();
-
-    // #region agent log
-    console.log('[agent-log] DOMAIN query result', {hasData:!!data, errorCode:error?.code, errorMessage:error?.message, errorDetails:error?.details, errorHint:error?.hint, status:error?.status});
-    // #endregion
-    if (!error && data) return data;
+  if (isLocalhost(hostname)) {
+    const envSlug = process.env.EXPO_PUBLIC_RESTAURANT_SLUG;
+    if (envSlug) {
+      return { type: 'slug', value: envSlug };
+    }
+  } else {
+    return { type: 'domain', value: hostname.replace(/^www\./, '') };
   }
 
-  // Fallback: match by slug
-  // #region agent log
-  console.log('[agent-log] fetchRestaurant trying SLUG match for', identifier);
-  // #endregion
-  const { data, error } = await supabase
-    .from('restaurants')
-    .select('*')
-    .eq('slug', identifier)
-    .single();
+  const pathSegments = window.location.pathname.split('/').filter(Boolean);
+  const first = pathSegments[0];
+  if (first && !RESERVED_PATH_SEGMENTS.has(first)) {
+    return { type: 'slug', value: first };
+  }
 
-  // #region agent log
-  console.log('[agent-log] SLUG query result', {hasData:!!data, errorCode:error?.code, errorMessage:error?.message, errorDetails:error?.details, errorHint:error?.hint, status:error?.status});
-  // #endregion
-  if (error) throw error;
-  return data;
-};
+  return null;
+}
 
-export const RestaurantProvider = ({ children }) => {
+function persistSlug(slug) {
+  try {
+    sessionStorage.setItem(SESSION_SLUG_KEY, slug);
+  } catch {
+    // ignore
+  }
+}
+
+export function RestaurantProvider({ children }) {
   const [restaurant, setRestaurant] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const loadRestaurant = async () => {
+  const loadRestaurant = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
     try {
-      setLoading(true);
-      setError(null);
-      const identifier = resolveRestaurantIdentifier();
-      // #region agent log
-      console.log('[agent-log] loadRestaurant resolved identifier:', JSON.stringify(identifier), 'hostname:', typeof window !== 'undefined' ? window.location.hostname : '(no window)', 'search:', typeof window !== 'undefined' ? window.location.search : '(no window)', 'envSlug:', process.env.EXPO_PUBLIC_RESTAURANT_SLUG || '(unset)');
-      // #endregion
-      const data = await fetchRestaurant(identifier);
-      // #region agent log
-      console.log('[agent-log] loadRestaurant fetchRestaurant returned:', data ? 'restaurant ' + (data.slug || data.id) : '(null)');
-      // #endregion
+      const identifier = getRestaurantIdentifierFromURL();
+
+      if (!identifier) {
+        setError('No restaurant identifier found in URL.');
+        setRestaurant(null);
+        return;
+      }
+
+      let data;
+      if (identifier.type === 'domain') {
+        data = await restaurantService.getRestaurantByDomain(identifier.value);
+      } else {
+        data = await restaurantService.getRestaurantBySlug(identifier.value);
+      }
+
+      if (!data) {
+        setError(`Restaurant not found (${identifier.type}: ${identifier.value})`);
+        setRestaurant(null);
+        return;
+      }
+
       setRestaurant(data);
+      if (identifier.type === 'slug') {
+        persistSlug(identifier.value);
+      }
+
+      const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeColorMeta && data.primary_color) {
+        themeColorMeta.setAttribute('content', data.primary_color);
+      }
+      if (data.name) {
+        document.title = `${data.name} — Order Online`;
+      }
     } catch (err) {
-      // #region agent log
-      console.error('[agent-log] loadRestaurant caught error:', {message:err?.message, code:err?.code, details:err?.details, hint:err?.hint, status:err?.status, name:err?.name});
-      // #endregion
-      console.error('Failed to load restaurant:', err);
-      setError(err.message || 'Failed to load restaurant');
+      console.error('[RestaurantContext] Failed to load restaurant:', err);
+      setError(err.message || 'Failed to load restaurant.');
+      setRestaurant(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadRestaurant();
-  }, []);
+    window.addEventListener('popstate', loadRestaurant);
+    return () => window.removeEventListener('popstate', loadRestaurant);
+  }, [loadRestaurant]);
+
+  const contextValue = {
+    restaurant,
+    loading,
+    error,
+    refetch: loadRestaurant,
+    refreshRestaurant: loadRestaurant,
+  };
 
   return (
-    <RestaurantContext.Provider
-      value={{
-        restaurant,
-        loading,
-        error,
-        refresh: loadRestaurant,
-      }}
-    >
+    <RestaurantContext.Provider value={contextValue}>
       {children}
     </RestaurantContext.Provider>
   );
-};
+}
 
-export const useRestaurantContext = () => {
-  const context = useContext(RestaurantContext);
-  if (!context) {
-    throw new Error('useRestaurantContext must be used within a RestaurantProvider');
+export function useRestaurantContext() {
+  const ctx = useContext(RestaurantContext);
+  if (!ctx) {
+    throw new Error('useRestaurantContext must be used inside <RestaurantProvider>');
   }
-  return context;
-};
+  return ctx;
+}
+
+export default RestaurantContext;

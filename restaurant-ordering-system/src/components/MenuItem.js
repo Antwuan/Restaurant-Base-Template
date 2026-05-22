@@ -47,7 +47,7 @@ const MenuItem = ({ item, onAddToCart }) => {
           styles.card,
           isUnavailable && styles.cardUnavailable,
         ]}
-        accessibilityLabel={`${item.name}, $${item.price.toFixed(2)}${isUnavailable ? ', unavailable' : ''}`}
+        accessibilityLabel={`${item.name}, $${Number(item.price ?? 0).toFixed(2)}${isUnavailable ? ', unavailable' : ''}`}
       >
         {/* Image */}
         <View style={styles.imageContainer}>
@@ -93,7 +93,7 @@ const MenuItem = ({ item, onAddToCart }) => {
 
           <View style={styles.footer}>
             <Text style={[styles.price, isUnavailable && styles.textMuted]}>
-              ${item.price.toFixed(2)}
+              ${Number(item.price ?? 0).toFixed(2)}
             </Text>
             {!isUnavailable && (
               <TouchableOpacity

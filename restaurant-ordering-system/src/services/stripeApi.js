@@ -1,21 +1,54 @@
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+const BACKEND_URL =
+  process.env.EXPO_PUBLIC_BACKEND_URL?.replace(/\/$/, '') ||
+  (SUPABASE_URL ? `${SUPABASE_URL}/functions/v1` : null);
+
+function getFunctionHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (SUPABASE_ANON_KEY) {
+    headers.Authorization = `Bearer ${SUPABASE_ANON_KEY}`;
+    headers.apikey = SUPABASE_ANON_KEY;
+  }
+  return headers;
+}
 
 export async function createPaymentIntent(amount, restaurantId) {
+  if (!BACKEND_URL) {
+    throw new Error(
+      'Payment backend URL is not configured. Set EXPO_PUBLIC_BACKEND_URL or EXPO_PUBLIC_SUPABASE_URL in .env',
+    );
+  }
+
   const response = await fetch(`${BACKEND_URL}/create-payment-intent`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getFunctionHeaders(),
     body: JSON.stringify({
       amount: Math.round(amount * 100),
       restaurantId,
+      restaurant_id: restaurantId,
       currency: 'usd',
     }),
   });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.message || 'Failed to initialize payment.');
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
   }
 
-  const { clientSecret } = await response.json();
+  if (!response.ok) {
+    throw new Error(
+      payload.message || payload.error || 'Failed to initialize payment.',
+    );
+  }
+
+  const { clientSecret } = payload;
+  if (!clientSecret) {
+    throw new Error('Payment backend did not return a client secret.');
+  }
+
   return clientSecret;
 }

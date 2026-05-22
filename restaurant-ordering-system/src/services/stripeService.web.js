@@ -1,1 +1,0 @@
-export { createPaymentIntent } from './stripeApi';
