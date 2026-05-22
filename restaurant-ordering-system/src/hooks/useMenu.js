@@ -9,7 +9,14 @@ export const useMenu = (restaurantId) => {
   const [error, setError] = useState(null);
 
   const loadMenu = useCallback(async () => {
-    if (!restaurantId) return;
+    if (!restaurantId) {
+      setLoading(false);
+      setError(null);
+      setCategories([]);
+      setMenuByCategory({});
+      setAllItems([]);
+      return;
+    }
 
     try {
       setLoading(true);
@@ -20,7 +27,6 @@ export const useMenu = (restaurantId) => {
         menuService.getMenuItems(restaurantId),
       ]);
 
-      // Group items by category
       const grouped = fetchedCategories.reduce((acc, category) => {
         acc[category.id] = {
           ...category,
@@ -45,7 +51,6 @@ export const useMenu = (restaurantId) => {
     loadMenu();
   }, [loadMenu]);
 
-  // Filter to only categories that have available items
   const categoriesWithItems = categories.filter(
     (cat) => menuByCategory[cat.id]?.items?.length > 0
   );
