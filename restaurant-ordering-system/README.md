@@ -31,6 +31,45 @@ After the first load, the app remembers the slug in `sessionStorage`, so **http:
 | `EXPO_PUBLIC_BACKEND_URL` | Edge functions base URL (defaults to `{SUPABASE_URL}/functions/v1` if omitted) |
 | `EXPO_PUBLIC_RESTAURANT_SLUG` | Default slug on localhost when query param is missing |
 
+## Database migrations
+
+Run the carousel + customer migration in Supabase SQL Editor (or via CLI):
+
+```bash
+# File: supabase/migrations/20260529_carousel_customers.sql
+```
+
+This adds:
+
+- **`menu_carousel_slides`** — promo images/videos on the menu (public read for active slides; staff CRUD)
+- **`restaurant_customers`** — per-restaurant customer profiles linked to `auth.users`
+- **`is_staff_for_restaurant()`** helper and `updated_at` triggers
+- RLS policies for both tables
+
+### Manual Supabase steps (required)
+
+1. **Run the SQL migration** in Dashboard → SQL Editor (paste contents of `supabase/migrations/20260529_carousel_customers.sql`).
+
+2. **Storage bucket** — create public bucket `menu-images` if it does not exist (Dashboard → Storage). Carousel media is stored at `{restaurant_id}/carousel/{slide_id}.{jpg|mp4}`.
+
+3. **Storage policies** — uncomment and run the storage policy block at the bottom of the migration file (requires the bucket to exist first). Staff can upload/delete; public can read.
+
+4. **Auth settings** (Dashboard → Authentication):
+   - Configure Site URL / redirect URLs for your web app
+   - Email confirmation on/off affects customer sign-up UX (app shows a message if confirmation is required)
+
+5. **Verify RLS** (SQL Editor, as anon role or with anon key):
+
+   ```sql
+   SELECT * FROM menu_carousel_slides
+   WHERE restaurant_id = '<your-restaurant-uuid>' AND is_active;
+   ```
+
+### Video upload notes for staff
+
+- Recommended: 16:9 aspect ratio, H.264/MP4 for web compatibility
+- Set reasonable max file size limits in Storage bucket settings
+
 ## Stripe / Edge Function
 
 The client calls:
@@ -56,13 +95,13 @@ Any future expiry and any CVC.
 
 ## Routes
 
-| Path | Screen |
-|------|--------|
-| `/menu` | Menu |
-| `/cart` | Cart |
+| Path | Screen / behavior |
+|------|-------------------|
+| `/menu` | Menu (carousel + categories; header has sign-in + cart) |
+| `/cart` | Opens menu with cart drawer (same as cart icon) |
 | `/checkout` | Checkout |
 | `/confirmation` | Order confirmed |
-| `/admin` | Admin (staff) |
+| `/admin` | Admin (staff) — includes **Promo** tab for carousel management |
 
 ## Connect a new restaurant
 

@@ -1,7 +1,7 @@
 // Web-only root navigator with deep linking and /admin branch.
 import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, getStateFromPath as defaultGetStateFromPath } from '@react-navigation/native';
 
 import CustomerNavigator from './CustomerNavigator';
 import AdminNavigator from './AdminNavigator';
@@ -18,11 +18,24 @@ const linking = {
   config: {
     screens: {
       Admin: 'admin',
-      Menu: 'menu',
-      Cart: 'cart',
+      Menu: {
+        path: 'menu',
+        parse: {
+          openCart: (value) => value === 'true' || value === '1' || value === true,
+        },
+      },
       Checkout: 'checkout',
       Confirmation: 'confirmation',
     },
+  },
+  getStateFromPath(path, options) {
+    const clean = (path || '').replace(/^\//, '').split('?')[0];
+    if (clean === 'cart') {
+      return {
+        routes: [{ name: 'Menu', params: { openCart: true } }],
+      };
+    }
+    return defaultGetStateFromPath(path, options);
   },
 };
 
