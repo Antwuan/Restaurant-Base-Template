@@ -1,4 +1,4 @@
-// Admin bottom tab navigator. Shows Orders, Menu editor, and Settings tabs
+// Admin bottom tab navigator. Shows Orders, Menu editor, Promo carousel, and Settings tabs
 // for authenticated staff, and falls back to the admin LoginScreen when
 // there is no active user in AuthContext.
 import React from 'react';
@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import LoginScreen from '../screens/admin/LoginScreen';
 import OrdersScreen from '../screens/admin/OrdersScreen';
 import MenuEditorScreen from '../screens/admin/MenuEditorScreen';
+import CarouselEditorScreen from '../screens/admin/CarouselEditorScreen';
 import SettingsScreen from '../screens/admin/SettingsScreen';
 
 const Tab = createBottomTabNavigator();
@@ -34,6 +35,8 @@ const AdminNavigator = () => {
             iconName = focused ? 'receipt' : 'receipt-outline';
           } else if (route.name === 'MenuEditor') {
             iconName = focused ? 'restaurant' : 'restaurant-outline';
+          } else if (route.name === 'Promo') {
+            iconName = focused ? 'images' : 'images-outline';
           } else if (route.name === 'Settings') {
             iconName = focused ? 'settings' : 'settings-outline';
           }
@@ -66,6 +69,11 @@ const AdminNavigator = () => {
         options={{ title: 'Menu', tabBarLabel: 'Menu' }}
       />
       <Tab.Screen
+        name="Promo"
+        component={CarouselEditorScreen}
+        options={{ title: 'Promo Carousel', tabBarLabel: 'Promo' }}
+      />
+      <Tab.Screen
         name="Settings"
         component={SettingsScreen}
         options={{ title: 'Settings' }}
@@ -75,4 +83,3 @@ const AdminNavigator = () => {
 };
 
 export default AdminNavigator;
-
