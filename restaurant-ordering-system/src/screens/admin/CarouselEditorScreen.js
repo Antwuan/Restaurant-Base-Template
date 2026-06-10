@@ -22,6 +22,7 @@ import {
   uploadFileFromUri,
   carouselStoragePath,
 } from '../../services/storageService';
+import AdminEmptyState from '../../components/admin/AdminEmptyState';
 
 const DEFAULT_FORM = {
   media_type: 'image',
@@ -426,7 +427,13 @@ export default function CarouselEditorScreen() {
           </View>
         )}
         ListEmptyComponent={(
-          <Text style={styles.empty}>No promo slides yet. Add one to show on the menu.</Text>
+          <AdminEmptyState
+            icon="🖼️"
+            title="No promo slides yet"
+            subtitle="Add a slide to showcase specials, events, or featured items at the top of your menu."
+            actionLabel="+ Add Slide"
+            onAction={openNew}
+          />
         )}
         contentContainerStyle={styles.listContent}
       />

@@ -16,6 +16,7 @@ import { useOrders } from '../../hooks/useOrders';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import * as restaurantService from '../../services/restaurantService';
 import OrderCard from '../../components/admin/OrderCard';
+import AdminEmptyState from '../../components/admin/AdminEmptyState';
 
 const STATUS_TABS = ['pending', 'preparing', 'ready', 'completed'];
 
@@ -66,15 +67,15 @@ export default function OrdersScreen() {
   };
 
   const renderEmpty = () => (
-    <View style={styles.emptyContainer}>
-      <Text style={styles.emptyIcon}>📋</Text>
-      <Text style={styles.emptyTitle}>No {activeTab} orders</Text>
-      <Text style={styles.emptySubtitle}>
-        {activeTab === 'pending'
+    <AdminEmptyState
+      icon="📋"
+      title={`No ${activeTab} orders`}
+      subtitle={
+        activeTab === 'pending'
           ? 'New orders will appear here in real time.'
-          : `Orders you move to "${activeTab}" will show here.`}
-      </Text>
-    </View>
+          : `Orders you move to "${activeTab}" will show here.`
+      }
+    />
   );
 
   return (
@@ -231,28 +232,6 @@ const styles = StyleSheet.create({
   },
   emptyList: {
     flex: 1,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-    lineHeight: 20,
   },
 });
 
