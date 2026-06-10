@@ -1,26 +1,45 @@
-// Admin menu management screen. Groups items by category using `useMenu`,
-// lets admins toggle availability, edit/delete items, and opens the shared
-// `MenuItemEditor` modal for creating/updating items.
-import React, { useState } from 'react';
+// Admin menu editor — preview-first design.
+// Shows the menu exactly as customers see it (MenuCarousel → RestaurantHeader →
+// category/item cards) but each card uses AdminMenuItem with Edit / Delete /
+// availability-toggle controls. A toolbar at the top lets admins add items or
+// manage categories. Changes persist immediately to Supabase and the preview
+// re-renders live via useMenu.refetch().
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
-  StyleSheet,
+  ScrollView,
   TouchableOpacity,
-  Switch,
-  Alert,
   Modal,
+  Alert,
+  StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useMenu } from '../../hooks/useMenu';
+import { useCarousel } from '../../hooks/useCarousel';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useTheme } from '../../theme';
 import * as menuService from '../../services/menuService';
+import {
+  uploadFileFromUri,
+  menuImageStoragePath,
+} from '../../services/storageService';
+import MenuCarousel from '../../components/MenuCarousel';
+import RestaurantHeader from '../../components/RestaurantHeader';
+import AdminCategorySection from '../../components/admin/AdminCategorySection';
+import AdminEmptyState from '../../components/admin/AdminEmptyState';
 import MenuItemEditor from '../../components/admin/MenuItemEditor';
+
+// Generates a simple unique id for new items before they're saved
+const newItemId = () => `item_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 export default function MenuEditorScreen() {
   const { restaurant } = useRestaurantContext();
+  const { theme } = useTheme();
+
   const {
     categories,
     allItems,
@@ -28,25 +47,32 @@ export default function MenuEditorScreen() {
     refetch: refreshMenu,
   } = useMenu(restaurant?.id);
 
-  const categorizedMenu = menuService.groupItemsByCategory(categories, allItems);
+  const { slides, refetch: refreshCarousel } = useCarousel(restaurant?.id);
 
   const [editorVisible, setEditorVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const handleToggleAvailability = async (item) => {
-    setTogglingId(item.id);
-    try {
-      await menuService.toggleItemAvailability(item.id, !item.is_available);
-      await refreshMenu();
-    } catch (e) {
-      Alert.alert('Error', 'Could not update item availability.');
-    } finally {
-      setTogglingId(null);
-    }
-  };
+  // Group all items (including unavailable) by category for the admin preview
+  const categorizedMenu = menuService.groupItemsByCategory(categories, allItems);
 
-  const handleDeleteItem = (item) => {
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const handleAddItem = useCallback((category) => {
+    setSelectedItem({
+      category_id: category?.id ?? '',
+      restaurant_id: restaurant?.id,
+    });
+    setEditorVisible(true);
+  }, [restaurant?.id]);
+
+  const handleEditItem = useCallback((item) => {
+    setSelectedItem(item);
+    setEditorVisible(true);
+  }, []);
+
+  const handleDeleteItem = useCallback((item) => {
     Alert.alert(
       'Delete Item',
       `Are you sure you want to delete "${item.name}"? This cannot be undone.`,
@@ -66,123 +92,181 @@ export default function MenuEditorScreen() {
         },
       ],
     );
-  };
+  }, [restaurant?.id, refreshMenu]);
 
-  const handleEditItem = (item) => {
-    setSelectedItem(item);
-    setEditorVisible(true);
-  };
+  const handleToggleAvailability = useCallback(async (item) => {
+    setTogglingId(item.id);
+    try {
+      await menuService.toggleItemAvailability(item.id, !item.is_available);
+      await refreshMenu();
+    } catch (e) {
+      Alert.alert('Error', 'Could not update item availability.');
+    } finally {
+      setTogglingId(null);
+    }
+  }, [refreshMenu]);
 
-  const handleAddItem = (category) => {
-    setSelectedItem({ category_id: category.id, restaurant_id: restaurant.id });
-    setEditorVisible(true);
-  };
+  // Persist a menu item — mirrors CarouselEditorScreen.persistSlide
+  const persistMenuItem = useCallback(async ({ name, description, price, category_id, image_url, is_available, localImageUri }) => {
+    const isNew = !selectedItem?.id;
+    const itemId = selectedItem?.id ?? newItemId();
 
-  const handleSave = async () => {
+    let finalImageUrl = image_url ?? '';
+
+    if (localImageUri) {
+      const storagePath = menuImageStoragePath(restaurant.id, itemId, 'jpg');
+      const { publicUrl } = await uploadFileFromUri({
+        path: storagePath,
+        uri: localImageUri,
+        contentType: 'image/jpeg',
+      });
+      finalImageUrl = publicUrl;
+    }
+
+    const payload = {
+      name,
+      description: description || null,
+      price: typeof price === 'number' ? price : parseFloat(price),
+      category_id,
+      image_url: finalImageUrl || null,
+      is_available: is_available ?? true,
+    };
+
+    if (isNew) {
+      await menuService.createMenuItem({
+        id: itemId,
+        restaurant_id: restaurant.id,
+        ...payload,
+      });
+    } else {
+      await menuService.updateMenuItem(selectedItem.id, {
+        restaurant_id: restaurant.id,
+        ...payload,
+      });
+    }
+
+    await refreshMenu();
     setEditorVisible(false);
     setSelectedItem(null);
-    await refreshMenu();
-  };
+  }, [selectedItem, restaurant?.id, refreshMenu]);
 
-  const renderItem = ({ item }) => (
-    <View style={styles.menuItem}>
-      <View style={styles.itemInfo}>
-        <Text style={styles.itemName}>{item.name}</Text>
-        <Text style={styles.itemPrice}>${Number(item.price).toFixed(2)}</Text>
-      </View>
-      <View style={styles.itemActions}>
-        <Switch
-          value={item.is_available}
-          onValueChange={() => handleToggleAvailability(item)}
-          disabled={togglingId === item.id}
-          trackColor={{ true: '#34C759', false: '#ccc' }}
-          style={styles.toggle}
-        />
-        <TouchableOpacity
-          style={styles.editBtn}
-          onPress={() => handleEditItem(item)}
-        >
-          <Text style={styles.editBtnText}>Edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.deleteBtn}
-          onPress={() => handleDeleteItem(item)}
-        >
-          <Text style={styles.deleteBtnText}>✕</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  const handleDeleteFromEditor = useCallback(async (itemId) => {
+    try {
+      await menuService.deleteMenuItem(itemId, restaurant.id);
+      await refreshMenu();
+    } finally {
+      setEditorVisible(false);
+      setSelectedItem(null);
+    }
+  }, [restaurant?.id, refreshMenu]);
 
-  const renderCategory = ({ item: category }) => (
-    <View style={styles.categorySection}>
-      <View style={styles.categoryHeader}>
-        <Text style={styles.categoryTitle}>{category.name}</Text>
-        <TouchableOpacity
-          style={styles.addItemBtn}
-          onPress={() => handleAddItem(category)}
-        >
-          <Text style={styles.addItemBtnText}>+ Add Item</Text>
-        </TouchableOpacity>
-      </View>
-      {category.items.map((menuItem) => renderItem({ item: menuItem }))}
-    </View>
-  );
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refreshMenu(), refreshCarousel()]);
+    setRefreshing(false);
+  }, [refreshMenu, refreshCarousel]);
 
-  if (loading && !categorizedMenu.length) {
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (loading && !categorizedMenu.length && !refreshing) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color={theme.colors.brand} />
       </View>
     );
   }
 
+  const isEmpty = !loading && categorizedMenu.length === 0;
+
   return (
     <View style={styles.container}>
-      <FlatList
-        data={categorizedMenu}
-        keyExtractor={(item) => item.id}
-        renderItem={renderCategory}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refreshMenu} />
-        }
-        ListHeaderComponent={
-          <View style={styles.listHeader}>
-            <Text style={styles.listHeaderText}>
-              {categorizedMenu.reduce(
-                (acc, c) => acc + (c.items?.length || 0),
-                0,
-              )}{' '}
-              items across {categorizedMenu.length} categories
+      {/* Admin toolbar */}
+      <View style={styles.toolbar}>
+        <View style={styles.toolbarLeft}>
+          <View style={[styles.previewBadge, { backgroundColor: theme.colors.brandLight }]}>
+            <Ionicons name="eye-outline" size={13} color={theme.colors.brand} />
+            <Text style={[styles.previewBadgeText, { color: theme.colors.brand }]}>
+              Customer preview
             </Text>
           </View>
-        }
-        contentContainerStyle={styles.listContent}
-      />
+          <Text style={styles.toolbarSub}>
+            {allItems.length} item{allItems.length !== 1 ? 's' : ''} · {categories.length} categor{categories.length !== 1 ? 'ies' : 'y'}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.addBtn, { backgroundColor: theme.colors.brand }]}
+          onPress={() => handleAddItem(categories[0] ?? { id: '' })}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={16} color="#fff" />
+          <Text style={styles.addBtnText}>Add Item</Text>
+        </TouchableOpacity>
+      </View>
 
+      {/* Preview scroll area */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={isEmpty ? styles.scrollEmpty : styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.brand}
+          />
+        }
+      >
+        {/* Promo carousel — exactly as customers see it */}
+        <MenuCarousel slides={slides} />
+
+        {/* Restaurant header — exactly as customers see it */}
+        <RestaurantHeader restaurant={restaurant} />
+
+        {isEmpty ? (
+          <AdminEmptyState
+            icon="🍽️"
+            title="No menu items yet"
+            subtitle="Add your first item to preview how customers will see your menu."
+            actionLabel="+ Add Item"
+            onAction={() => handleAddItem(categories[0] ?? { id: '' })}
+          />
+        ) : (
+          <>
+            {categorizedMenu.map((category) => (
+              <AdminCategorySection
+                key={category.id}
+                category={category}
+                items={category.items ?? []}
+                onEdit={handleEditItem}
+                onDelete={handleDeleteItem}
+                onToggleAvailability={handleToggleAvailability}
+                onAddItem={handleAddItem}
+                togglingId={togglingId}
+              />
+            ))}
+            <View style={{ height: 32 }} />
+          </>
+        )}
+      </ScrollView>
+
+      {/* Item editor modal */}
       <Modal
         visible={editorVisible}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setEditorVisible(false)}
+        onRequestClose={() => {
+          setEditorVisible(false);
+          setSelectedItem(null);
+        }}
       >
         <MenuItemEditor
           item={selectedItem}
           categories={categories}
-          onSave={handleSave}
+          onSave={persistMenuItem}
           onCancel={() => {
             setEditorVisible(false);
             setSelectedItem(null);
           }}
-          onDelete={async (itemId) => {
-            try {
-              await menuService.deleteMenuItem(itemId, restaurant.id);
-              await refreshMenu();
-            } finally {
-              setEditorVisible(false);
-              setSelectedItem(null);
-            }
-          }}
+          onDelete={handleDeleteFromEditor}
         />
       </Modal>
     </View>
@@ -192,101 +276,72 @@ export default function MenuEditorScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f3f4f6',
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  listContent: {
-    padding: 16,
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    gap: 12,
+    ...Platform.select({
+      web: { boxShadow: '0 1px 0 #e5e7eb' },
+    }),
+  },
+  toolbarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  previewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+    gap: 4,
+  },
+  previewBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  toolbarSub: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 4,
+    flexShrink: 0,
+  },
+  addBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  scroll: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  scrollContent: {
     paddingBottom: 40,
   },
-  listHeader: {
-    marginBottom: 12,
-  },
-  listHeaderText: {
-    fontSize: 13,
-    color: '#999',
-  },
-  categorySection: {
-    marginBottom: 24,
-  },
-  categoryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  categoryTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111',
-  },
-  addItemBtn: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  addItemBtnText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  menuItem: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 14,
-    marginBottom: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  itemInfo: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111',
-  },
-  itemPrice: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 2,
-  },
-  itemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  toggle: {
-    marginRight: 4,
-  },
-  editBtn: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-  editBtnText: {
-    fontSize: 13,
-    color: '#333',
-    fontWeight: '500',
-  },
-  deleteBtn: {
-    padding: 5,
-  },
-  deleteBtnText: {
-    fontSize: 16,
-    color: '#FF3B30',
+  scrollEmpty: {
+    flexGrow: 1,
   },
 });
-

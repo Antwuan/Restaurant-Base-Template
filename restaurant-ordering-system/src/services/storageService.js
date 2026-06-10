@@ -36,3 +36,7 @@ export async function deleteStorageObject(path, bucket = MENU_IMAGES_BUCKET) {
 export function carouselStoragePath(restaurantId, slideId, extension) {
   return `${restaurantId}/carousel/${slideId}.${extension}`;
 }
+
+export function menuImageStoragePath(restaurantId, itemId, extension) {
+  return `${restaurantId}/menu/${itemId}.${extension}`;
+}
