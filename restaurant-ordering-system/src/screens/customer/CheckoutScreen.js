@@ -15,7 +15,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { loadStripe } from '@stripe/stripe-js';
-import { useCart } from '../../hooks/useCart';
+import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import OrderSummary from '../../components/OrderSummary';
@@ -34,7 +34,7 @@ export default function CheckoutScreen({ navigation }) {
     tax,
     total,
     clearCart,
-  } = useCart(restaurant?.id);
+  } = useCartContext();
 
   const mountRef = useRef(null);
   const stripeRef = useRef(null);

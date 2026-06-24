@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
-import { useCart } from '../hooks/useCart';
+import { useCartContext } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import CustomerSignInModal from './CustomerSignInModal';
 
 export default function MenuHeaderActions({ onOpenCart }) {
   const { restaurant } = useRestaurantContext();
-  const { itemCount } = useCart(restaurant?.id);
+  const { itemCount } = useCartContext();
   const { user, customerProfile, refreshCustomerProfile } = useAuth();
   const [signInVisible, setSignInVisible] = useState(false);
 
