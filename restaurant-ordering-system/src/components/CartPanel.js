@@ -7,14 +7,12 @@ import {
   StyleSheet,
   Platform,
 } from 'react-native';
-import { useRestaurantContext } from '../context/RestaurantContext';
-import { useCart } from '../hooks/useCart';
+import { useCartContext } from '../context/CartContext';
 import { useTheme } from '../theme';
 import CartItem from './CartItem';
 import OrderSummary from './OrderSummary';
 
 export default function CartPanel({ onClose, onCheckout }) {
-  const { restaurant } = useRestaurantContext();
   const { theme } = useTheme();
   const {
     items,
@@ -24,7 +22,7 @@ export default function CartPanel({ onClose, onCheckout }) {
     subtotal,
     tax,
     total,
-  } = useCart(restaurant?.id);
+  } = useCartContext();
 
   if (items.length === 0) {
     return (

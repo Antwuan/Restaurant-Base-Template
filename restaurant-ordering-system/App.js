@@ -1,10 +1,11 @@
 import React from 'react';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Text, StyleSheet, Platform } from 'react-native';
 
 import { RestaurantProvider, useRestaurantContext } from './src/context/RestaurantContext';
 import { AuthProvider } from './src/context/AuthContext';
+import { CartProvider } from './src/context/CartContext';
 import { ThemeProvider, useTheme, buildPaperTheme } from './src/theme';
 import RootNavigator from './src/navigation/RootNavigator';
 
@@ -32,9 +33,13 @@ const AppContent = () => {
   }
 
   return (
-    <PaperProvider theme={paperTheme}>
-      <RootNavigator />
-    </PaperProvider>
+    <View style={styles.root}>
+      <PaperProvider theme={paperTheme}>
+        <CartProvider restaurantId={restaurant?.id}>
+          <RootNavigator />
+        </CartProvider>
+      </PaperProvider>
+    </View>
   );
 };
 
@@ -62,6 +67,12 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    ...Platform.select({
+      web: { minHeight: '100vh' },
+    }),
+  },
   center: {
     flex: 1,
     justifyContent: 'center',
