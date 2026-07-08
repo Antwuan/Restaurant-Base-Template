@@ -18,6 +18,7 @@ const linking = {
   config: {
     screens: {
       Admin: 'admin',
+      Home: { path: '' },
       Menu: {
         path: 'menu',
         parse: {
@@ -26,6 +27,7 @@ const linking = {
       },
       Checkout: 'checkout',
       Confirmation: 'confirmation',
+      OrderTracker: 'tracker',
     },
   },
   getStateFromPath(path, options) {
@@ -34,6 +36,9 @@ const linking = {
       return {
         routes: [{ name: 'Menu', params: { openCart: true } }],
       };
+    }
+    if (clean === '' || clean === 'home') {
+      return { routes: [{ name: 'Home' }] };
     }
     return defaultGetStateFromPath(path, options);
   },
@@ -58,7 +63,7 @@ const RootNavigator = () => {
   }
 
   return (
-    <NavigationContainer linking={linking}>
+    <NavigationContainer linking={linking} style={{ flex: 1 }}>
       {isAdmin ? <AdminNavigator /> : <CustomerNavigator />}
     </NavigationContainer>
   );

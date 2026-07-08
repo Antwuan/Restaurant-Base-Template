@@ -84,3 +84,30 @@ export function subscribeToOrders(restaurantId, callback) {
 
   return () => supabase.removeChannel(channel);
 }
+
+export async function getOrdersByPhone(restaurantId, phone) {
+  const { data, error } = await supabase.functions.invoke('get-orders-by-phone', {
+    body: { restaurantId, phone },
+  });
+
+  if (error) throw error;
+  return data?.data || [];
+}
+
+export function subscribeToOrder(orderId, callback) {
+  const channel = supabase
+    .channel(`order:${orderId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `id=eq.${orderId}`,
+      },
+      (payload) => callback(payload.new)
+    )
+    .subscribe();
+
+  return () => supabase.removeChannel(channel);
+}
