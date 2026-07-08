@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useRestaurantContext } from '../context/RestaurantContext';
 
+import HomeScreen from '../screens/customer/HomeScreen';
 import MenuScreen from '../screens/customer/MenuScreen';
 import CheckoutScreen from '../screens/customer/CheckoutScreen';
 import ConfirmationScreen from '../screens/customer/ConfirmationScreen';
-import MenuHeaderActions from '../components/MenuHeaderActions';
+import TrackerScreen from '../screens/customer/TrackerScreen';
+import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
 
 const Stack = createNativeStackNavigator();
@@ -15,12 +16,6 @@ function MenuScreenWithCart({ navigation, route }) {
 
   const openCart = useCallback(() => setCartOpen(true), []);
   const closeCart = useCallback(() => setCartOpen(false), []);
-
-  useEffect(() => {
-    navigation.setOptions({
-      headerRight: () => <MenuHeaderActions onOpenCart={openCart} />,
-    });
-  }, [navigation, openCart]);
 
   useEffect(() => {
     if (route.params?.openCart) {
@@ -36,6 +31,7 @@ function MenuScreenWithCart({ navigation, route }) {
 
   return (
     <>
+      <CustomerNavbar navigation={navigation} currentRoute="Menu" onOpenCart={openCart} />
       <MenuScreen />
       <CartDrawer
         visible={cartOpen}
@@ -46,38 +42,43 @@ function MenuScreenWithCart({ navigation, route }) {
   );
 }
 
-export default function CustomerNavigator() {
-  const { restaurant } = useRestaurantContext();
-  const primaryColor = restaurant?.primary_color || '#007AFF';
+function CheckoutScreenWithNav({ navigation }) {
+  return (
+    <>
+      <CustomerNavbar navigation={navigation} currentRoute="Checkout" />
+      <CheckoutScreen navigation={navigation} />
+    </>
+  );
+}
 
+function ConfirmationScreenWithNav({ navigation, route }) {
+  return (
+    <>
+      <CustomerNavbar navigation={navigation} currentRoute="Confirmation" />
+      <ConfirmationScreen navigation={navigation} route={route} />
+    </>
+  );
+}
+
+function TrackerScreenWithNav({ navigation }) {
+  return <TrackerScreen navigation={navigation} />;
+}
+
+export default function CustomerNavigator() {
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle: { backgroundColor: primaryColor },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: '600' },
+        headerShown: false,
       }}
     >
-      <Stack.Screen
-        name="Menu"
-        component={MenuScreenWithCart}
-        options={{
-          title: restaurant?.name || 'Menu',
-        }}
-      />
-      <Stack.Screen
-        name="Checkout"
-        component={CheckoutScreen}
-        options={{ title: 'Checkout' }}
-      />
+      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Menu" component={MenuScreenWithCart} />
+      <Stack.Screen name="Checkout" component={CheckoutScreenWithNav} />
       <Stack.Screen
         name="Confirmation"
-        component={ConfirmationScreen}
-        options={{
-          title: 'Order Confirmed',
-          headerBackVisible: false,
-        }}
+        component={ConfirmationScreenWithNav}
       />
+      <Stack.Screen name="OrderTracker" component={TrackerScreenWithNav} />
     </Stack.Navigator>
   );
 }

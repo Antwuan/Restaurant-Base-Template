@@ -41,7 +41,8 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
     if (!navigation) return;
     if (route === 'Menu') navigation.navigate('Menu');
     else if (route === 'Home') navigation.navigate('Home');
-    // Catering, Rewards, OrderTracker are placeholder future screens
+    else if (route === 'OrderTracker') navigation.navigate('OrderTracker');
+    // Catering, Rewards are placeholder future screens
   };
 
   const handleLogoPress = () => {
