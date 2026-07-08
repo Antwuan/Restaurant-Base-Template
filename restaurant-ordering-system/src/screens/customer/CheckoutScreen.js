@@ -1,20 +1,22 @@
 /**
- * Checkout — Stripe.js Card Element + confirmCardPayment.
- * PaymentIntent is created via Supabase Edge Function create-payment-intent.
+ * Checkout — Stripe Payment Element, Stripe-Checkout-inspired UI.
+ * Two-column layout on desktop (≥768 px), single column on mobile.
+ * Each restaurant's stripe_account_id scopes the Stripe instance for Connect.
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   ScrollView,
-  StyleSheet,
-  Alert,
   ActivityIndicator,
-  KeyboardAvoidingView,
+  Alert,
+  StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
 import { loadStripe } from '@stripe/stripe-js';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
@@ -24,21 +26,13 @@ import { createOrder } from '../../services/orderService';
 
 const ORDER_TYPES = ['pickup', 'delivery'];
 const TIME_OPTIONS = ['ASAP', '15 min', '30 min', '45 min', '1 hour'];
+const BREAKPOINT = 768;
 
-export default function CheckoutScreen({ navigation }) {
-  const { restaurant } = useRestaurantContext();
-  const { theme } = useTheme();
-  const {
-    items,
-    subtotal,
-    tax,
-    total,
-    clearCart,
-  } = useCartContext();
-
-  const mountRef = useRef(null);
-  const stripeRef = useRef(null);
-  const cardRef = useRef(null);
+// ─── Inner form — must live inside <Elements> to use Stripe hooks ─────────────
+function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const { items, subtotal, tax, total, clearCart } = useCartContext();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -46,111 +40,48 @@ export default function CheckoutScreen({ navigation }) {
   const [orderType, setOrderType] = useState('pickup');
   const [scheduledTime, setScheduledTime] = useState('ASAP');
   const [notes, setNotes] = useState('');
-  const [cardComplete, setCardComplete] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const [stripeReady, setStripeReady] = useState(false);
-
-  const hasConnectAccount = Boolean(restaurant?.stripe_account_id);
-
-  useEffect(() => {
-    let cancelled = false;
-    let card;
-
-    (async () => {
-      const pk = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-      if (!pk || !hasConnectAccount) {
-        return;
-      }
-      const stripe = await loadStripe(pk);
-      if (cancelled || !stripe || !mountRef.current) {
-        return;
-      }
-      stripeRef.current = stripe;
-      const elements = stripe.elements();
-      card = elements.create('card', {
-        style: {
-          base: {
-            fontSize: '16px',
-            color: '#111',
-            '::placeholder': { color: '#999' },
-          },
-          invalid: { color: '#cc2222' },
-        },
-      });
-      card.mount(mountRef.current);
-      card.on('change', (event) => {
-        setCardComplete(!!event.complete);
-      });
-      cardRef.current = card;
-      setStripeReady(true);
-    })();
-
-    return () => {
-      cancelled = true;
-      if (card) {
-        try {
-          card.unmount();
-        } catch {
-          // ignore
-        }
-      }
-      cardRef.current = null;
-      stripeRef.current = null;
-    };
-  }, [hasConnectAccount]);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   const validate = () => {
     const errs = {};
     if (!name.trim()) errs.name = 'Name is required';
     if (!phone.trim()) errs.phone = 'Phone number is required';
-    if (!hasConnectAccount) {
-      errs.card = 'Payments are not configured for this restaurant.';
-    } else if (!cardComplete) {
-      errs.card = 'Please enter valid card details';
-    }
     return errs;
   };
 
-  const handlePlaceOrder = async () => {
+  const handleSubmit = async () => {
     const validationErrors = validate();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
     setErrors({});
+    if (!stripe || !elements) return;
     setLoading(true);
 
-    const stripe = stripeRef.current;
-    const card = cardRef.current;
-    if (!stripe || !card) {
-      Alert.alert(
-        'Payment unavailable',
-        'Stripe could not load. Check EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY and try again.',
-      );
-      setLoading(false);
-      return;
-    }
-
     try {
-      const clientSecret = await createPaymentIntent(total, restaurant.id);
-
-      const { error: paymentError, paymentIntent } = await stripe.confirmCardPayment(
-        clientSecret,
-        {
-          payment_method: {
-            card,
+      const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          payment_method_data: {
             billing_details: {
               name,
               phone,
               email: email || undefined,
             },
           },
+          return_url:
+            typeof window !== 'undefined'
+              ? window.location.href
+              : 'https://localhost:19006/confirmation',
         },
-      );
+        redirect: 'if_required',
+      });
 
-      if (paymentError) {
-        Alert.alert('Payment Failed', paymentError.message);
+      if (confirmError) {
+        Alert.alert('Payment Failed', confirmError.message);
         setLoading(false);
         return;
       }
@@ -160,15 +91,13 @@ export default function CheckoutScreen({ navigation }) {
         customerName: name,
         customerPhone: phone,
         customerEmail: email || null,
-        items: items.map(
-          ({ id, name: itemName, price, quantity, specialInstructions }) => ({
-            id,
-            name: itemName,
-            price,
-            quantity,
-            special_instructions: specialInstructions || '',
-          }),
-        ),
+        items: items.map(({ id, name: itemName, price, quantity, specialInstructions }) => ({
+          id,
+          name: itemName,
+          price,
+          quantity,
+          special_instructions: specialInstructions || '',
+        })),
         subtotal,
         tax,
         total,
@@ -181,298 +110,560 @@ export default function CheckoutScreen({ navigation }) {
       clearCart();
       navigation.replace('Confirmation', { order });
     } catch (err) {
-      Alert.alert(
-        'Error',
-        err.message || 'Something went wrong. Please try again.',
-      );
+      Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior="height">
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={{ paddingBottom: 120 }}
-      >
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Info</Text>
+  const s = makeFormStyles(theme);
 
-          <Text style={styles.label}>Name *</Text>
-          <TextInput
-            style={[styles.input, errors.name && styles.inputError]}
-            placeholder="Full name"
-            value={name}
-            onChangeText={setName}
-            autoCapitalize="words"
-          />
-          {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
+  const summaryPanel = (
+    <View style={[s.summaryPanel, isDesktop && s.summaryPanelDesktop]}>
+      <OrderSummary
+        items={items}
+        subtotal={subtotal}
+        tax={tax}
+        total={total}
+        orderType={orderType}
+        scheduledTime={scheduledTime}
+      />
+    </View>
+  );
 
-          <Text style={styles.label}>Phone *</Text>
-          <TextInput
-            style={[styles.input, errors.phone && styles.inputError]}
-            placeholder="(555) 555-5555"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
-          {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
+  const formPanel = (
+    <View style={[s.formPanel, isDesktop && s.formPanelDesktop]}>
 
-          <Text style={styles.label}>Email (optional)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="you@example.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
+      {/* ── Contact ─────────────────────────────── */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Contact</Text>
+        <View style={[isDesktop && s.twoCol]}>
+          <View style={[isDesktop && s.colHalf]}>
+            <Text style={s.fieldLabel}>
+              Name <Text style={s.required}>*</Text>
+            </Text>
+            <TextInput
+              style={[s.input, errors.name && s.inputError]}
+              placeholder="Full name"
+              value={name}
+              onChangeText={setName}
+              autoCapitalize="words"
+            />
+            {errors.name ? <Text style={s.errorText}>{errors.name}</Text> : null}
+          </View>
+          <View style={[isDesktop && s.colHalf]}>
+            <Text style={s.fieldLabel}>
+              Phone <Text style={s.required}>*</Text>
+            </Text>
+            <TextInput
+              style={[s.input, errors.phone && s.inputError]}
+              placeholder="(555) 555-5555"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+            />
+            {errors.phone ? <Text style={s.errorText}>{errors.phone}</Text> : null}
+          </View>
         </View>
+        <Text style={[s.fieldLabel, { marginTop: 14 }]}>
+          Email <Text style={s.optional}>(optional)</Text>
+        </Text>
+        <TextInput
+          style={s.input}
+          placeholder="you@example.com"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+      </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order Type</Text>
-          <View style={styles.toggleRow}>
-            {ORDER_TYPES.map((type) => {
-              const selected = orderType === type;
+      <View style={s.sectionDivider} />
+
+      {/* ── Order Details ────────────────────────── */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Order Details</Text>
+        <View style={s.toggleRow}>
+          {ORDER_TYPES.map((type) => {
+            const selected = orderType === type;
+            return (
+              <TouchableOpacity
+                key={type}
+                style={[
+                  s.toggleBtn,
+                  selected && { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
+                ]}
+                onPress={() => setOrderType(type)}
+              >
+                <Text style={[s.toggleText, selected && { color: '#fff' }]}>
+                  {type.charAt(0).toUpperCase() + type.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={[s.fieldLabel, { marginTop: 16 }]}>Ready Time</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+          <View style={s.timeRow}>
+            {TIME_OPTIONS.map((opt) => {
+              const selected = scheduledTime === opt;
               return (
                 <TouchableOpacity
-                  key={type}
+                  key={opt}
                   style={[
-                    styles.toggleBtn,
-                    selected && {
-                      backgroundColor: theme.colors.brand,
-                      borderColor: theme.colors.brand,
-                    },
+                    s.timeChip,
+                    selected && { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
                   ]}
-                  onPress={() => setOrderType(type)}
+                  onPress={() => setScheduledTime(opt)}
                 >
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      selected && { color: '#fff' },
-                    ]}
-                  >
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
-                  </Text>
+                  <Text style={[s.timeChipText, selected && { color: '#fff' }]}>{opt}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-        </View>
+        </ScrollView>
+      </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Ready Time</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.timeRow}>
-              {TIME_OPTIONS.map((opt) => {
-                const selected = scheduledTime === opt;
-                return (
-                  <TouchableOpacity
-                    key={opt}
-                    style={[
-                      styles.timeChip,
-                      selected && {
-                        backgroundColor: theme.colors.brand,
-                        borderColor: theme.colors.brand,
-                      },
-                    ]}
-                    onPress={() => setScheduledTime(opt)}
-                  >
-                    <Text
-                      style={[
-                        styles.timeChipText,
-                        selected && { color: '#fff' },
-                      ]}
-                    >
-                      {opt}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
-        </View>
+      <View style={s.sectionDivider} />
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Special Instructions</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Allergies, requests, delivery notes…"
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-            numberOfLines={3}
+      {/* ── Special Instructions ─────────────────── */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Special Instructions</Text>
+        <TextInput
+          style={[s.input, s.textArea]}
+          placeholder="Allergies, requests, delivery notes…"
+          value={notes}
+          onChangeText={setNotes}
+          multiline
+          numberOfLines={3}
+        />
+      </View>
+
+      <View style={s.sectionDivider} />
+
+      {/* ── Payment ──────────────────────────────── */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Payment</Text>
+        <View style={s.paymentElementWrap}>
+          <PaymentElement
+            options={{
+              layout: 'tabs',
+              paymentMethodOrder: ['apple_pay', 'google_pay', 'card'],
+            }}
           />
         </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order Summary</Text>
-          <OrderSummary
-            subtotal={subtotal}
-            tax={tax}
-            total={total}
-            orderType={orderType}
-            scheduledTime={scheduledTime}
-          />
+        <View style={s.securedRow}>
+          <Text style={s.securedText}>🔒  Secured by Stripe</Text>
         </View>
+      </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Payment</Text>
-          {!process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ? (
-            <Text style={styles.errorText}>
-              Set EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY in .env to accept cards.
-            </Text>
-          ) : !hasConnectAccount ? (
-            <Text style={styles.errorText}>
-              This restaurant has no Stripe Connect account. Set stripe_account_id in Supabase.
-            </Text>
-          ) : (
-            <>
-              <View
-                ref={mountRef}
-                collapsable={false}
-                style={styles.cardMount}
-              />
-              {!stripeReady && (
-                <ActivityIndicator style={{ marginTop: 8 }} />
-              )}
-              {errors.card && (
-                <Text style={styles.errorText}>{errors.card}</Text>
-              )}
-            </>
-          )}
-        </View>
-      </ScrollView>
-
-      <View style={styles.bottomBar}>
+      {/* ── Submit ───────────────────────────────── */}
+      <View style={s.submitWrap}>
         <TouchableOpacity
           style={[
-            styles.placeOrderBtn,
+            s.submitBtn,
             { backgroundColor: theme.colors.brand },
-            loading && { opacity: 0.6 },
+            (loading || !stripe) && { opacity: 0.6 },
           ]}
-          onPress={handlePlaceOrder}
-          disabled={loading || !hasConnectAccount}
+          onPress={handleSubmit}
+          disabled={loading || !stripe}
         >
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.placeOrderText}>
-              Place Order · ${total.toFixed(2)}
-            </Text>
+            <Text style={s.submitText}>Pay ${total.toFixed(2)} · Place Order</Text>
           )}
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </View>
+  );
+
+  return (
+    <View style={[s.columns, isDesktop && s.columnsDesktop]}>
+      {isDesktop ? (
+        <>
+          {summaryPanel}
+          {formPanel}
+        </>
+      ) : (
+        <>
+          {/* Mobile: collapsible order summary */}
+          <TouchableOpacity
+            style={s.summaryToggle}
+            onPress={() => setSummaryOpen((o) => !o)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.summaryToggleText}>
+              {summaryOpen ? '▲' : '▼'}{'  '}Order Summary
+            </Text>
+            <Text style={[s.summaryToggleText, { fontWeight: '700' }]}>${total.toFixed(2)}</Text>
+          </TouchableOpacity>
+          {summaryOpen && summaryPanel}
+          {formPanel}
+        </>
+      )}
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  section: {
-    padding: 20,
-    borderBottomWidth: 8,
-    borderBottomColor: '#f5f5f5',
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 14,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#555',
-    marginBottom: 6,
-    marginTop: 10,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontSize: 15,
-    color: '#111',
-    backgroundColor: '#fafafa',
-  },
-  inputError: {
-    borderColor: '#cc2222',
-  },
-  textArea: {
-    height: 80,
-    textAlignVertical: 'top',
-  },
-  errorText: {
-    fontSize: 12,
-    color: '#cc2222',
-    marginTop: 4,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  toggleBtn: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  toggleText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#555',
-  },
-  timeRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingRight: 20,
-  },
-  timeChip: {
-    borderWidth: 1.5,
-    borderColor: '#ddd',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  timeChipText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#555',
-  },
-  cardMount: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#fafafa',
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  placeOrderBtn: {
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  placeOrderText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-});
+// ─── Outer component — creates PaymentIntent, wraps with Elements ─────────────
+export default function CheckoutScreen({ navigation }) {
+  const { restaurant } = useRestaurantContext();
+  const { total } = useCartContext();
+  const { theme } = useTheme();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= BREAKPOINT;
+
+  const [clientSecret, setClientSecret] = useState(null);
+  const [piError, setPiError] = useState(null);
+
+  const hasConnectAccount = Boolean(restaurant?.stripe_account_id);
+
+  const stripePromise = useMemo(() => {
+    const pk = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+    if (!pk) return null;
+    return loadStripe(pk);
+  }, []);
+
+  useEffect(() => {
+    if (!restaurant?.id || !hasConnectAccount || !total) return;
+    createPaymentIntent(total, restaurant.id)
+      .then(setClientSecret)
+      .catch((e) => setPiError(e.message));
+  }, [restaurant?.id, hasConnectAccount, total]);
+
+  const appearance = {
+    theme: 'stripe',
+    variables: {
+      colorPrimary: theme.colors.brand,
+      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+      borderRadius: '8px',
+      colorBackground: '#ffffff',
+      colorText: '#0a2540',
+      colorTextSecondary: '#697386',
+    },
+  };
+
+  const s = makePageStyles(theme);
+
+  if (!process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+    return (
+      <View style={s.errorPage}>
+        <Text style={s.errorMsg}>
+          Set EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY in .env to accept payments.
+        </Text>
+      </View>
+    );
+  }
+
+  if (!hasConnectAccount) {
+    return (
+      <View style={s.errorPage}>
+        <Text style={s.errorMsg}>
+          Payments are not configured for this restaurant. Set stripe_account_id in Supabase.
+        </Text>
+      </View>
+    );
+  }
+
+  if (piError) {
+    return (
+      <View style={s.errorPage}>
+        <Text style={s.errorMsg}>{piError}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={s.page} contentContainerStyle={s.pageContent}>
+      {/* Header */}
+      <View style={[s.header, isDesktop && s.headerDesktop]}>
+        {restaurant?.name ? (
+          <Text style={s.restaurantName}>{restaurant.name}</Text>
+        ) : null}
+        <Text style={s.pageTitle}>Checkout</Text>
+      </View>
+
+      {clientSecret ? (
+        <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
+          <CheckoutForm
+            navigation={navigation}
+            isDesktop={isDesktop}
+            theme={theme}
+            restaurant={restaurant}
+          />
+        </Elements>
+      ) : (
+        <View style={s.loadingWrap}>
+          <ActivityIndicator size="large" color={theme.colors.brand} />
+          <Text style={s.loadingText}>Preparing checkout…</Text>
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+function makePageStyles(theme) {
+  return StyleSheet.create({
+    page: {
+      flex: 1,
+      backgroundColor: '#f6f9fc',
+    },
+    pageContent: {
+      paddingBottom: 40,
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      paddingBottom: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: '#e3e8ee',
+      backgroundColor: '#ffffff',
+    },
+    headerDesktop: {
+      paddingHorizontal: 40,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    restaurantName: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#697386',
+    },
+    pageTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: '#0a2540',
+      marginTop: 2,
+    },
+    loadingWrap: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 80,
+      gap: 16,
+    },
+    loadingText: {
+      fontSize: 15,
+      color: '#697386',
+    },
+    errorPage: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 32,
+      backgroundColor: '#f6f9fc',
+    },
+    errorMsg: {
+      fontSize: 15,
+      color: '#c0392b',
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+  });
+}
+
+function makeFormStyles(theme) {
+  return StyleSheet.create({
+    // Layout
+    columns: {
+      flexDirection: 'column',
+    },
+    columnsDesktop: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      maxWidth: 1100,
+      width: '100%',
+      alignSelf: 'center',
+      paddingHorizontal: 40,
+      paddingTop: 40,
+      gap: 32,
+    },
+
+    // Summary panel
+    summaryPanel: {
+      backgroundColor: '#f6f9fc',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    summaryPanelDesktop: {
+      flex: 4,
+      backgroundColor: 'transparent',
+      paddingHorizontal: 0,
+      paddingVertical: 0,
+      position: 'sticky',
+      top: 24,
+    },
+
+    // Mobile summary toggle bar
+    summaryToggle: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      backgroundColor: '#e8f0fe',
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: '#d0d9f0',
+    },
+    summaryToggleText: {
+      fontSize: 15,
+      color: '#0a2540',
+      fontWeight: '500',
+    },
+
+    // Form panel
+    formPanel: {
+      backgroundColor: '#ffffff',
+      marginHorizontal: 0,
+    },
+    formPanelDesktop: {
+      flex: 5,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#e3e8ee',
+      overflow: 'hidden',
+    },
+
+    // Sections
+    section: {
+      padding: 24,
+    },
+    sectionDivider: {
+      height: 1,
+      backgroundColor: '#e3e8ee',
+      marginHorizontal: 24,
+    },
+    sectionLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#697386',
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      marginBottom: 16,
+    },
+
+    // Field labels + inputs
+    fieldLabel: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: '#0a2540',
+      marginBottom: 6,
+    },
+    required: {
+      color: '#c0392b',
+    },
+    optional: {
+      color: '#697386',
+      fontWeight: '400',
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: '#e3e8ee',
+      borderRadius: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 15,
+      color: '#0a2540',
+      backgroundColor: '#ffffff',
+    },
+    inputError: {
+      borderColor: '#c0392b',
+    },
+    textArea: {
+      height: 80,
+      textAlignVertical: 'top',
+    },
+    errorText: {
+      fontSize: 12,
+      color: '#c0392b',
+      marginTop: 4,
+    },
+
+    // Two-column input row (desktop only)
+    twoCol: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    colHalf: {
+      flex: 1,
+    },
+
+    // Order type toggles
+    toggleRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    toggleBtn: {
+      flex: 1,
+      borderWidth: 1.5,
+      borderColor: '#e3e8ee',
+      borderRadius: 8,
+      paddingVertical: 11,
+      alignItems: 'center',
+    },
+    toggleText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#697386',
+    },
+
+    // Time chips
+    timeRow: {
+      flexDirection: 'row',
+      gap: 8,
+      paddingRight: 16,
+    },
+    timeChip: {
+      borderWidth: 1.5,
+      borderColor: '#e3e8ee',
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    timeChipText: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: '#697386',
+    },
+
+    // Payment Element
+    paymentElementWrap: {
+      borderWidth: 1,
+      borderColor: '#e3e8ee',
+      borderRadius: 8,
+      padding: 16,
+      backgroundColor: '#ffffff',
+      minHeight: 60,
+    },
+    securedRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 12,
+    },
+    securedText: {
+      fontSize: 12,
+      color: '#697386',
+    },
+
+    // Submit
+    submitWrap: {
+      padding: 24,
+      paddingTop: 8,
+    },
+    submitBtn: {
+      borderRadius: 10,
+      paddingVertical: 16,
+      alignItems: 'center',
+    },
+    submitText: {
+      color: '#ffffff',
+      fontSize: 17,
+      fontWeight: '700',
+      letterSpacing: 0.2,
+    },
+  });
+}

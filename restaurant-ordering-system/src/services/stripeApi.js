@@ -14,6 +14,48 @@ function getFunctionHeaders() {
   return headers;
 }
 
+/**
+ * Creates a Stripe Checkout Session (ui_mode: 'custom') with line items.
+ * Returns the session client_secret used to initialize CheckoutElementsProvider.
+ */
+export async function createCheckoutSession({ items, restaurantId, currency = 'usd' }) {
+  if (!BACKEND_URL) {
+    throw new Error(
+      'Payment backend URL is not configured. Set EXPO_PUBLIC_BACKEND_URL or EXPO_PUBLIC_SUPABASE_URL in .env',
+    );
+  }
+
+  const returnUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/confirmation`
+      : '';
+
+  const response = await fetch(`${BACKEND_URL}/create-checkout-session`, {
+    method: 'POST',
+    headers: getFunctionHeaders(),
+    body: JSON.stringify({ items, restaurantId, currency, returnUrl }),
+  });
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.message || payload.error || 'Failed to initialize checkout.');
+  }
+
+  const { clientSecret } = payload;
+  if (!clientSecret) {
+    throw new Error('Checkout session did not return a client secret.');
+  }
+
+  return clientSecret;
+}
+
+/** @deprecated Use createCheckoutSession instead. Kept for backward compatibility. */
 export async function createPaymentIntent(amount, restaurantId) {
   if (!BACKEND_URL) {
     throw new Error(
