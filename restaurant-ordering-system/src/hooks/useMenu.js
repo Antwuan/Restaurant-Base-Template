@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as menuService from '../services/menuService';
 
-export const useMenu = (restaurantId) => {
+export const useMenu = (restaurantId, menuType = null) => {
   const [categories, setCategories] = useState([]);
   const [menuByCategory, setMenuByCategory] = useState({});
   const [allItems, setAllItems] = useState([]);
@@ -23,14 +23,18 @@ export const useMenu = (restaurantId) => {
       setError(null);
 
       const [fetchedCategories, fetchedItems] = await Promise.all([
-        menuService.getMenuCategories(restaurantId),
+        menuService.getMenuCategories(restaurantId, menuType),
         menuService.getMenuItems(restaurantId),
       ]);
+
+      // Only keep items that belong to the fetched categories
+      const categoryIds = new Set(fetchedCategories.map(c => c.id));
+      const filteredItems = fetchedItems.filter(item => categoryIds.has(item.category_id));
 
       const grouped = fetchedCategories.reduce((acc, category) => {
         acc[category.id] = {
           ...category,
-          items: fetchedItems.filter(
+          items: filteredItems.filter(
             (item) => item.category_id === category.id && item.is_available
           ),
         };
@@ -39,13 +43,13 @@ export const useMenu = (restaurantId) => {
 
       setCategories(fetchedCategories);
       setMenuByCategory(grouped);
-      setAllItems(fetchedItems);
+      setAllItems(filteredItems);
     } catch (err) {
       setError(err.message || 'Failed to load menu');
     } finally {
       setLoading(false);
     }
-  }, [restaurantId]);
+  }, [restaurantId, menuType]);
 
   useEffect(() => {
     loadMenu();

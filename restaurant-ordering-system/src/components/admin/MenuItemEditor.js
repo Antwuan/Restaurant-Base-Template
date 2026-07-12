@@ -1,8 +1,9 @@
-// Admin form for creating and editing menu items. Uses React hooks, React Native
-// inputs/layout, `expo-image-picker` for image selection, and delegates saving,
-// deletion, and Supabase image upload handling to callbacks from the parent screen.
+// Admin floating-card editor for creating and editing menu items.
+// Styled to match the customer MenuItemModal — centered card, dim backdrop,
+// hero image at top — so admins immediately see what customers will see.
 import React, { useState, useEffect } from 'react';
 import {
+  Modal,
   View,
   Text,
   TextInput,
@@ -13,8 +14,13 @@ import {
   Alert,
   ScrollView,
   Switch,
+  Platform,
+  KeyboardAvoidingView,
+  Pressable,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
+import { confirmAsync } from '../../utils/confirm';
 
 const DEFAULT_FORM = {
   name: '',
@@ -26,11 +32,12 @@ const DEFAULT_FORM = {
 };
 
 export default function MenuItemEditor({
+  visible,
   item = null,
   categories = [],
   onSave,
   onDelete,
-  onCancel,
+  onClose,
 }) {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [localImageUri, setLocalImageUri] = useState(null);
@@ -38,20 +45,29 @@ export default function MenuItemEditor({
   const [deleting, setDeleting] = useState(false);
   const [errors, setErrors] = useState({});
 
+  const isEdit = !!item?.id;
+
   useEffect(() => {
-    if (item) {
-      setForm({
-        name: item.name || '',
-        description: item.description || '',
-        price: item.price != null ? String(item.price) : '',
-        category_id: item.category_id || '',
-        image_url: item.image_url || '',
-        is_available: item.is_available ?? true,
-      });
-    } else {
-      setForm(DEFAULT_FORM);
+    if (visible) {
+      if (item) {
+        setForm({
+          name: item.name || '',
+          description: item.description || '',
+          price: item.price != null ? String(item.price) : '',
+          category_id: item.category_id || '',
+          image_url: item.image_url || '',
+          is_available: item.is_available ?? true,
+        });
+      } else {
+        setForm({
+          ...DEFAULT_FORM,
+          category_id: item?.category_id ?? '',
+        });
+      }
+      setLocalImageUri(null);
+      setErrors({});
     }
-  }, [item]);
+  }, [visible, item]);
 
   const setField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -104,259 +120,328 @@ export default function MenuItemEditor({
     }
   };
 
-  const handleDelete = () => {
-    Alert.alert(
-      'Delete Item',
-      `Are you sure you want to delete "${form.name}"? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            try {
-              await onDelete(item.id);
-            } catch (e) {
-              Alert.alert('Error', e.message || 'Failed to delete item.');
-              setDeleting(false);
-            }
-          },
-        },
-      ],
-    );
+  const handleDelete = async () => {
+    const confirmed = await confirmAsync({
+      title: 'Delete Item',
+      message: `Are you sure you want to delete "${form.name}"? This cannot be undone.`,
+      confirmText: 'Delete',
+    });
+    if (!confirmed) return;
+    setDeleting(true);
+    try {
+      await onDelete(item.id);
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Failed to delete item.');
+      setDeleting(false);
+    }
   };
 
   const imageSource = localImageUri || form.image_url || null;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onClose}
     >
-      <Text style={styles.title}>{item ? 'Edit Menu Item' : 'New Menu Item'}</Text>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <Pressable style={styles.backdrop} onPress={onClose} />
 
-      <TouchableOpacity style={styles.imagePicker} onPress={handlePickImage} activeOpacity={0.8}>
-        {imageSource ? (
-          <Image source={{ uri: imageSource }} style={styles.imagePreview} />
-        ) : (
-          <View style={styles.imagePlaceholder}>
-            <Text style={styles.imagePlaceholderIcon}>📷</Text>
-            <Text style={styles.imagePlaceholderText}>Tap to add photo</Text>
-          </View>
-        )}
-        {imageSource && (
-          <View style={styles.imageOverlay}>
-            <Text style={styles.imageOverlayText}>Change</Text>
-          </View>
-        )}
-      </TouchableOpacity>
+        <View style={styles.card}>
+          {/* Hero image — tap to pick */}
+          <TouchableOpacity
+            style={styles.heroZone}
+            onPress={handlePickImage}
+            activeOpacity={0.88}
+            accessibilityLabel="Tap to change photo"
+          >
+            {imageSource ? (
+              <Image source={{ uri: imageSource }} style={styles.heroImage} resizeMode="cover" />
+            ) : (
+              <View style={styles.heroPlaceholder}>
+                <Ionicons name="camera-outline" size={36} color="#9ca3af" />
+                <Text style={styles.heroPlaceholderText}>Tap to add photo</Text>
+              </View>
+            )}
+            {/* Edit overlay */}
+            <View style={styles.heroOverlay}>
+              <Ionicons name="camera" size={16} color="#fff" />
+              <Text style={styles.heroOverlayText}>{imageSource ? 'Change' : 'Add Photo'}</Text>
+            </View>
+          </TouchableOpacity>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>Item Name *</Text>
-        <TextInput
-          style={[styles.input, errors.name && styles.inputError]}
-          value={form.name}
-          onChangeText={(v) => setField('name', v)}
-          placeholder="e.g. Margherita Pizza"
-          placeholderTextColor="#AAA"
-        />
-        {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
-      </View>
+          {/* Close button */}
+          <TouchableOpacity style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close">
+            <Ionicons name="close" size={20} color="#1a1a1a" />
+          </TouchableOpacity>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>Description</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={form.description}
-          onChangeText={(v) => setField('description', v)}
-          placeholder="Brief description of the item..."
-          placeholderTextColor="#AAA"
-          multiline
-          numberOfLines={3}
-          textAlignVertical="top"
-        />
-      </View>
+          {/* Scrollable form body */}
+          <ScrollView
+            style={styles.body}
+            contentContainerStyle={styles.bodyContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Title */}
+            <Text style={styles.screenTitle}>{isEdit ? 'Edit Item' : 'New Item'}</Text>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>Price ($) *</Text>
-        <TextInput
-          style={[styles.input, styles.priceInput, errors.price && styles.inputError]}
-          value={form.price}
-          onChangeText={(v) => setField('price', v)}
-          placeholder="0.00"
-          placeholderTextColor="#AAA"
-          keyboardType="decimal-pad"
-        />
-        {errors.price && <Text style={styles.errorText}>{errors.price}</Text>}
-      </View>
+            {/* Name */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Item Name *</Text>
+              <TextInput
+                style={[styles.input, errors.name && styles.inputError]}
+                value={form.name}
+                onChangeText={(v) => setField('name', v)}
+                placeholder="e.g. Margherita Pizza"
+                placeholderTextColor="#aaa"
+              />
+              {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
+            </View>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>Category *</Text>
-        <View style={[styles.categoryGrid, errors.category_id && styles.inputError]}>
-          {categories.map((cat) => (
-            <TouchableOpacity
-              key={cat.id}
-              style={[
-                styles.categoryChip,
-                form.category_id === cat.id && styles.categoryChipSelected,
-              ]}
-              onPress={() => setField('category_id', cat.id)}
-            >
-              <Text
-                style={[
-                  styles.categoryChipText,
-                  form.category_id === cat.id && styles.categoryChipTextSelected,
-                ]}
+            {/* Description */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={form.description}
+                onChangeText={(v) => setField('description', v)}
+                placeholder="Brief description of the item..."
+                placeholderTextColor="#aaa"
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+            </View>
+
+            {/* Price */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Price ($) *</Text>
+              <TextInput
+                style={[styles.input, styles.priceInput, errors.price && styles.inputError]}
+                value={form.price}
+                onChangeText={(v) => setField('price', v)}
+                placeholder="0.00"
+                placeholderTextColor="#aaa"
+                keyboardType="decimal-pad"
+              />
+              {errors.price ? <Text style={styles.errorText}>{errors.price}</Text> : null}
+            </View>
+
+            {/* Category */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Category *</Text>
+              <View style={[styles.categoryGrid, errors.category_id && styles.inputError]}>
+                {categories.map((cat) => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[
+                      styles.categoryChip,
+                      form.category_id === cat.id && styles.categoryChipSelected,
+                    ]}
+                    onPress={() => setField('category_id', cat.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryChipText,
+                        form.category_id === cat.id && styles.categoryChipTextSelected,
+                      ]}
+                    >
+                      {cat.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {errors.category_id ? <Text style={styles.errorText}>{errors.category_id}</Text> : null}
+            </View>
+
+            {/* Availability */}
+            <View style={styles.field}>
+              <View style={styles.toggleRow}>
+                <View>
+                  <Text style={styles.label}>Available</Text>
+                  <Text style={styles.toggleSubtext}>
+                    {form.is_available ? 'Showing on menu' : 'Hidden from menu'}
+                  </Text>
+                </View>
+                <Switch
+                  value={form.is_available}
+                  onValueChange={(v) => setField('is_available', v)}
+                  trackColor={{ false: '#d1d5db', true: '#34c759' }}
+                  thumbColor="#fff"
+                />
+              </View>
+            </View>
+
+            {/* Delete (edit mode only) */}
+            {isEdit && (
+              <TouchableOpacity
+                style={[styles.deleteBtnFull, deleting && styles.btnDisabled]}
+                onPress={handleDelete}
+                disabled={deleting || saving}
               >
-                {cat.name}
-              </Text>
+                {deleting
+                  ? <ActivityIndicator color="#ef4444" size="small" />
+                  : <><Ionicons name="trash-outline" size={16} color="#ef4444" /><Text style={styles.deleteBtnText}>Delete Item</Text></>
+                }
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+
+          {/* Footer — Cancel / Save */}
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={onClose}
+              disabled={saving || deleting}
+            >
+              <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
-          ))}
-        </View>
-        {errors.category_id && <Text style={styles.errorText}>{errors.category_id}</Text>}
-      </View>
-
-      <View style={styles.field}>
-        <View style={styles.toggleRow}>
-          <View>
-            <Text style={styles.label}>Available</Text>
-            <Text style={styles.toggleSubtext}>
-              {form.is_available ? 'Showing on menu' : 'Hidden from menu'}
-            </Text>
+            <TouchableOpacity
+              style={[styles.saveBtn, (saving || deleting) && styles.btnDisabled]}
+              onPress={handleSave}
+              disabled={saving || deleting}
+            >
+              {saving
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.saveBtnText}>{isEdit ? 'Save Changes' : 'Add Item'}</Text>
+              }
+            </TouchableOpacity>
           </View>
-          <Switch
-            value={form.is_available}
-            onValueChange={(v) => setField('is_available', v)}
-            trackColor={{ false: '#DDD', true: '#34C759' }}
-            thumbColor="#fff"
-          />
         </View>
-      </View>
-
-      <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.saveButton, saving && styles.buttonDisabled]}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.saveButtonText}>{item ? 'Save Changes' : 'Add Item'}</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {item && (
-        <TouchableOpacity
-          style={[styles.deleteButton, deleting && styles.buttonDisabled]}
-          onPress={handleDelete}
-          disabled={deleting}
-        >
-          {deleting ? (
-            <ActivityIndicator color="#DC3545" size="small" />
-          ) : (
-            <Text style={styles.deleteButtonText}>🗑 Delete Item</Text>
-          )}
-        </TouchableOpacity>
-      )}
-    </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  overlay: {
     flex: 1,
-    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 48,
   },
-  content: {
-    padding: 20,
-    paddingBottom: 40,
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: 20,
-  },
-  imagePicker: {
+  card: {
     width: '100%',
-    height: 180,
-    borderRadius: 12,
+    maxWidth: 680,
+    maxHeight: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    borderStyle: 'dashed',
+    ...Platform.select({
+      web: { boxShadow: '0 8px 40px rgba(0,0,0,0.22)' },
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 16 },
+      android: { elevation: 12 },
+    }),
   },
-  imagePreview: {
+  heroZone: {
+    width: '100%',
+    height: 200,
+    backgroundColor: '#f3f4f6',
+  },
+  heroImage: {
     width: '100%',
     height: '100%',
   },
-  imagePlaceholder: {
+  heroPlaceholder: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F8F8F8',
+    alignItems: 'center',
+    gap: 8,
   },
-  imagePlaceholderIcon: {
-    fontSize: 32,
-    marginBottom: 6,
-  },
-  imagePlaceholderText: {
+  heroPlaceholderText: {
     fontSize: 14,
-    color: '#AAA',
+    color: '#9ca3af',
     fontWeight: '500',
   },
-  imageOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  heroOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    right: 12,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
   },
-  imageOverlayText: {
+  heroOverlayText: {
     color: '#fff',
-    fontWeight: '700',
-    fontSize: 15,
+    fontSize: 12,
+    fontWeight: '600',
   },
-  field: {
+  closeBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...Platform.select({
+      web: { boxShadow: '0 2px 8px rgba(0,0,0,0.15)' },
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 4 },
+      android: { elevation: 4 },
+    }),
+  },
+  body: {
+    flexShrink: 1,
+  },
+  bodyContent: {
+    padding: 20,
+    paddingBottom: 8,
+  },
+  screenTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1a1a1a',
     marginBottom: 18,
   },
+  field: {
+    marginBottom: 16,
+  },
   label: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#555',
+    color: '#6b7280',
     marginBottom: 6,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#1A1A1A',
-    backgroundColor: '#FAFAFA',
+    color: '#1a1a1a',
+    backgroundColor: '#fafafa',
   },
   inputError: {
-    borderColor: '#DC3545',
+    borderColor: '#ef4444',
   },
   textArea: {
-    minHeight: 80,
+    minHeight: 76,
     paddingTop: 11,
   },
   priceInput: {
     width: 140,
   },
   errorText: {
-    color: '#DC3545',
+    color: '#ef4444',
     fontSize: 12,
     marginTop: 4,
   },
@@ -372,7 +457,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#E0E0E0',
+    borderColor: '#e5e7eb',
     backgroundColor: '#fff',
   },
   categoryChipSelected: {
@@ -382,7 +467,7 @@ const styles = StyleSheet.create({
   categoryChipText: {
     fontSize: 13,
     fontWeight: '500',
-    color: '#555',
+    color: '#6b7280',
   },
   categoryChipTextSelected: {
     color: '#fff',
@@ -392,36 +477,56 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#fafafa',
     padding: 14,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#e5e7eb',
   },
   toggleSubtext: {
     fontSize: 12,
-    color: '#AAA',
+    color: '#9ca3af',
     marginTop: 2,
   },
-  buttonRow: {
+  deleteBtnFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#ef4444',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  deleteBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ef4444',
+  },
+  footer: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
   },
-  cancelButton: {
+  cancelBtn: {
     flex: 1,
     paddingVertical: 13,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#DDD',
+    borderColor: '#e5e7eb',
     alignItems: 'center',
   },
-  cancelButtonText: {
+  cancelBtnText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#555',
+    color: '#6b7280',
   },
-  saveButton: {
+  saveBtn: {
     flex: 2,
     paddingVertical: 13,
     borderRadius: 10,
@@ -429,26 +534,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveButtonText: {
+  saveBtnText: {
     fontSize: 15,
     fontWeight: '700',
     color: '#fff',
   },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  deleteButton: {
-    marginTop: 14,
-    paddingVertical: 13,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#DC3545',
-    alignItems: 'center',
-  },
-  deleteButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#DC3545',
+  btnDisabled: {
+    opacity: 0.55,
   },
 });
-
