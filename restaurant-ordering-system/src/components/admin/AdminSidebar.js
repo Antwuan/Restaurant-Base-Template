@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { key: 'Promo',        label: 'Promo',        icon: 'images',           iconOutline: 'images-outline'           },
   { key: 'Rewards',      label: 'Rewards',      icon: 'gift',             iconOutline: 'gift-outline'             },
   { key: 'Applications', label: 'Applications', icon: 'document-text',    iconOutline: 'document-text-outline'    },
+  { key: 'Reviews',      label: 'Reviews',      icon: 'star',             iconOutline: 'star-outline'             },
   { key: 'Marketing',    label: 'Marketing',    icon: 'megaphone',        iconOutline: 'megaphone-outline'        },
   { key: 'Settings',     label: 'Settings',     icon: 'settings',         iconOutline: 'settings-outline'         },
 ];

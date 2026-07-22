@@ -41,6 +41,16 @@ export function ApplicationsScreen() {
   );
 }
 
+export function ReviewsScreen() {
+  return (
+    <AdminPlaceholderScreen
+      title="Reviews"
+      icon="star-outline"
+      description="Customer reviews will live here."
+    />
+  );
+}
+
 export function MarketingScreen() {
   return (
     <AdminPlaceholderScreen

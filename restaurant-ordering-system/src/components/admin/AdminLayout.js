@@ -18,9 +18,10 @@ import MenuEditorScreen from '../../screens/admin/MenuEditorScreen';
 import CarouselEditorScreen from '../../screens/admin/CarouselEditorScreen';
 import SettingsScreen from '../../screens/admin/SettingsScreen';
 import AnalyticsScreen from '../../screens/admin/AnalyticsScreen';
+import AdminRewardsScreen from '../../screens/admin/RewardsScreen';
+import ApplicationsScreen from '../../screens/admin/ApplicationsScreen';
 import {
-  RewardsScreen,
-  ApplicationsScreen,
+  ReviewsScreen,
   MarketingScreen,
 } from '../../screens/admin/PlaceholderScreens';
 
@@ -29,8 +30,9 @@ const SCREENS = {
   Analytics:    AnalyticsScreen,
   Menu:         MenuEditorScreen,
   Promo:        CarouselEditorScreen,
-  Rewards:      RewardsScreen,
+  Rewards:      AdminRewardsScreen,
   Applications: ApplicationsScreen,
+  Reviews:      ReviewsScreen,
   Marketing:    MarketingScreen,
   Settings:     SettingsScreen,
 };
