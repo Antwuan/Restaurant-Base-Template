@@ -11,9 +11,12 @@ import {
   Platform,
   Alert,
   ScrollView,
+  Pressable,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
 import { useAuth } from '../context/AuthContext';
+import { confirmAsync } from '../utils/confirm';
 
 export default function CustomerSignInModal({ visible, onClose }) {
   const { restaurant } = useRestaurantContext();
@@ -130,6 +133,12 @@ export default function CustomerSignInModal({ visible, onClose }) {
   };
 
   const handleSignOut = async () => {
+    const confirmed = await confirmAsync({
+      title: 'Sign Out',
+      message: 'Are you sure you want to sign out?',
+      confirmText: 'Sign Out',
+    });
+    if (!confirmed) return;
     setLoading(true);
     try {
       await signOut();
@@ -143,19 +152,31 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
   const signedInAsCustomer = user && customerProfile;
 
+  const brandColor = restaurant?.brand_color || '#007AFF';
+
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType="fade"
       transparent
       onRequestClose={onClose}
+      statusBarTranslucent
     >
       <KeyboardAvoidingView
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        {/* Dim backdrop — tap to close */}
+        <Pressable style={styles.backdrop} onPress={onClose} />
+
+        {/* Floating card */}
         <View style={styles.card}>
-          <ScrollView keyboardShouldPersistTaps="handled">
+          {/* Close button */}
+          <TouchableOpacity style={styles.closeBtn} onPress={onClose} hitSlop={8}>
+            <Ionicons name="close" size={18} color="#555" />
+          </TouchableOpacity>
+
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>
               {signedInAsCustomer ? 'Your account' : 'Customer account'}
             </Text>
@@ -166,10 +187,13 @@ export default function CustomerSignInModal({ visible, onClose }) {
             </Text>
 
             {signedInAsCustomer ? (
-              <View>
-                <Text style={styles.signedInEmail}>{customerProfile.email}</Text>
+              <View style={{ gap: 14 }}>
+                <View style={styles.signedInRow}>
+                  <Ionicons name="person-circle-outline" size={20} color="#777" />
+                  <Text style={styles.signedInEmail}>{customerProfile.email}</Text>
+                </View>
                 <TouchableOpacity
-                  style={[styles.button, loading && styles.buttonDisabled]}
+                  style={[styles.button, { backgroundColor: '#111' }, loading && styles.buttonDisabled]}
                   onPress={handleSignOut}
                   disabled={loading}
                 >
@@ -232,7 +256,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
                 />
 
                 <TouchableOpacity
-                  style={[styles.button, loading && styles.buttonDisabled]}
+                  style={[styles.button, { backgroundColor: brandColor }, loading && styles.buttonDisabled]}
                   onPress={mode === 'signin' ? handleSignIn : handleSignUp}
                   disabled={loading}
                 >
@@ -246,10 +270,6 @@ export default function CustomerSignInModal({ visible, onClose }) {
                 </TouchableOpacity>
               </>
             )}
-
-            <TouchableOpacity style={styles.cancelLink} onPress={onClose}>
-              <Text style={styles.cancelText}>Close</Text>
-            </TouchableOpacity>
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -260,90 +280,117 @@ export default function CustomerSignInModal({ visible, onClose }) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
-    padding: 20,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 48,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   card: {
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 20,
     padding: 28,
-    maxWidth: 420,
+    maxWidth: 460,
     width: '100%',
-    alignSelf: 'center',
     maxHeight: '90%',
+    ...Platform.select({
+      web: { boxShadow: '0 8px 40px rgba(0,0,0,0.22)' },
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 16 },
+      android: { elevation: 12 },
+    }),
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    zIndex: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.07)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '800',
     color: '#111',
-    marginBottom: 6,
+    marginBottom: 4,
+    paddingRight: 36,
   },
   subtitle: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 20,
+    marginBottom: 22,
+    lineHeight: 20,
+  },
+  signedInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 10,
+    padding: 12,
   },
   signedInEmail: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#333',
-    marginBottom: 16,
+    flex: 1,
   },
   tabs: {
     flexDirection: 'row',
-    marginBottom: 16,
-    borderRadius: 8,
+    marginBottom: 18,
+    borderRadius: 10,
     backgroundColor: '#f0f0f0',
     padding: 4,
   },
   tab: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 9,
     alignItems: 'center',
-    borderRadius: 6,
+    borderRadius: 8,
   },
   tabActive: {
     backgroundColor: '#fff',
+    ...Platform.select({
+      web: { boxShadow: '0 1px 4px rgba(0,0,0,0.08)' },
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4 },
+      android: { elevation: 2 },
+    }),
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: '#888',
   },
   tabTextActive: {
-    color: '#007AFF',
+    color: '#111',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
+    borderColor: '#e5e5e5',
+    borderRadius: 10,
     padding: 14,
-    fontSize: 16,
-    marginBottom: 14,
+    fontSize: 15,
+    marginBottom: 12,
     color: '#111',
     backgroundColor: '#fafafa',
   },
   button: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     alignItems: 'center',
     marginTop: 6,
   },
   buttonDisabled: {
-    backgroundColor: '#a0c4ff',
+    opacity: 0.6,
   },
   buttonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
-  },
-  cancelLink: {
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  cancelText: {
-    color: '#666',
-    fontSize: 14,
+    fontWeight: '700',
   },
 });

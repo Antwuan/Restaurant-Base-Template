@@ -8,6 +8,7 @@ import { AuthProvider } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
 import { ThemeProvider, useTheme, buildPaperTheme } from './src/theme';
 import RootNavigator from './src/navigation/RootNavigator';
+import { GlobalConfirmModal } from './src/components/ConfirmModal';
 
 // Inner app wrapper that has access to theme + restaurant context
 const AppContent = () => {
@@ -26,8 +27,14 @@ const AppContent = () => {
   if (error || !restaurant) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>Restaurant not found.</Text>
-        <Text style={styles.errorSub}>Please check the URL or contact support.</Text>
+        <Text style={styles.errorText}>
+          {error || 'Restaurant not found.'}
+        </Text>
+        <Text style={styles.errorSub}>
+          {typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+            ? 'Your admin account must be linked in the restaurant_staff table. See supabase/migrations/20260612_admin_rls.sql.'
+            : 'Please check the URL or contact support.'}
+        </Text>
       </View>
     );
   }
@@ -37,6 +44,7 @@ const AppContent = () => {
       <PaperProvider theme={paperTheme}>
         <CartProvider restaurantId={restaurant?.id}>
           <RootNavigator />
+          <GlobalConfirmModal />
         </CartProvider>
       </PaperProvider>
     </View>
