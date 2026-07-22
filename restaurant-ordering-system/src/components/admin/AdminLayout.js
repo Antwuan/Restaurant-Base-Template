@@ -3,11 +3,11 @@ import {
   View,
   StyleSheet,
   useWindowDimensions,
-  Alert,
   Platform,
   TouchableOpacity,
   Text,
 } from 'react-native';
+import { confirmAsync } from '../../utils/confirm';
 import { Ionicons } from '@expo/vector-icons';
 import AdminSidebar, { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from './AdminSidebar';
 import { useTheme } from '../../theme';
@@ -17,12 +17,22 @@ import OrdersScreen from '../../screens/admin/OrdersScreen';
 import MenuEditorScreen from '../../screens/admin/MenuEditorScreen';
 import CarouselEditorScreen from '../../screens/admin/CarouselEditorScreen';
 import SettingsScreen from '../../screens/admin/SettingsScreen';
+import AnalyticsScreen from '../../screens/admin/AnalyticsScreen';
+import {
+  RewardsScreen,
+  ApplicationsScreen,
+  MarketingScreen,
+} from '../../screens/admin/PlaceholderScreens';
 
 const SCREENS = {
-  Orders:   OrdersScreen,
-  Menu:     MenuEditorScreen,
-  Promo:    CarouselEditorScreen,
-  Settings: SettingsScreen,
+  Orders:       OrdersScreen,
+  Analytics:    AnalyticsScreen,
+  Menu:         MenuEditorScreen,
+  Promo:        CarouselEditorScreen,
+  Rewards:      RewardsScreen,
+  Applications: ApplicationsScreen,
+  Marketing:    MarketingScreen,
+  Settings:     SettingsScreen,
 };
 
 // Sidebar collapses to icon rail below this breakpoint
@@ -46,16 +56,20 @@ export default function AdminLayout() {
     if (!isMobile) setMobileMenuOpen(false);
   }, [isMobile]);
 
-  const handleNavigate = useCallback((key) => {
+  const handleNavigate = useCallback(async (key) => {
     if (key === 'SignOut') {
-      Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: () => signOut(),
-        },
-      ]);
+      const confirmed = await confirmAsync({
+        title: 'Sign Out',
+        message: 'Are you sure you want to sign out?',
+        confirmText: 'Sign Out',
+      });
+      if (confirmed) {
+        try {
+          await signOut();
+        } catch {
+          // auth state change will handle UI; nothing to do on error
+        }
+      }
       return;
     }
     setActiveSection(key);
@@ -67,7 +81,7 @@ export default function AdminLayout() {
   const sectionTitle = activeSection === 'Promo' ? 'Promo Carousel' : activeSection;
 
   return (
-    <View style={styles.shell}>
+    <View style={[styles.shell, { backgroundColor: theme.colors.background }]}>
       {/* ── Mobile sidebar overlay ── */}
       {isMobile && mobileMenuOpen && (
         <TouchableOpacity
@@ -94,20 +108,28 @@ export default function AdminLayout() {
       {/* ── Main content ── */}
       <View style={styles.main}>
         {/* Top bar */}
-        <View style={[styles.topBar, { borderBottomColor: theme.colors.border }]}>
+        <View style={[
+          styles.topBar,
+          {
+            backgroundColor: theme.colors.backgroundCard,
+            borderBottomColor: theme.colors.border,
+          },
+        ]}>
           {isMobile && (
             <TouchableOpacity
               style={styles.menuButton}
               onPress={() => setMobileMenuOpen((v) => !v)}
             >
-              <Ionicons name="menu" size={24} color="#374151" />
+              <Ionicons name="menu" size={24} color={theme.colors.textPrimary} />
             </TouchableOpacity>
           )}
-          <Text style={styles.topBarTitle}>{sectionTitle}</Text>
+          <Text style={[styles.topBarTitle, { color: theme.colors.textPrimary }]}>
+            {sectionTitle}
+          </Text>
         </View>
 
         {/* Screen content */}
-        <View style={styles.content}>
+        <View style={[styles.content, { backgroundColor: theme.colors.background }]}>
           <ActiveScreen />
         </View>
       </View>
@@ -119,7 +141,6 @@ const styles = StyleSheet.create({
   shell: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#f3f4f6',
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -129,6 +150,7 @@ const styles = StyleSheet.create({
   sidebarWrapper: {
     flexShrink: 0,
     zIndex: 20,
+    alignSelf: 'stretch',
     ...Platform.select({
       web: { height: '100%' },
     }),
@@ -155,9 +177,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 14,
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
     gap: 12,
   },
   menuButton: {
@@ -166,7 +186,6 @@ const styles = StyleSheet.create({
   topBarTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
   },
   content: {
     flex: 1,

@@ -13,7 +13,16 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../../theme';
 import { confirmAsync } from '../../utils/confirm';
+
+function showError(title, message) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n\n${message}` : title);
+    return;
+  }
+  Alert.alert(title, message);
+}
 
 export default function CategoryEditor({
   visible,
@@ -23,6 +32,8 @@ export default function CategoryEditor({
   onDelete,
   onClose,
 }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -47,7 +58,7 @@ export default function CategoryEditor({
     try {
       await onSave({ name: name.trim(), menu_type: menuType, id: category?.id });
     } catch (e) {
-      Alert.alert('Error', e.message || 'Failed to save category.');
+      showError('Error', e.message || 'Failed to save category.');
     } finally {
       setSaving(false);
     }
@@ -64,7 +75,7 @@ export default function CategoryEditor({
     try {
       await onDelete(category.id);
     } catch (e) {
-      Alert.alert('Cannot Delete', e.message || 'Failed to delete category.');
+      showError('Cannot Delete', e.message || 'Failed to delete category.');
       setDeleting(false);
     }
   };
@@ -85,34 +96,50 @@ export default function CategoryEditor({
       >
         <Pressable style={styles.backdrop} onPress={onClose} />
 
-        <View style={styles.card}>
+        <View style={[styles.card, { backgroundColor: c.backgroundCard }]}>
           {/* Header */}
           <View style={styles.header}>
             <View>
-              <Text style={styles.title}>{isEdit ? 'Edit Category' : 'New Category'}</Text>
+              <Text style={[styles.title, { color: c.textPrimary }]}>
+                {isEdit ? 'Edit Category' : 'New Category'}
+              </Text>
               <View style={styles.typeBadge}>
                 <Ionicons
                   name={menuType === 'catering' ? 'restaurant-outline' : 'grid-outline'}
                   size={12}
-                  color="#6b7280"
+                  color={c.textSecondary}
                 />
-                <Text style={styles.typeBadgeText}>{menuTypeLabel}</Text>
+                <Text style={[styles.typeBadgeText, { color: c.textSecondary }]}>
+                  {menuTypeLabel}
+                </Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close">
-              <Ionicons name="close" size={20} color="#374151" />
+            <TouchableOpacity
+              style={[styles.closeBtn, { backgroundColor: c.backgroundSunken }]}
+              onPress={onClose}
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={20} color={c.textPrimary} />
             </TouchableOpacity>
           </View>
 
           {/* Name field */}
           <View style={styles.body}>
-            <Text style={styles.label}>Category Name *</Text>
+            <Text style={[styles.label, { color: c.textSecondary }]}>Category Name *</Text>
             <TextInput
-              style={[styles.input, nameError ? styles.inputError : null]}
+              style={[
+                styles.input,
+                {
+                  color: c.textPrimary,
+                  backgroundColor: c.backgroundSunken,
+                  borderColor: c.border,
+                },
+                nameError ? styles.inputError : null,
+              ]}
               value={name}
               onChangeText={(v) => { setName(v); setNameError(''); }}
               placeholder="e.g. Appetizers"
-              placeholderTextColor="#aaa"
+              placeholderTextColor={c.textDisabled}
               autoFocus
               returnKeyType="done"
               onSubmitEditing={handleSave}
@@ -124,7 +151,11 @@ export default function CategoryEditor({
           <View style={styles.footer}>
             {isEdit && (
               <TouchableOpacity
-                style={[styles.deleteBtn, deleting && styles.btnDisabled]}
+                style={[
+                  styles.deleteBtn,
+                  { backgroundColor: theme.mode === 'dark' ? 'rgba(239,68,68,0.15)' : '#fef2f2' },
+                  deleting && styles.btnDisabled,
+                ]}
                 onPress={handleDelete}
                 disabled={deleting || saving}
               >
@@ -134,18 +165,29 @@ export default function CategoryEditor({
                 }
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose} disabled={saving || deleting}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
+            <TouchableOpacity
+              style={[styles.cancelBtn, { borderColor: c.border }]}
+              onPress={onClose}
+              disabled={saving || deleting}
+            >
+              <Text style={[styles.cancelBtnText, { color: c.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.saveBtn, (saving || deleting) && styles.btnDisabled]}
+              style={[
+                styles.saveBtn,
+                { backgroundColor: c.brand },
+                (saving || deleting) && styles.btnDisabled,
+              ]}
               onPress={handleSave}
               disabled={saving || deleting}
             >
               {saving
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={styles.saveBtnText}>{isEdit ? 'Save' : 'Create'}</Text>
-              }
+                ? <ActivityIndicator size="small" color={c.brandText} />
+                : (
+                  <Text style={[styles.saveBtnText, { color: c.brandText }]}>
+                    {isEdit ? 'Save' : 'Create'}
+                  </Text>
+                )}
             </TouchableOpacity>
           </View>
         </View>
@@ -168,7 +210,6 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 420,
-    backgroundColor: '#fff',
     borderRadius: 20,
     overflow: 'hidden',
     ...Platform.select({
@@ -188,7 +229,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1a1a1a',
   },
   typeBadge: {
     flexDirection: 'row',
@@ -198,13 +238,11 @@ const styles = StyleSheet.create({
   },
   typeBadgeText: {
     fontSize: 12,
-    color: '#6b7280',
   },
   closeBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#f3f4f6',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -215,20 +253,16 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#555',
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#1a1a1a',
-    backgroundColor: '#fafafa',
   },
   inputError: {
     borderColor: '#ef4444',
@@ -250,7 +284,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 10,
-    backgroundColor: '#fef2f2',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -259,26 +292,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#e0e0e0',
     alignItems: 'center',
   },
   cancelBtnText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#555',
   },
   saveBtn: {
     flex: 2,
     paddingVertical: 12,
     borderRadius: 10,
-    backgroundColor: '#007AFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#fff',
   },
   btnDisabled: {
     opacity: 0.55,

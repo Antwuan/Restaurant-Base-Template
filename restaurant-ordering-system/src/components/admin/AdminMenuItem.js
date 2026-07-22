@@ -27,10 +27,20 @@ export default function AdminMenuItem({
   dragHandleListeners,
 }) {
   const { theme } = useTheme();
+  const c = theme.colors;
   const isUnavailable = !item.is_available;
 
   return (
-    <View style={[styles.card, isUnavailable && styles.cardUnavailable]}>
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: c.backgroundCard,
+          borderColor: c.border,
+        },
+        isUnavailable && styles.cardUnavailable,
+      ]}
+    >
       {/* Drag handle strip — web only, renders as a native div so pointer events work */}
       {Platform.OS === 'web' && dragHandleListeners && (
         <div
@@ -46,24 +56,41 @@ export default function AdminMenuItem({
             flexShrink: 0,
             borderRightWidth: 1,
             borderRightStyle: 'solid',
-            borderRightColor: '#f3f4f6',
+            borderRightColor: c.border,
           }}
         >
-          <Ionicons name="reorder-three-outline" size={18} color="#c4c9d4" />
+          <Ionicons name="reorder-three-outline" size={18} color={c.textDisabled} />
         </div>
       )}
 
       {/* Left: text info — mirrors customer MenuItem */}
       <View style={styles.info}>
-        <Text style={[styles.name, isUnavailable && styles.textMuted]} numberOfLines={2}>
+        <Text
+          style={[
+            styles.name,
+            { color: c.textPrimary },
+            isUnavailable && { color: c.textDisabled },
+          ]}
+          numberOfLines={2}
+        >
           {item.name}
         </Text>
-        <Text style={[styles.price, isUnavailable && styles.textMuted]}>
+        <Text
+          style={[
+            styles.price,
+            { color: c.textPrimary },
+            isUnavailable && { color: c.textDisabled },
+          ]}
+        >
           ${Number(item.price ?? 0).toFixed(2)}
         </Text>
         {item.description ? (
           <Text
-            style={[styles.description, { color: theme.colors.brand }, isUnavailable && styles.textMuted]}
+            style={[
+              styles.description,
+              { color: c.brand },
+              isUnavailable && { color: c.textDisabled },
+            ]}
             numberOfLines={3}
           >
             {item.description}
@@ -72,18 +99,39 @@ export default function AdminMenuItem({
 
         {/* Tappable availability badge */}
         <TouchableOpacity
-          style={[styles.availBadge, isUnavailable && styles.availBadgeHidden]}
+          style={[
+            styles.availBadge,
+            {
+              backgroundColor: isUnavailable
+                ? c.backgroundSunken
+                : theme.mode === 'dark'
+                  ? 'rgba(34,197,94,0.18)'
+                  : '#f0fdf4',
+            },
+          ]}
           onPress={() => onToggleAvailability(item)}
           disabled={toggling}
           activeOpacity={0.7}
           accessibilityLabel={item.is_available ? 'Mark as hidden' : 'Mark as visible'}
         >
           {toggling ? (
-            <ActivityIndicator size="small" color="#9ca3af" style={{ width: 14, height: 14 }} />
+            <ActivityIndicator size="small" color={c.textSecondary} style={{ width: 14, height: 14 }} />
           ) : (
-            <View style={[styles.availDot, isUnavailable ? styles.availDotOff : styles.availDotOn]} />
+            <View
+              style={[
+                styles.availDot,
+                { backgroundColor: isUnavailable ? c.textDisabled : '#22c55e' },
+              ]}
+            />
           )}
-          <Text style={[styles.availText, isUnavailable && styles.availTextHidden]}>
+          <Text
+            style={[
+              styles.availText,
+              {
+                color: isUnavailable ? c.textSecondary : '#16a34a',
+              },
+            ]}
+          >
             {item.is_available ? 'Visible' : 'Hidden'}
           </Text>
         </TouchableOpacity>
@@ -94,24 +142,34 @@ export default function AdminMenuItem({
         {item.image_url ? (
           <Image
             source={{ uri: item.image_url }}
-            style={[styles.image, isUnavailable && styles.imageUnavailable]}
+            style={[
+              styles.image,
+              { backgroundColor: c.backgroundSunken },
+              isUnavailable && styles.imageUnavailable,
+            ]}
             resizeMode="cover"
           />
         ) : (
-          <View style={[styles.image, styles.imagePlaceholder]}>
-            <Ionicons name="restaurant-outline" size={28} color="#cbd5e1" />
+          <View
+            style={[
+              styles.image,
+              styles.imagePlaceholder,
+              { backgroundColor: c.backgroundSunken },
+            ]}
+          >
+            <Ionicons name="restaurant-outline" size={28} color={c.textDisabled} />
           </View>
         )}
 
         {/* Edit button — same position and style as customer "+" button */}
         <TouchableOpacity
-          style={styles.editButton}
+          style={[styles.editButton, { backgroundColor: c.backgroundCard }]}
           onPress={() => onEdit(item)}
           accessibilityLabel={`Edit ${item.name}`}
           activeOpacity={0.8}
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
-          <Ionicons name="pencil" size={16} color="#1a1a1a" />
+          <Ionicons name="pencil" size={16} color={c.textPrimary} />
         </TouchableOpacity>
       </View>
     </View>
@@ -125,8 +183,6 @@ const styles = StyleSheet.create({
     minHeight: CARD_HEIGHT,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#ececec',
-    backgroundColor: '#fff',
     overflow: 'hidden',
     ...Platform.select({
       web: { boxShadow: '0 1px 4px rgba(0,0,0,0.06)' },
@@ -144,13 +200,11 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#111',
     lineHeight: 22,
   },
   price: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111',
     marginTop: 2,
   },
   description: {
@@ -159,41 +213,24 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontWeight: '500',
   },
-  textMuted: {
-    color: '#aaa',
-  },
   availBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     alignSelf: 'flex-start',
-    backgroundColor: '#f0fdf4',
     borderRadius: 4,
     paddingHorizontal: 7,
     paddingVertical: 3,
     marginTop: 10,
-  },
-  availBadgeHidden: {
-    backgroundColor: '#f3f4f6',
   },
   availDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
   },
-  availDotOn: {
-    backgroundColor: '#22c55e',
-  },
-  availDotOff: {
-    backgroundColor: '#9ca3af',
-  },
   availText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#16a34a',
-  },
-  availTextHidden: {
-    color: '#6b7280',
   },
   media: {
     width: MEDIA_WIDTH,
@@ -204,7 +241,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     minHeight: CARD_HEIGHT,
-    backgroundColor: '#f3f4f6',
   },
   imageUnavailable: {
     opacity: 0.5,
@@ -220,7 +256,6 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 12,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
     ...Platform.select({

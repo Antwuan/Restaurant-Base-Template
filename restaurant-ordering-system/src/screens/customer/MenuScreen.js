@@ -33,7 +33,7 @@ export default function MenuScreen() {
     loading,
     error,
     refetch,
-  } = useMenu(restaurant?.id);
+  } = useMenu(restaurant?.id, 'regular');
 
   const { slides, refetch: refetchCarousel } = useCarousel(restaurant?.id);
   const { addItem } = useCartContext();

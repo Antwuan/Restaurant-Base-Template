@@ -19,19 +19,22 @@ import { useTheme } from '../../theme';
  */
 export default function AdminEmptyState({ icon, title, subtitle, actionLabel, onAction }) {
   const { theme } = useTheme();
+  const c = theme.colors;
 
   return (
     <View style={styles.container}>
       {icon ? <Text style={styles.icon}>{icon}</Text> : null}
-      <Text style={styles.title}>{title}</Text>
-      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+      <Text style={[styles.title, { color: c.textPrimary }]}>{title}</Text>
+      {subtitle ? (
+        <Text style={[styles.subtitle, { color: c.textSecondary }]}>{subtitle}</Text>
+      ) : null}
       {actionLabel && onAction ? (
         <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: theme.colors.brand }]}
+          style={[styles.actionBtn, { backgroundColor: c.brand }]}
           onPress={onAction}
           activeOpacity={0.85}
         >
-          <Text style={styles.actionBtnText}>{actionLabel}</Text>
+          <Text style={[styles.actionBtnText, { color: c.brandText }]}>{actionLabel}</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -55,13 +58,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#374151',
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#9ca3af',
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 20,
@@ -72,7 +73,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   actionBtnText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 14,
   },

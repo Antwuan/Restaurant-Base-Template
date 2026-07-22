@@ -12,6 +12,7 @@ import {
   Switch,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useTheme } from '../../theme';
 
 const DEFAULT_FORM = {
   media_type: 'image',
@@ -27,6 +28,8 @@ export default function CarouselSlideEditor({
   onSave,
   onCancel,
 }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
   const [form, setForm] = useState(DEFAULT_FORM);
   const [localMediaUri, setLocalMediaUri] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -98,30 +101,35 @@ export default function CarouselSlideEditor({
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: c.backgroundCard }]}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.title}>
+      <Text style={[styles.title, { color: c.textPrimary }]}>
         {slide?.id ? 'Edit Promo Slide' : 'New Promo Slide'}
       </Text>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Media type</Text>
+        <Text style={[styles.label, { color: c.textSecondary }]}>Media type</Text>
         <View style={styles.typeRow}>
           {['image', 'video'].map((type) => (
             <TouchableOpacity
               key={type}
               style={[
                 styles.typeChip,
-                form.media_type === type && styles.typeChipSelected,
+                { borderColor: c.border },
+                form.media_type === type && {
+                  backgroundColor: c.brand,
+                  borderColor: c.brand,
+                },
               ]}
               onPress={() => setField('media_type', type)}
             >
               <Text
                 style={[
                   styles.typeChipText,
-                  form.media_type === type && styles.typeChipTextSelected,
+                  { color: c.textSecondary },
+                  form.media_type === type && { color: c.brandText, fontWeight: '600' },
                 ]}
               >
                 {type === 'image' ? 'Image' : 'Video'}
@@ -132,7 +140,7 @@ export default function CarouselSlideEditor({
       </View>
 
       <TouchableOpacity
-        style={styles.mediaPicker}
+        style={[styles.mediaPicker, { borderColor: c.border }]}
         onPress={handlePickMedia}
         activeOpacity={0.8}
       >
@@ -144,9 +152,9 @@ export default function CarouselSlideEditor({
             <Text style={styles.videoText}>Video selected</Text>
           </View>
         ) : (
-          <View style={styles.mediaPlaceholder}>
+          <View style={[styles.mediaPlaceholder, { backgroundColor: c.backgroundSunken }]}>
             <Text style={styles.mediaPlaceholderIcon}>📷</Text>
-            <Text style={styles.mediaPlaceholderText}>
+            <Text style={[styles.mediaPlaceholderText, { color: c.textDisabled }]}>
               Tap to upload {form.media_type}
             </Text>
           </View>
@@ -154,81 +162,124 @@ export default function CarouselSlideEditor({
       </TouchableOpacity>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Or media URL</Text>
+        <Text style={[styles.label, { color: c.textSecondary }]}>Or media URL</Text>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              color: c.textPrimary,
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
           value={form.media_url}
           onChangeText={(v) => setField('media_url', v)}
           placeholder="https://..."
-          placeholderTextColor="#AAA"
+          placeholderTextColor={c.textDisabled}
           autoCapitalize="none"
         />
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Title (caption)</Text>
+        <Text style={[styles.label, { color: c.textSecondary }]}>Title (caption)</Text>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              color: c.textPrimary,
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
           value={form.title}
           onChangeText={(v) => setField('title', v)}
           placeholder="Optional caption"
-          placeholderTextColor="#AAA"
+          placeholderTextColor={c.textDisabled}
         />
       </View>
 
       {form.media_type === 'image' ? (
         <View style={styles.field}>
-          <Text style={styles.label}>Alt text</Text>
+          <Text style={[styles.label, { color: c.textSecondary }]}>Alt text</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                color: c.textPrimary,
+                backgroundColor: c.backgroundSunken,
+                borderColor: c.border,
+              },
+            ]}
             value={form.alt_text}
             onChangeText={(v) => setField('alt_text', v)}
             placeholder="Accessibility description"
-            placeholderTextColor="#AAA"
+            placeholderTextColor={c.textDisabled}
           />
         </View>
       ) : null}
 
       <View style={styles.field}>
-        <Text style={styles.label}>Link URL (optional)</Text>
+        <Text style={[styles.label, { color: c.textSecondary }]}>Link URL (optional)</Text>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              color: c.textPrimary,
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
           value={form.link_url}
           onChangeText={(v) => setField('link_url', v)}
           placeholder="https://..."
-          placeholderTextColor="#AAA"
+          placeholderTextColor={c.textDisabled}
           autoCapitalize="none"
         />
       </View>
 
-      <View style={styles.toggleRow}>
+      <View
+        style={[
+          styles.toggleRow,
+          {
+            backgroundColor: c.backgroundSunken,
+            borderColor: c.border,
+          },
+        ]}
+      >
         <View>
-          <Text style={styles.label}>Active</Text>
-          <Text style={styles.toggleSubtext}>
+          <Text style={[styles.label, { color: c.textSecondary, marginBottom: 0 }]}>Active</Text>
+          <Text style={[styles.toggleSubtext, { color: c.textDisabled }]}>
             {form.is_active ? 'Visible on menu' : 'Hidden from menu'}
           </Text>
         </View>
         <Switch
           value={form.is_active}
           onValueChange={(v) => setField('is_active', v)}
-          trackColor={{ false: '#DDD', true: '#34C759' }}
+          trackColor={{ false: c.border, true: '#34C759' }}
           thumbColor="#fff"
         />
       </View>
 
       <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
+        <TouchableOpacity
+          style={[styles.cancelButton, { borderColor: c.border }]}
+          onPress={onCancel}
+        >
+          <Text style={[styles.cancelButtonText, { color: c.textSecondary }]}>Cancel</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.saveButton, saving && styles.buttonDisabled]}
+          style={[
+            styles.saveButton,
+            { backgroundColor: c.brand },
+            saving && styles.buttonDisabled,
+          ]}
           onPress={handleSave}
           disabled={saving}
         >
           {saving ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={c.brandText} size="small" />
           ) : (
-            <Text style={styles.saveButtonText}>Save Slide</Text>
+            <Text style={[styles.saveButtonText, { color: c.brandText }]}>Save Slide</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -239,7 +290,6 @@ export default function CarouselSlideEditor({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   content: {
     padding: 20,
@@ -248,7 +298,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#1A1A1A',
     marginBottom: 20,
   },
   field: {
@@ -257,7 +306,6 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#555',
     marginBottom: 6,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -271,20 +319,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#E0E0E0',
-  },
-  typeChipSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
   },
   typeChipText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#555',
-  },
-  typeChipTextSelected: {
-    color: '#fff',
-    fontWeight: '600',
   },
   mediaPicker: {
     width: '100%',
@@ -293,7 +331,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 16,
     borderWidth: 2,
-    borderColor: '#E0E0E0',
     borderStyle: 'dashed',
   },
   mediaPreview: {
@@ -304,7 +341,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F8F8F8',
   },
   mediaPlaceholderIcon: {
     fontSize: 32,
@@ -312,7 +348,6 @@ const styles = StyleSheet.create({
   },
   mediaPlaceholderText: {
     fontSize: 14,
-    color: '#AAA',
     fontWeight: '500',
   },
   videoPlaceholder: {
@@ -331,28 +366,22 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#1A1A1A',
-    backgroundColor: '#FAFAFA',
   },
   toggleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#FAFAFA',
     padding: 14,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
     marginBottom: 16,
   },
   toggleSubtext: {
     fontSize: 12,
-    color: '#AAA',
     marginTop: 2,
   },
   buttonRow: {
@@ -365,26 +394,22 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#DDD',
     alignItems: 'center',
   },
   cancelButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#555',
   },
   saveButton: {
     flex: 2,
     paddingVertical: 13,
     borderRadius: 10,
-    backgroundColor: '#007AFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveButtonText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#fff',
   },
   buttonDisabled: {
     opacity: 0.6,

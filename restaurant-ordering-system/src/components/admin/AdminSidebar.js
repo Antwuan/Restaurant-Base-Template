@@ -11,10 +11,14 @@ import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 
 const NAV_ITEMS = [
-  { key: 'Orders',   label: 'Orders',    icon: 'receipt',   iconOutline: 'receipt-outline'   },
-  { key: 'Menu',     label: 'Menu',      icon: 'restaurant', iconOutline: 'restaurant-outline' },
-  { key: 'Promo',    label: 'Promo',     icon: 'images',    iconOutline: 'images-outline'    },
-  { key: 'Settings', label: 'Settings',  icon: 'settings',  iconOutline: 'settings-outline'  },
+  { key: 'Orders',       label: 'Orders',       icon: 'receipt',          iconOutline: 'receipt-outline'          },
+  { key: 'Analytics',    label: 'Analytics',    icon: 'bar-chart',        iconOutline: 'bar-chart-outline'        },
+  { key: 'Menu',         label: 'Menu',         icon: 'restaurant',       iconOutline: 'restaurant-outline'       },
+  { key: 'Promo',        label: 'Promo',        icon: 'images',           iconOutline: 'images-outline'           },
+  { key: 'Rewards',      label: 'Rewards',      icon: 'gift',             iconOutline: 'gift-outline'             },
+  { key: 'Applications', label: 'Applications', icon: 'document-text',    iconOutline: 'document-text-outline'    },
+  { key: 'Marketing',    label: 'Marketing',    icon: 'megaphone',        iconOutline: 'megaphone-outline'        },
+  { key: 'Settings',     label: 'Settings',     icon: 'settings',         iconOutline: 'settings-outline'         },
 ];
 
 export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
@@ -22,7 +26,14 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
   const { restaurant } = useRestaurantContext();
 
   return (
-    <View style={[styles.sidebar, collapsed && styles.sidebarCollapsed]}>
+    <View style={[
+      styles.sidebar,
+      collapsed && styles.sidebarCollapsed,
+      {
+        backgroundColor: theme.colors.backgroundCard,
+        borderRightColor: theme.colors.border,
+      },
+    ]}>
       {/* Brand header */}
       <View style={[styles.brandHeader, { borderBottomColor: theme.colors.border }]}>
         <View style={[styles.brandIcon, { backgroundColor: theme.colors.brand }]}>
@@ -30,10 +41,10 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
         </View>
         {!collapsed && (
           <View style={styles.brandText}>
-            <Text style={styles.brandName} numberOfLines={1}>
+            <Text style={[styles.brandName, { color: theme.colors.textPrimary }]} numberOfLines={1}>
               {restaurant?.name ?? 'Admin'}
             </Text>
-            <Text style={styles.brandSub}>Dashboard</Text>
+            <Text style={[styles.brandSub, { color: theme.colors.textSecondary }]}>Dashboard</Text>
           </View>
         )}
       </View>
@@ -55,14 +66,16 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
               <Ionicons
                 name={isActive ? item.icon : item.iconOutline}
                 size={20}
-                color={isActive ? theme.colors.brand : '#6b7280'}
+                color={isActive ? theme.colors.brand : theme.colors.textSecondary}
                 style={styles.navIcon}
               />
               {!collapsed && (
                 <Text
                   style={[
                     styles.navLabel,
-                    isActive ? { color: theme.colors.brand, fontWeight: '600' } : { color: '#374151' },
+                    isActive
+                      ? { color: theme.colors.brand, fontWeight: '600' }
+                      : { color: theme.colors.textPrimary },
                   ]}
                 >
                   {item.label}
@@ -77,16 +90,16 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
       </View>
 
       {/* Footer */}
-      <View style={styles.footer}>
-        {!collapsed && (
-          <TouchableOpacity
-            style={styles.signOutRow}
-            onPress={() => onNavigate('SignOut')}
-          >
-            <Ionicons name="log-out-outline" size={18} color="#9ca3af" style={styles.navIcon} />
-            <Text style={styles.signOutText}>Sign out</Text>
-          </TouchableOpacity>
-        )}
+      <View style={[styles.footer, { borderTopColor: theme.colors.border }]}>
+        <TouchableOpacity
+          style={[styles.signOutRow, collapsed && styles.signOutRowCollapsed]}
+          onPress={() => onNavigate('SignOut')}
+        >
+          <Ionicons name="log-out-outline" size={18} color={theme.colors.textSecondary} style={styles.navIcon} />
+          {!collapsed && (
+            <Text style={[styles.signOutText, { color: theme.colors.textSecondary }]}>Sign out</Text>
+          )}
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -98,9 +111,7 @@ const SIDEBAR_COLLAPSED_WIDTH = 60;
 const styles = StyleSheet.create({
   sidebar: {
     width: SIDEBAR_WIDTH,
-    backgroundColor: '#fff',
     borderRightWidth: 1,
-    borderRightColor: '#e5e7eb',
     flexDirection: 'column',
     ...Platform.select({
       web: { userSelect: 'none' },
@@ -115,7 +126,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 18,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
     gap: 10,
   },
   brandIcon: {
@@ -133,11 +143,9 @@ const styles = StyleSheet.create({
   brandName: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
   },
   brandSub: {
     fontSize: 11,
-    color: '#9ca3af',
     marginTop: 1,
   },
   navList: {
@@ -171,7 +179,6 @@ const styles = StyleSheet.create({
   footer: {
     padding: 12,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
   },
   signOutRow: {
     flexDirection: 'row',
@@ -181,9 +188,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 10,
   },
+  signOutRowCollapsed: {
+    justifyContent: 'center',
+    paddingHorizontal: 0,
+  },
   signOutText: {
     fontSize: 13,
-    color: '#9ca3af',
   },
 });
 

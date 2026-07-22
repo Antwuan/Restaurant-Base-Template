@@ -20,12 +20,14 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../../theme';
 import { confirmAsync } from '../../utils/confirm';
 
 const DEFAULT_FORM = {
   name: '',
   description: '',
   price: '',
+  cost: '',
   category_id: '',
   image_url: '',
   is_available: true,
@@ -39,6 +41,8 @@ export default function MenuItemEditor({
   onDelete,
   onClose,
 }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
   const [form, setForm] = useState(DEFAULT_FORM);
   const [localImageUri, setLocalImageUri] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -54,6 +58,7 @@ export default function MenuItemEditor({
           name: item.name || '',
           description: item.description || '',
           price: item.price != null ? String(item.price) : '',
+          cost: item.cost != null ? String(item.cost) : '',
           category_id: item.category_id || '',
           image_url: item.image_url || '',
           is_available: item.is_available ?? true,
@@ -81,6 +86,9 @@ export default function MenuItemEditor({
       newErrors.price = 'Price is required';
     } else if (isNaN(parseFloat(form.price)) || parseFloat(form.price) < 0) {
       newErrors.price = 'Enter a valid price';
+    }
+    if (form.cost.trim() && (isNaN(parseFloat(form.cost)) || parseFloat(form.cost) < 0)) {
+      newErrors.cost = 'Enter a valid cost';
     }
     if (!form.category_id) newErrors.category_id = 'Select a category';
     setErrors(newErrors);
@@ -111,6 +119,7 @@ export default function MenuItemEditor({
       await onSave({
         ...form,
         price: parseFloat(form.price),
+        cost: form.cost.trim() !== '' ? parseFloat(form.cost) : null,
         localImageUri,
       });
     } catch (e) {
@@ -152,10 +161,10 @@ export default function MenuItemEditor({
       >
         <Pressable style={styles.backdrop} onPress={onClose} />
 
-        <View style={styles.card}>
+        <View style={[styles.card, { backgroundColor: c.backgroundCard }]}>
           {/* Hero image — tap to pick */}
           <TouchableOpacity
-            style={styles.heroZone}
+            style={[styles.heroZone, { backgroundColor: c.backgroundSunken }]}
             onPress={handlePickImage}
             activeOpacity={0.88}
             accessibilityLabel="Tap to change photo"
@@ -164,8 +173,10 @@ export default function MenuItemEditor({
               <Image source={{ uri: imageSource }} style={styles.heroImage} resizeMode="cover" />
             ) : (
               <View style={styles.heroPlaceholder}>
-                <Ionicons name="camera-outline" size={36} color="#9ca3af" />
-                <Text style={styles.heroPlaceholderText}>Tap to add photo</Text>
+                <Ionicons name="camera-outline" size={36} color={c.textSecondary} />
+                <Text style={[styles.heroPlaceholderText, { color: c.textSecondary }]}>
+                  Tap to add photo
+                </Text>
               </View>
             )}
             {/* Edit overlay */}
@@ -176,8 +187,12 @@ export default function MenuItemEditor({
           </TouchableOpacity>
 
           {/* Close button */}
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close">
-            <Ionicons name="close" size={20} color="#1a1a1a" />
+          <TouchableOpacity
+            style={[styles.closeBtn, { backgroundColor: c.backgroundCard }]}
+            onPress={onClose}
+            accessibilityLabel="Close"
+          >
+            <Ionicons name="close" size={20} color={c.textPrimary} />
           </TouchableOpacity>
 
           {/* Scrollable form body */}
@@ -188,67 +203,135 @@ export default function MenuItemEditor({
             showsVerticalScrollIndicator={false}
           >
             {/* Title */}
-            <Text style={styles.screenTitle}>{isEdit ? 'Edit Item' : 'New Item'}</Text>
+            <Text style={[styles.screenTitle, { color: c.textPrimary }]}>
+              {isEdit ? 'Edit Item' : 'New Item'}
+            </Text>
 
             {/* Name */}
             <View style={styles.field}>
-              <Text style={styles.label}>Item Name *</Text>
+              <Text style={[styles.label, { color: c.textSecondary }]}>Item Name *</Text>
               <TextInput
-                style={[styles.input, errors.name && styles.inputError]}
+                style={[
+                  styles.input,
+                  {
+                    color: c.textPrimary,
+                    backgroundColor: c.backgroundSunken,
+                    borderColor: c.border,
+                  },
+                  errors.name && styles.inputError,
+                ]}
                 value={form.name}
                 onChangeText={(v) => setField('name', v)}
                 placeholder="e.g. Margherita Pizza"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={c.textDisabled}
               />
               {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
             </View>
 
             {/* Description */}
             <View style={styles.field}>
-              <Text style={styles.label}>Description</Text>
+              <Text style={[styles.label, { color: c.textSecondary }]}>Description</Text>
               <TextInput
-                style={[styles.input, styles.textArea]}
+                style={[
+                  styles.input,
+                  styles.textArea,
+                  {
+                    color: c.textPrimary,
+                    backgroundColor: c.backgroundSunken,
+                    borderColor: c.border,
+                  },
+                ]}
                 value={form.description}
                 onChangeText={(v) => setField('description', v)}
                 placeholder="Brief description of the item..."
-                placeholderTextColor="#aaa"
+                placeholderTextColor={c.textDisabled}
                 multiline
                 numberOfLines={3}
                 textAlignVertical="top"
               />
             </View>
 
-            {/* Price */}
-            <View style={styles.field}>
-              <Text style={styles.label}>Price ($) *</Text>
-              <TextInput
-                style={[styles.input, styles.priceInput, errors.price && styles.inputError]}
-                value={form.price}
-                onChangeText={(v) => setField('price', v)}
-                placeholder="0.00"
-                placeholderTextColor="#aaa"
-                keyboardType="decimal-pad"
-              />
-              {errors.price ? <Text style={styles.errorText}>{errors.price}</Text> : null}
+            {/* Price + Cost row */}
+            <View style={styles.priceRow}>
+              <View style={[styles.field, styles.priceCol]}>
+                <Text style={[styles.label, { color: c.textSecondary }]}>Price ($) *</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.priceInput,
+                    {
+                      color: c.textPrimary,
+                      backgroundColor: c.backgroundSunken,
+                      borderColor: c.border,
+                    },
+                    errors.price && styles.inputError,
+                  ]}
+                  value={form.price}
+                  onChangeText={(v) => setField('price', v)}
+                  placeholder="0.00"
+                  placeholderTextColor={c.textDisabled}
+                  keyboardType="decimal-pad"
+                />
+                {errors.price ? <Text style={styles.errorText}>{errors.price}</Text> : null}
+              </View>
+
+              <View style={[styles.field, styles.priceCol]}>
+                <Text style={[styles.label, { color: c.textSecondary }]}>Cost ($)</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.priceInput,
+                    {
+                      color: c.textPrimary,
+                      backgroundColor: c.backgroundSunken,
+                      borderColor: c.border,
+                    },
+                    errors.cost && styles.inputError,
+                  ]}
+                  value={form.cost}
+                  onChangeText={(v) => setField('cost', v)}
+                  placeholder="0.00"
+                  placeholderTextColor={c.textDisabled}
+                  keyboardType="decimal-pad"
+                />
+                {errors.cost ? (
+                  <Text style={styles.errorText}>{errors.cost}</Text>
+                ) : (
+                  <Text style={[styles.fieldHint, { color: c.textDisabled }]}>
+                    Used to calculate profit margin in Analytics
+                  </Text>
+                )}
+              </View>
             </View>
 
             {/* Category */}
             <View style={styles.field}>
-              <Text style={styles.label}>Category *</Text>
+              <Text style={[styles.label, { color: c.textSecondary }]}>Category *</Text>
               <View style={[styles.categoryGrid, errors.category_id && styles.inputError]}>
                 {categories.map((cat) => (
                   <TouchableOpacity
                     key={cat.id}
                     style={[
                       styles.categoryChip,
-                      form.category_id === cat.id && styles.categoryChipSelected,
+                      {
+                        borderColor: c.border,
+                        backgroundColor: c.backgroundCard,
+                      },
+                      form.category_id === cat.id && {
+                        backgroundColor: c.brand,
+                        borderColor: c.brand,
+                      },
                     ]}
                     onPress={() => setField('category_id', cat.id)}
                   >
                     <Text
                       style={[
                         styles.categoryChipText,
-                        form.category_id === cat.id && styles.categoryChipTextSelected,
+                        { color: c.textSecondary },
+                        form.category_id === cat.id && {
+                          color: c.brandText,
+                          fontWeight: '600',
+                        },
                       ]}
                     >
                       {cat.name}
@@ -261,17 +344,25 @@ export default function MenuItemEditor({
 
             {/* Availability */}
             <View style={styles.field}>
-              <View style={styles.toggleRow}>
+              <View
+                style={[
+                  styles.toggleRow,
+                  {
+                    backgroundColor: c.backgroundSunken,
+                    borderColor: c.border,
+                  },
+                ]}
+              >
                 <View>
-                  <Text style={styles.label}>Available</Text>
-                  <Text style={styles.toggleSubtext}>
+                  <Text style={[styles.label, { color: c.textSecondary }]}>Available</Text>
+                  <Text style={[styles.toggleSubtext, { color: c.textDisabled }]}>
                     {form.is_available ? 'Showing on menu' : 'Hidden from menu'}
                   </Text>
                 </View>
                 <Switch
                   value={form.is_available}
                   onValueChange={(v) => setField('is_available', v)}
-                  trackColor={{ false: '#d1d5db', true: '#34c759' }}
+                  trackColor={{ false: c.border, true: '#34c759' }}
                   thumbColor="#fff"
                 />
               </View>
@@ -293,23 +384,30 @@ export default function MenuItemEditor({
           </ScrollView>
 
           {/* Footer — Cancel / Save */}
-          <View style={styles.footer}>
+          <View style={[styles.footer, { borderTopColor: c.border }]}>
             <TouchableOpacity
-              style={styles.cancelBtn}
+              style={[styles.cancelBtn, { borderColor: c.border }]}
               onPress={onClose}
               disabled={saving || deleting}
             >
-              <Text style={styles.cancelBtnText}>Cancel</Text>
+              <Text style={[styles.cancelBtnText, { color: c.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.saveBtn, (saving || deleting) && styles.btnDisabled]}
+              style={[
+                styles.saveBtn,
+                { backgroundColor: c.brand },
+                (saving || deleting) && styles.btnDisabled,
+              ]}
               onPress={handleSave}
               disabled={saving || deleting}
             >
               {saving
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={styles.saveBtnText}>{isEdit ? 'Save Changes' : 'Add Item'}</Text>
-              }
+                ? <ActivityIndicator color={c.brandText} size="small" />
+                : (
+                  <Text style={[styles.saveBtnText, { color: c.brandText }]}>
+                    {isEdit ? 'Save Changes' : 'Add Item'}
+                  </Text>
+                )}
             </TouchableOpacity>
           </View>
         </View>
@@ -334,7 +432,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 680,
     maxHeight: '100%',
-    backgroundColor: '#fff',
     borderRadius: 20,
     overflow: 'hidden',
     ...Platform.select({
@@ -346,7 +443,6 @@ const styles = StyleSheet.create({
   heroZone: {
     width: '100%',
     height: 200,
-    backgroundColor: '#f3f4f6',
   },
   heroImage: {
     width: '100%',
@@ -360,7 +456,6 @@ const styles = StyleSheet.create({
   },
   heroPlaceholderText: {
     fontSize: 14,
-    color: '#9ca3af',
     fontWeight: '500',
   },
   heroOverlay: {
@@ -387,7 +482,6 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
     ...Platform.select({
@@ -406,7 +500,6 @@ const styles = StyleSheet.create({
   screenTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#1a1a1a',
     marginBottom: 18,
   },
   field: {
@@ -415,20 +508,16 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#6b7280',
     marginBottom: 6,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#1a1a1a',
-    backgroundColor: '#fafafa',
   },
   inputError: {
     borderColor: '#ef4444',
@@ -438,7 +527,18 @@ const styles = StyleSheet.create({
     paddingTop: 11,
   },
   priceInput: {
-    width: 140,
+    width: '100%',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  priceCol: {
+    flex: 1,
+  },
+  fieldHint: {
+    fontSize: 11,
+    marginTop: 4,
   },
   errorText: {
     color: '#ef4444',
@@ -457,35 +557,21 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
-  },
-  categoryChipSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
   },
   categoryChipText: {
     fontSize: 13,
     fontWeight: '500',
-    color: '#6b7280',
-  },
-  categoryChipTextSelected: {
-    color: '#fff',
-    fontWeight: '600',
   },
   toggleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#fafafa',
     padding: 14,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
   },
   toggleSubtext: {
     fontSize: 12,
-    color: '#9ca3af',
     marginTop: 2,
   },
   deleteBtnFull: {
@@ -511,33 +597,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
   },
   cancelBtn: {
     flex: 1,
     paddingVertical: 13,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
     alignItems: 'center',
   },
   cancelBtnText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#6b7280',
   },
   saveBtn: {
     flex: 2,
     paddingVertical: 13,
     borderRadius: 10,
-    backgroundColor: '#007AFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#fff',
   },
   btnDisabled: {
     opacity: 0.55,
