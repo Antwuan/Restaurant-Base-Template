@@ -26,6 +26,7 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useTheme } from '../../theme';
 import AdminMenuItem from './AdminMenuItem';
 
 const DESKTOP_BREAKPOINT = 768;
@@ -61,6 +62,8 @@ export default function AdminCategorySection({
   onItemsReordered,
   onEditCategory,
 }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BREAKPOINT;
 
@@ -84,23 +87,33 @@ export default function AdminCategorySection({
     <View style={styles.container}>
       {/* Category header — mirrors CategorySection's headerText style */}
       <View style={styles.headerRow}>
-        <Text style={styles.headerText}>{category.name}</Text>
+        <Text style={[styles.headerText, { color: c.textPrimary }]}>{category.name}</Text>
         {onEditCategory && (
           <TouchableOpacity
-            style={styles.editCatBtn}
+            style={[styles.editCatBtn, { backgroundColor: c.backgroundSunken }]}
             onPress={() => onEditCategory(category)}
             accessibilityLabel={`Edit ${category.name} category`}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
-            <Ionicons name="pencil-outline" size={14} color="#9ca3af" />
+            <Ionicons name="pencil-outline" size={14} color={c.textSecondary} />
           </TouchableOpacity>
         )}
       </View>
 
       {/* Items grid */}
       {items.length === 0 ? (
-        <View style={styles.emptyCategory}>
-          <Text style={styles.emptyCategoryText}>No items in this category yet.</Text>
+        <View
+          style={[
+            styles.emptyCategory,
+            {
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
+        >
+          <Text style={[styles.emptyCategoryText, { color: c.textSecondary }]}>
+            No items in this category yet.
+          </Text>
         </View>
       ) : Platform.OS === 'web' ? (
         <DndContext
@@ -168,27 +181,22 @@ const styles = StyleSheet.create({
   headerText: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#1a1a1a',
     flex: 1,
   },
   editCatBtn: {
     padding: 4,
     borderRadius: 6,
-    backgroundColor: '#f3f4f6',
   },
   emptyCategory: {
     paddingVertical: 24,
     paddingHorizontal: 16,
-    backgroundColor: '#f9fafb',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
     borderStyle: 'dashed',
     alignItems: 'center',
   },
   emptyCategoryText: {
     fontSize: 13,
-    color: '#9ca3af',
   },
   // Native fallback grid
   grid: {

@@ -162,11 +162,15 @@ export const generateTheme = ({
   secondaryColor = DEFAULT_SECONDARY,
   restaurantName = 'Restaurant',
   logoUrl = null,
+  mode = 'light',
 }) => {
   const primary = generateScale(primaryColor);
   const secondary = generateScale(secondaryColor);
+  const isDark = mode === 'dark';
 
   return {
+    mode: isDark ? 'dark' : 'light',
+
     // ── Brand identity
     restaurant: {
       name: restaurantName,
@@ -182,29 +186,29 @@ export const generateTheme = ({
 
       // ── Convenience aliases (most commonly used in components)
       brand: primaryColor,
-      brandLight: primary[100],
+      brandLight: isDark ? hexToRgba(primaryColor, 0.22) : primary[100],
       brandDark: primary[700],
       brandText: getContrastText(primaryColor),
 
       accent: secondaryColor,
-      accentLight: secondary[100],
+      accentLight: isDark ? hexToRgba(secondaryColor, 0.22) : secondary[100],
       accentDark: secondary[700],
       accentText: getContrastText(secondaryColor),
 
       // ── Backgrounds
-      background:       neutral[50],
-      backgroundCard:   neutral[0],
-      backgroundSunken: neutral[100],
+      background:       isDark ? '#0f1115' : neutral[50],
+      backgroundCard:   isDark ? '#1a1d24' : neutral[0],
+      backgroundSunken: isDark ? '#12151a' : neutral[100],
 
       // ── Borders
-      border:       neutral[200],
-      borderStrong: neutral[300],
+      border:       isDark ? '#2a2f3a' : neutral[200],
+      borderStrong: isDark ? '#3a4150' : neutral[300],
 
       // ── Text
-      textPrimary:   neutral[900],
-      textSecondary: neutral[500],
-      textDisabled:  neutral[400],
-      textInverse:   neutral[0],
+      textPrimary:   isDark ? '#f3f4f6' : neutral[900],
+      textSecondary: isDark ? '#9ca3af' : neutral[500],
+      textDisabled:  isDark ? '#6b7280' : neutral[400],
+      textInverse:   isDark ? neutral[900] : neutral[0],
 
       // ── Semantic
       ...semantic,
@@ -267,10 +271,10 @@ export const generateTheme = ({
 
     // ── Shadows
     shadows: {
-      sm:  '0 1px 3px rgba(0,0,0,0.08)',
-      md:  '0 4px 12px rgba(0,0,0,0.10)',
-      lg:  '0 8px 24px rgba(0,0,0,0.12)',
-      xl:  '0 16px 48px rgba(0,0,0,0.16)',
+      sm:  isDark ? '0 1px 3px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.08)',
+      md:  isDark ? '0 4px 12px rgba(0,0,0,0.45)' : '0 4px 12px rgba(0,0,0,0.10)',
+      lg:  isDark ? '0 8px 24px rgba(0,0,0,0.5)' : '0 8px 24px rgba(0,0,0,0.12)',
+      xl:  isDark ? '0 16px 48px rgba(0,0,0,0.55)' : '0 16px 48px rgba(0,0,0,0.16)',
     },
 
     // ── Helper functions (available wherever theme is used)

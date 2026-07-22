@@ -1,4 +1,11 @@
 import { supabase } from '../config/supabase';
+import { friendlySupabaseError } from '../utils/supabaseErrors';
+
+function throwMenuError(error, context) {
+  const err = new Error(friendlySupabaseError(error, context));
+  err.cause = error;
+  throw err;
+}
 
 const _menuCache = {};
 
@@ -19,34 +26,47 @@ export async function getMenuCategories(restaurantId, menuType = null) {
     .eq('restaurant_id', restaurantId)
     .order('display_order', { ascending: true });
 
-  if (menuType) {
+  if (menuType === 'regular') {
+    // Treat NULL menu_type as regular (rows added before the column existed,
+    // or inserted manually in the Supabase table without setting menu_type).
+    query = query.or('menu_type.eq.regular,menu_type.is.null');
+  } else if (menuType) {
     query = query.eq('menu_type', menuType);
   }
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throwMenuError(error, 'load categories');
   return data;
 }
 
 export async function createCategory({ restaurant_id, name, menu_type = 'regular', display_order }) {
-  const { data: existing } = await supabase
+  const resolvedType = menu_type === 'catering' ? 'catering' : 'regular';
+
+  const { data: existing, error: existingError } = await supabase
     .from('menu_categories')
     .select('display_order')
     .eq('restaurant_id', restaurant_id)
-    .eq('menu_type', menu_type)
+    .eq('menu_type', resolvedType)
     .order('display_order', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
+
+  if (existingError) throwMenuError(existingError, 'load categories');
 
   const nextOrder = display_order ?? ((existing?.display_order ?? -1) + 1);
 
   const { data, error } = await supabase
     .from('menu_categories')
-    .insert({ restaurant_id, name, menu_type, display_order: nextOrder })
+    .insert({
+      restaurant_id,
+      name,
+      menu_type: resolvedType,
+      display_order: nextOrder,
+    })
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) throwMenuError(error, 'create category');
   clearMenuCache(restaurant_id);
   return data;
 }

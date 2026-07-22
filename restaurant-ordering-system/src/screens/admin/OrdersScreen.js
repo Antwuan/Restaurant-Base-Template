@@ -1,6 +1,3 @@
-// Main admin orders dashboard. Uses `useOrders` for realtime updates, integrates
-// with `RestaurantContext` and `restaurantService` to control accepting orders,
-// and renders per-order UI via the shared admin `OrderCard` component.
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -10,35 +7,47 @@ import {
   TouchableOpacity,
   Switch,
   RefreshControl,
-  Alert,
+  Dimensions,
 } from 'react-native';
+
+const COLUMNS = 5;
+const LIST_PADDING = 10;
+const COLUMN_GAP = 8;
+
+function getCardWidth() {
+  const { width } = Dimensions.get('window');
+  return (width - LIST_PADDING * 2 - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS;
+}
 import { useOrders } from '../../hooks/useOrders';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useTheme } from '../../theme';
 import * as restaurantService from '../../services/restaurantService';
 import OrderCard from '../../components/admin/OrderCard';
 import AdminEmptyState from '../../components/admin/AdminEmptyState';
 
-const STATUS_TABS = ['pending', 'preparing', 'ready', 'completed'];
+const STATUS_TABS = ['pending', 'preparing', 'completed'];
 
 export default function OrdersScreen() {
-  const { restaurant, refreshRestaurant } = useRestaurantContext();
+  const { theme } = useTheme();
+  const c = theme.colors;
+  const { restaurant, patchRestaurant } = useRestaurantContext();
   const [activeTab, setActiveTab] = useState('pending');
+  const [cardWidth, setCardWidth] = useState(getCardWidth);
   const [acceptingOrders, setAcceptingOrders] = useState(
     restaurant?.is_accepting_orders ?? true,
   );
   const [toggling, setToggling] = useState(false);
+  const [toggleError, setToggleError] = useState(null);
   const flatListRef = useRef(null);
 
-  const { orders, loading, refreshOrders, updateStatus } = useOrders(
+  const { orders, loading, refetch: refreshOrders, updateOrderStatus: updateStatus } = useOrders(
     restaurant?.id,
   );
 
-  // Keep local acceptingOrders state in sync when restaurant changes.
   useEffect(() => {
     setAcceptingOrders(restaurant?.is_accepting_orders ?? true);
   }, [restaurant?.is_accepting_orders]);
 
-  // Scroll to top when new pending orders arrive.
   useEffect(() => {
     if (activeTab === 'pending' && orders.length > 0) {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -46,21 +55,35 @@ export default function OrdersScreen() {
   }, [orders.length, activeTab]);
 
   const filteredOrders = orders
-    .filter((o) => o.status === activeTab)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    .filter((o) => {
+      if (activeTab === 'preparing') {
+        // Include both accepted and preparing so legacy accepted orders are visible
+        return o.status === 'preparing' || o.status === 'accepted';
+      }
+      return o.status === activeTab;
+    })
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  const tabCount = (tab) => {
+    if (tab === 'preparing') {
+      return orders.filter((o) => o.status === 'preparing' || o.status === 'accepted').length;
+    }
+    return orders.filter((o) => o.status === tab).length;
+  };
 
   const handleToggleAccepting = async (value) => {
     if (!restaurant?.id) return;
-
+    setAcceptingOrders(value);
+    setToggleError(null);
     setToggling(true);
     try {
       await restaurantService.updateRestaurant(restaurant.id, {
         is_accepting_orders: value,
       });
-      setAcceptingOrders(value);
-      await refreshRestaurant();
+      patchRestaurant({ is_accepting_orders: value });
     } catch (e) {
-      Alert.alert('Error', 'Could not update order acceptance status.');
+      setAcceptingOrders(!value);
+      setToggleError('Could not update order status. Check your connection.');
     } finally {
       setToggling(false);
     }
@@ -79,40 +102,62 @@ export default function OrdersScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: c.background }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: c.backgroundCard, borderBottomColor: c.border },
+        ]}
+      >
         <View>
-          <Text style={styles.headerTitle}>{restaurant?.name ?? 'Orders'}</Text>
-          <Text style={styles.headerSub}>
+          <Text style={[styles.headerTitle, { color: c.textPrimary }]}>
+            {restaurant?.name ?? 'Orders'}
+          </Text>
+          <Text style={[styles.headerSub, { color: c.textSecondary }]}>
             {acceptingOrders ? '🟢 Accepting orders' : '🔴 Paused'}
           </Text>
         </View>
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Open</Text>
-          <Switch
-            value={acceptingOrders}
-            onValueChange={handleToggleAccepting}
-            disabled={toggling}
-            trackColor={{ true: '#34C759', false: '#ccc' }}
-          />
+        <View style={styles.toggleColumn}>
+          <View style={styles.toggleRow}>
+            <Text style={[styles.toggleLabel, { color: c.textPrimary }]}>Open</Text>
+            <Switch
+              value={acceptingOrders}
+              onValueChange={handleToggleAccepting}
+              disabled={toggling}
+              trackColor={{ true: '#34C759', false: '#ccc' }}
+            />
+          </View>
+          {toggleError ? (
+            <Text style={styles.toggleError}>{toggleError}</Text>
+          ) : null}
         </View>
       </View>
 
       {/* Status Tabs */}
-      <View style={styles.tabs}>
+      <View
+        style={[
+          styles.tabs,
+          { backgroundColor: c.backgroundCard, borderBottomColor: c.border },
+        ]}
+      >
         {STATUS_TABS.map((tab) => {
-          const count = orders.filter((o) => o.status === tab).length;
+          const count = tabCount(tab);
+          const isActive = activeTab === tab;
           return (
             <TouchableOpacity
               key={tab}
-              style={[styles.tab, activeTab === tab && styles.activeTab]}
+              style={[
+                styles.tab,
+                isActive && { borderBottomWidth: 2, borderBottomColor: c.brand },
+              ]}
               onPress={() => setActiveTab(tab)}
             >
               <Text
                 style={[
                   styles.tabText,
-                  activeTab === tab && styles.activeTabText,
+                  { color: isActive ? c.brand : c.textSecondary },
+                  isActive && styles.activeTabText,
                 ]}
               >
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -121,6 +166,7 @@ export default function OrdersScreen() {
                 <View
                   style={[
                     styles.badge,
+                    { backgroundColor: c.textDisabled },
                     tab === 'pending' && styles.badgeUrgent,
                   ]}
                 >
@@ -132,16 +178,27 @@ export default function OrdersScreen() {
         })}
       </View>
 
-      {/* Orders List */}
+      {/* Orders Grid */}
       <FlatList
         ref={flatListRef}
         data={filteredOrders}
         keyExtractor={(item) => item.id}
+        numColumns={COLUMNS}
+        key="orders-5col"
+        columnWrapperStyle={styles.row}
+        onLayout={(e) => {
+          const containerWidth = e.nativeEvent.layout.width;
+          setCardWidth(
+            (containerWidth - LIST_PADDING * 2 - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS,
+          );
+        }}
         renderItem={({ item }) => (
-          <OrderCard order={item} onStatusUpdate={updateStatus} />
+          <View style={[styles.cardWrapper, { width: cardWidth }]}>
+            <OrderCard order={item} onStatusUpdate={updateStatus} />
+          </View>
         )}
         contentContainerStyle={
-          filteredOrders.length === 0 && styles.emptyList
+          filteredOrders.length === 0 ? styles.emptyList : styles.listContent
         }
         ListEmptyComponent={renderEmpty}
         refreshControl={
@@ -155,27 +212,25 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#fff',
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#111',
   },
   headerSub: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 12,
     marginTop: 2,
+  },
+  toggleColumn: {
+    alignItems: 'flex-end',
   },
   toggleRow: {
     flexDirection: 'row',
@@ -184,37 +239,34 @@ const styles = StyleSheet.create({
   },
   toggleLabel: {
     fontSize: 14,
-    color: '#333',
+  },
+  toggleError: {
+    fontSize: 11,
+    color: '#DC3545',
+    marginTop: 2,
+    maxWidth: 160,
+    textAlign: 'right',
   },
   tabs: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
   },
   tab: {
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 11,
     gap: 4,
-  },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#007AFF',
   },
   tabText: {
     fontSize: 13,
-    color: '#999',
     fontWeight: '500',
   },
   activeTabText: {
-    color: '#007AFF',
     fontWeight: '700',
   },
   badge: {
-    backgroundColor: '#ccc',
     borderRadius: 10,
     minWidth: 18,
     height: 18,
@@ -230,8 +282,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  listContent: {
+    padding: 10,
+  },
+  row: {
+    gap: 8,
+    marginBottom: 8,
+    alignItems: 'flex-start',
+  },
+  cardWrapper: {
+    // width is set inline from cardWidth state
+  },
   emptyList: {
     flex: 1,
   },
 });
-

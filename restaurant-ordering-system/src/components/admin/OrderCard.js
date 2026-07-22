@@ -1,46 +1,67 @@
-// Admin order card component for kitchen/staff views. Depends on React hooks,
-// React Native UI primitives, `Linking` for tap-to-call, and the local
-// `StatusButton` for status transitions and cancellations.
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useTheme } from '../../theme';
 import StatusButton from './StatusButton';
 
 const STATUS_COLORS = {
-  pending: { bg: '#FFF3CD', text: '#856404', border: '#FFECB5' },
-  accepted: { bg: '#CCE5FF', text: '#004085', border: '#B8D4FF' },
+  pending:   { bg: '#FFF3CD', text: '#856404', border: '#FFECB5' },
+  accepted:  { bg: '#CCE5FF', text: '#004085', border: '#B8D4FF' },
   preparing: { bg: '#D1ECF1', text: '#0C5460', border: '#BEE5EB' },
-  ready: { bg: '#D4EDDA', text: '#155724', border: '#C3E6CB' },
+  ready:     { bg: '#D4EDDA', text: '#155724', border: '#C3E6CB' },
   completed: { bg: '#E2E3E5', text: '#383D41', border: '#D6D8DB' },
   cancelled: { bg: '#F8D7DA', text: '#721C24', border: '#F5C6CB' },
 };
 
+// pending → preparing (skip accepted), preparing → completed (skip ready)
 const NEXT_STATUS = {
-  pending: { label: 'Accept Order', next: 'accepted' },
-  accepted: { label: 'Start Preparing', next: 'preparing' },
-  preparing: { label: 'Mark Ready', next: 'ready' },
-  ready: { label: 'Complete Order', next: 'completed' },
+  pending:   { label: 'Accept Order',   next: 'preparing' },
+  preparing: { label: 'Complete Order', next: 'completed' },
 };
 
-const getMinutesAgo = (createdAt) => {
-  const diff = Math.floor((Date.now() - new Date(createdAt)) / 60000);
-  if (diff < 1) return 'Just now';
-  if (diff === 1) return '1 min ago';
-  return `${diff} mins ago`;
-};
+const URGENCY_THRESHOLD_MS = 15 * 60 * 1000;
+const SHOW_TIMER_STATUSES = ['pending', 'accepted', 'preparing'];
 
-const isUrgent = (createdAt, status) => {
-  if (['completed', 'cancelled'].includes(status)) return false;
-  const diff = Math.floor((Date.now() - new Date(createdAt)) / 60000);
-  return diff > 15;
-};
+function useElapsedTimer(createdAt, active) {
+  const [elapsed, setElapsed] = useState(Date.now() - new Date(createdAt).getTime());
+
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => {
+      setElapsed(Date.now() - new Date(createdAt).getTime());
+    }, 1000);
+    return () => clearInterval(id);
+  }, [createdAt, active]);
+
+  return elapsed;
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
 
 export default function OrderCard({ order, onStatusUpdate }) {
-  const [expanded, setExpanded] = useState(order.status === 'pending');
+  const { theme } = useTheme();
+  const c = theme.colors;
   const [updatingStatus, setUpdatingStatus] = useState(null);
+  const [checkedItems, setCheckedItems] = useState({});
+
+  const showTimer = SHOW_TIMER_STATUSES.includes(order.status);
+  const elapsed = useElapsedTimer(order.created_at, showTimer);
+  const isUrgent = showTimer && elapsed >= URGENCY_THRESHOLD_MS;
 
   const statusStyle = STATUS_COLORS[order.status] || STATUS_COLORS.pending;
-  const urgent = isUrgent(order.created_at, order.status);
   const nextAction = NEXT_STATUS[order.status];
+  const isPreparing = order.status === 'preparing';
+
+  const items = order.items || [];
+  const allChecked = items.length > 0 && items.every((_, i) => checkedItems[i]);
+
+  const toggleItem = useCallback((idx) => {
+    setCheckedItems((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  }, []);
 
   const handleStatusUpdate = async (newStatus) => {
     setUpdatingStatus(newStatus);
@@ -51,29 +72,26 @@ export default function OrderCard({ order, onStatusUpdate }) {
     }
   };
 
-  const callCustomer = () => {
-    if (!order.customer_phone) return;
-    Linking.openURL(`tel:${order.customer_phone}`);
-  };
-
   return (
-    <View style={[styles.card, urgent && styles.urgentCard]}>
-      {urgent && (
+    <View
+      style={[
+        styles.card,
+        { backgroundColor: c.backgroundCard },
+        isUrgent && styles.urgentCard,
+      ]}
+    >
+      {isUrgent && (
         <View style={styles.urgentBanner}>
-          <Text style={styles.urgentText}>⚠ Waiting {getMinutesAgo(order.created_at)}</Text>
+          <Text style={styles.urgentText}>⚠ {formatElapsed(elapsed)}</Text>
         </View>
       )}
 
-      <TouchableOpacity
-        style={styles.header}
-        onPress={() => setExpanded((prev) => !prev)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.headerLeft}>
-          <Text style={styles.orderNumber}>{order.order_number}</Text>
-          <Text style={styles.timestamp}>{getMinutesAgo(order.created_at)}</Text>
-        </View>
-        <View style={styles.headerRight}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerTop}>
+          <Text style={[styles.orderNumber, { color: c.textPrimary }]}>
+            {order.order_number}
+          </Text>
           <View
             style={[
               styles.statusBadge,
@@ -84,29 +102,45 @@ export default function OrderCard({ order, onStatusUpdate }) {
               {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
             </Text>
           </View>
-          <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
         </View>
-      </TouchableOpacity>
 
+        {showTimer && (
+          <Text
+            style={[
+              styles.timer,
+              { color: c.textPrimary },
+              isUrgent && styles.timerUrgent,
+            ]}
+          >
+            {formatElapsed(elapsed)}
+          </Text>
+        )}
+      </View>
+
+      {/* Customer info */}
       <View style={styles.customerRow}>
-        <View>
-          <Text style={styles.customerName}>{order.customer_name}</Text>
-          {order.customer_phone ? (
-            <TouchableOpacity onPress={callCustomer}>
-              <Text style={styles.customerPhone}>{order.customer_phone}</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <View style={styles.orderTypePill}>
+        <Text
+          style={[styles.customerName, { color: c.textPrimary }]}
+          numberOfLines={1}
+        >
+          {order.customer_name}
+        </Text>
+        <View style={[styles.orderTypePill, { backgroundColor: c.backgroundSunken }]}>
           <Text style={styles.orderTypeText}>
-            {order.order_type === 'delivery' ? '🚗 Delivery' : '🏃 Pickup'}
+            {order.order_type === 'delivery' ? '🚗' : '🏃'}
           </Text>
         </View>
       </View>
 
+      {order.customer_phone ? (
+        <Text style={[styles.customerPhone, { color: c.textSecondary }]}>
+          {order.customer_phone}
+        </Text>
+      ) : null}
+
       {order.scheduled_time && (
         <Text style={styles.scheduledTime}>
-          ⏰ Scheduled:{' '}
+          ⏰{' '}
           {new Date(order.scheduled_time).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
@@ -114,68 +148,73 @@ export default function OrderCard({ order, onStatusUpdate }) {
         </Text>
       )}
 
-      {expanded && (
-        <View style={styles.itemsContainer}>
-          <View style={styles.divider} />
-          {(order.items || []).map((item, idx) => (
-            <View key={idx} style={styles.itemRow}>
-              <Text style={styles.itemQty}>{item.quantity}×</Text>
+      {/* Items — always visible */}
+      <View style={styles.itemsContainer}>
+        <View style={[styles.divider, { backgroundColor: c.border }]} />
+        {items.map((item, idx) => {
+          const checked = !!checkedItems[idx];
+          return (
+            <TouchableOpacity
+              key={idx}
+              style={styles.itemRow}
+              onPress={isPreparing ? () => toggleItem(idx) : undefined}
+              activeOpacity={isPreparing ? 0.6 : 1}
+            >
+              {isPreparing && (
+                <View
+                  style={[
+                    styles.checkbox,
+                    { borderColor: c.borderStrong },
+                    checked && styles.checkboxChecked,
+                  ]}
+                >
+                  {checked && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+              )}
+              <Text style={[styles.itemQty, { color: c.brand }]}>{item.quantity}×</Text>
               <View style={styles.itemDetails}>
-                <Text style={styles.itemName}>{item.name}</Text>
+                <Text
+                  style={[
+                    styles.itemName,
+                    { color: c.textPrimary },
+                    checked && { color: c.textDisabled, textDecorationLine: 'line-through' },
+                  ]}
+                >
+                  {item.name}
+                </Text>
                 {item.special_instructions ? (
-                  <Text style={styles.itemNote}>📝 {item.special_instructions}</Text>
+                  <Text style={[styles.itemNote, { color: c.textSecondary }]}>
+                    📝 {item.special_instructions}
+                  </Text>
                 ) : null}
               </View>
-              <Text style={styles.itemPrice}>
-                ${Number(item.price * item.quantity).toFixed(2)}
-              </Text>
-            </View>
-          ))}
+            </TouchableOpacity>
+          );
+        })}
 
-          <View style={styles.totalsRow}>
-            <View style={styles.divider} />
-            <View style={styles.totalLine}>
-              <Text style={styles.totalLabel}>Subtotal</Text>
-              <Text style={styles.totalValue}>
-                ${Number(order.subtotal || 0).toFixed(2)}
-              </Text>
-            </View>
-            {order.tax > 0 && (
-              <View style={styles.totalLine}>
-                <Text style={styles.totalLabel}>Tax</Text>
-                <Text style={styles.totalValue}>${Number(order.tax).toFixed(2)}</Text>
-              </View>
-            )}
-            <View style={[styles.totalLine, styles.grandTotalLine]}>
-              <Text style={styles.grandTotalLabel}>Total</Text>
-              <Text style={styles.grandTotalValue}>
-                ${Number(order.total || 0).toFixed(2)}
-              </Text>
-            </View>
+        {order.notes ? (
+          <View style={styles.notesBox}>
+            <Text style={styles.notesLabel}>Notes</Text>
+            <Text style={styles.notesText}>{order.notes}</Text>
           </View>
+        ) : null}
+      </View>
 
-          {order.notes ? (
-            <View style={styles.notesBox}>
-              <Text style={styles.notesLabel}>Order Notes:</Text>
-              <Text style={styles.notesText}>{order.notes}</Text>
-            </View>
-          ) : null}
-        </View>
-      )}
-
+      {/* Action buttons */}
       {!['completed', 'cancelled'].includes(order.status) && (
-        <View style={styles.actions}>
+        <View style={[styles.actions, { borderTopColor: c.border }]}>
           {nextAction && (
             <StatusButton
               label={nextAction.label}
-              color="#007AFF"
+              color={isPreparing ? (allChecked ? '#34C759' : '#aaa') : c.brand}
               loading={updatingStatus === nextAction.next}
               onPress={() => handleStatusUpdate(nextAction.next)}
+              disabled={isPreparing && !allChecked}
               style={styles.primaryAction}
             />
           )}
           <StatusButton
-            label="Cancel"
+            label="✕"
             color="#DC3545"
             loading={updatingStatus === 'cancelled'}
             onPress={() => handleStatusUpdate('cancelled')}
@@ -191,14 +230,12 @@ export default function OrderCard({ order, onStatusUpdate }) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 12,
+    borderRadius: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
+    elevation: 2,
     overflow: 'hidden',
   },
   urgentCard: {
@@ -207,194 +244,164 @@ const styles = StyleSheet.create({
   },
   urgentBanner: {
     backgroundColor: '#FF6B35',
-    paddingVertical: 4,
-    paddingHorizontal: 16,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
   },
   urgentText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
   },
   header: {
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    paddingBottom: 8,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
   },
   orderNumber: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  timestamp: {
-    fontSize: 12,
-    color: '#999',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
     borderWidth: 1,
   },
   statusText: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
   },
-  chevron: {
-    fontSize: 10,
-    color: '#999',
+  timer: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: 4,
+    letterSpacing: 0.5,
+  },
+  timerUrgent: {
+    color: '#FF6B35',
   },
   customerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 10,
+    paddingBottom: 2,
   },
   customerName: {
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#333',
-  },
-  customerPhone: {
-    fontSize: 13,
-    color: '#007AFF',
-    marginTop: 2,
+    flex: 1,
+    marginRight: 4,
   },
   orderTypePill: {
-    backgroundColor: '#F0F0F0',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 12,
   },
   orderTypeText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#555',
+    fontSize: 12,
+  },
+  customerPhone: {
+    fontSize: 11,
+    paddingHorizontal: 10,
+    paddingBottom: 2,
   },
   scheduledTime: {
-    fontSize: 13,
+    fontSize: 11,
     color: '#E6821E',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingHorizontal: 10,
+    paddingBottom: 2,
     fontWeight: '500',
   },
   itemsContainer: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 10,
+    paddingBottom: 4,
   },
   divider: {
     height: 1,
-    backgroundColor: '#F0F0F0',
-    marginVertical: 10,
+    marginBottom: 8,
   },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 7,
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    marginRight: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  checkboxChecked: {
+    backgroundColor: '#34C759',
+    borderColor: '#34C759',
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 13,
   },
   itemQty: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#007AFF',
-    width: 28,
+    width: 24,
+    flexShrink: 0,
   },
   itemDetails: {
     flex: 1,
   },
   itemName: {
-    fontSize: 14,
-    color: '#333',
+    fontSize: 12,
     fontWeight: '500',
   },
   itemNote: {
-    fontSize: 12,
-    color: '#888',
-    marginTop: 2,
+    fontSize: 11,
+    marginTop: 1,
     fontStyle: 'italic',
-  },
-  itemPrice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  totalsRow: {
-    marginTop: 4,
-  },
-  totalLine: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  totalLabel: {
-    fontSize: 13,
-    color: '#888',
-  },
-  totalValue: {
-    fontSize: 13,
-    color: '#888',
-  },
-  grandTotalLine: {
-    marginTop: 4,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-  },
-  grandTotalLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  grandTotalValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1A1A1A',
   },
   notesBox: {
     backgroundColor: '#FFFBF0',
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 8,
+    borderRadius: 6,
+    padding: 8,
+    marginTop: 6,
     marginBottom: 4,
     borderLeftWidth: 3,
     borderLeftColor: '#FFC107',
   },
   notesLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: '#856404',
-    marginBottom: 3,
+    marginBottom: 2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   notesText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#555',
   },
   actions: {
     flexDirection: 'row',
-    gap: 8,
-    padding: 12,
-    paddingTop: 8,
+    gap: 6,
+    padding: 8,
     borderTopWidth: 1,
-    borderTopColor: '#F5F5F5',
   },
   primaryAction: {
     flex: 1,
   },
   cancelAction: {
     flex: 0,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
   },
 });
-

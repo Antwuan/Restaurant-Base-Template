@@ -82,6 +82,7 @@ function newItemId() {
 // ── Sidebar sortable category row ──────────────────────────────────────────────
 function SortableSidebarCategory({ category, isActive, onPress, onEdit, theme }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: category.id });
+  const c = theme.colors;
 
   const divStyle = {
     transform: CSS.Transform.toString(transform),
@@ -91,7 +92,7 @@ function SortableSidebarCategory({ category, isActive, onPress, onEdit, theme })
     display: 'flex',
     alignItems: 'center',
     borderRadius: 6,
-    backgroundColor: isDragging ? '#f8fafc' : 'transparent',
+    backgroundColor: isDragging ? c.backgroundSunken : 'transparent',
   };
 
   return (
@@ -108,14 +109,14 @@ function SortableSidebarCategory({ category, isActive, onPress, onEdit, theme })
           flexShrink: 0,
         }}
       >
-        <Ionicons name="reorder-two-outline" size={15} color="#c4c9d4" />
+        <Ionicons name="reorder-two-outline" size={15} color={c.textDisabled} />
       </div>
 
       {/* Category name */}
       <TouchableOpacity
         style={[
           sidebarStyles.item,
-          isActive && { borderLeftColor: theme.colors.brand },
+          isActive && { borderLeftColor: c.brand },
         ]}
         onPress={onPress}
         activeOpacity={0.7}
@@ -123,7 +124,8 @@ function SortableSidebarCategory({ category, isActive, onPress, onEdit, theme })
         <Text
           style={[
             sidebarStyles.itemText,
-            isActive && { color: theme.colors.brand, fontWeight: '700' },
+            { color: c.textPrimary },
+            isActive && { color: c.brand, fontWeight: '700' },
           ]}
           numberOfLines={2}
         >
@@ -138,7 +140,7 @@ function SortableSidebarCategory({ category, isActive, onPress, onEdit, theme })
         hitSlop={{ top: 6, bottom: 6, left: 4, right: 8 }}
         accessibilityLabel={`Edit ${category.name}`}
       >
-        <Ionicons name="pencil-outline" size={12} color="#9ca3af" />
+        <Ionicons name="pencil-outline" size={12} color={c.textSecondary} />
       </TouchableOpacity>
     </div>
   );
@@ -147,6 +149,7 @@ function SortableSidebarCategory({ category, isActive, onPress, onEdit, theme })
 // ── Mobile horizontal sortable chip ────────────────────────────────────────────
 function SortableMobileChip({ category, isActive, onPress, theme }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: category.id });
+  const c = theme.colors;
 
   const divStyle = {
     transform: CSS.Transform.toString(transform),
@@ -168,8 +171,8 @@ function SortableMobileChip({ category, isActive, onPress, theme }) {
     paddingTop: 7,
     paddingBottom: 7,
     borderRadius: 20,
-    border: `1px solid ${isActive ? theme.colors.brand : '#ddd'}`,
-    backgroundColor: isActive ? theme.colors.brand : '#fff',
+    border: `1px solid ${isActive ? c.brand : c.border}`,
+    backgroundColor: isActive ? c.brand : c.backgroundCard,
     cursor: 'pointer',
     userSelect: 'none',
     whiteSpace: 'nowrap',
@@ -178,7 +181,7 @@ function SortableMobileChip({ category, isActive, onPress, theme }) {
   const textStyle = {
     fontSize: 13,
     fontWeight: '600',
-    color: isActive ? '#fff' : '#444',
+    color: isActive ? c.brandText : c.textPrimary,
   };
 
   return (
@@ -194,7 +197,11 @@ function SortableMobileChip({ category, isActive, onPress, theme }) {
           alignItems: 'center',
         }}
       >
-        <Ionicons name="reorder-two-outline" size={13} color={isActive ? 'rgba(255,255,255,0.7)' : '#c4c9d4'} />
+        <Ionicons
+          name="reorder-two-outline"
+          size={13}
+          color={isActive ? c.brandText : c.textDisabled}
+        />
       </div>
       <div style={chipStyle} onClick={onPress}>
         <span style={textStyle}>{category.name}</span>
@@ -207,6 +214,7 @@ function SortableMobileChip({ category, isActive, onPress, theme }) {
 export default function MenuEditorScreen() {
   const { restaurant } = useRestaurantContext();
   const { theme } = useTheme();
+  const c = theme.colors;
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BREAKPOINT;
 
@@ -370,6 +378,9 @@ export default function MenuEditorScreen() {
   }, []);
 
   const persistCategory = useCallback(async ({ name, menu_type, id }) => {
+    if (!restaurant?.id) {
+      throw new Error('Restaurant not loaded. Refresh the page and try again.');
+    }
     if (id) {
       await menuService.updateCategory(id, { name });
     } else {
@@ -401,17 +412,17 @@ export default function MenuEditorScreen() {
   const isEmpty = !loading && categorizedMenu.length === 0;
 
   const renderInfoBar = () => (
-    <View style={styles.infoBar}>
+    <View style={[styles.infoBar, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
       <View style={styles.infoBarInner}>
         <View style={styles.infoLeft}>
           {restaurant?.name ? (
-            <Text style={styles.infoName}>{restaurant.name}</Text>
+            <Text style={[styles.infoName, { color: c.textPrimary }]}>{restaurant.name}</Text>
           ) : null}
           <View style={styles.infoMeta}>
             {restaurant?.address ? (
               <View style={styles.infoMetaItem}>
-                <Ionicons name="location-outline" size={13} color="#666" />
-                <Text style={styles.infoMetaText} numberOfLines={1}>
+                <Ionicons name="location-outline" size={13} color={c.textSecondary} />
+                <Text style={[styles.infoMetaText, { color: c.textSecondary }]} numberOfLines={1}>
                   {restaurant.address}
                 </Text>
               </View>
@@ -429,12 +440,12 @@ export default function MenuEditorScreen() {
         </View>
         {restaurant?.phone ? (
           <TouchableOpacity
-            style={styles.phoneBtn}
+            style={[styles.phoneBtn, { borderColor: c.border }]}
             onPress={() => Linking.openURL(`tel:${restaurant.phone}`)}
             activeOpacity={0.7}
           >
-            <Ionicons name="call-outline" size={14} color={theme.colors.brand} />
-            <Text style={[styles.phoneBtnText, { color: theme.colors.brand }]}>
+            <Ionicons name="call-outline" size={14} color={c.brand} />
+            <Text style={[styles.phoneBtnText, { color: c.brand }]}>
               {restaurant.phone}
             </Text>
           </TouchableOpacity>
@@ -475,7 +486,7 @@ export default function MenuEditorScreen() {
         position: 'sticky',
         top: 0,
         alignSelf: 'flex-start',
-        borderRight: '1px solid #e8e8e8',
+        borderRight: `1px solid ${c.border}`,
         paddingTop: 16,
         paddingBottom: 24,
         paddingRight: 8,
@@ -508,12 +519,12 @@ export default function MenuEditorScreen() {
 
       {/* Add Category button */}
       <TouchableOpacity
-        style={[styles.sidebarAddCatBtn, { borderColor: theme.colors.brand }]}
+        style={[styles.sidebarAddCatBtn, { borderColor: c.brand }]}
         onPress={handleAddCategory}
         activeOpacity={0.75}
       >
-        <Ionicons name="add-circle-outline" size={14} color={theme.colors.brand} />
-        <Text style={[styles.sidebarAddCatText, { color: theme.colors.brand }]}>
+        <Ionicons name="add-circle-outline" size={14} color={c.brand} />
+        <Text style={[styles.sidebarAddCatText, { color: c.brand }]}>
           Add Category
         </Text>
       </TouchableOpacity>
@@ -523,7 +534,7 @@ export default function MenuEditorScreen() {
   // ── Mobile chip nav ───────────────────────────────────────────────────────
 
   const renderMobileChips = () => (
-    <View style={styles.mobileNav}>
+    <View style={[styles.mobileNav, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -531,7 +542,7 @@ export default function MenuEditorScreen() {
         modifiers={[restrictToHorizontalAxis, restrictToParentElement]}
       >
         <SortableContext
-          items={categories.map((c) => c.id)}
+          items={categories.map((cat) => cat.id)}
           strategy={horizontalListSortingStrategy}
         >
           <div
@@ -556,12 +567,15 @@ export default function MenuEditorScreen() {
             ))}
             {/* Add Category chip */}
             <TouchableOpacity
-              style={[styles.addCategoryChip, { borderColor: theme.colors.brand }]}
+              style={[
+                styles.addCategoryChip,
+                { borderColor: c.brand, backgroundColor: c.backgroundCard },
+              ]}
               onPress={handleAddCategory}
               activeOpacity={0.75}
             >
-              <Ionicons name="add" size={14} color={theme.colors.brand} />
-              <Text style={[styles.addCategoryChipText, { color: theme.colors.brand }]}>
+              <Ionicons name="add" size={14} color={c.brand} />
+              <Text style={[styles.addCategoryChipText, { color: c.brand }]}>
                 Category
               </Text>
             </TouchableOpacity>
@@ -574,24 +588,33 @@ export default function MenuEditorScreen() {
   // ── Root render ───────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: c.background }]}>
       {/* Tab switcher */}
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
         {MENU_TABS.map((tab) => {
           const isActive = tab.key === activeMenuType;
           return (
             <TouchableOpacity
               key={tab.key}
-              style={[styles.tab, isActive && styles.tabActive]}
+              style={[
+                styles.tab,
+                isActive && { borderBottomColor: c.brand },
+              ]}
               onPress={() => setActiveMenuType(tab.key)}
               activeOpacity={0.75}
             >
               <Ionicons
                 name={tab.icon}
                 size={15}
-                color={isActive ? theme.colors.brand : '#9ca3af'}
+                color={isActive ? c.brand : c.textSecondary}
               />
-              <Text style={[styles.tabLabel, isActive && { color: theme.colors.brand }]}>
+              <Text
+                style={[
+                  styles.tabLabel,
+                  { color: c.textSecondary },
+                  isActive && { color: c.brand },
+                ]}
+              >
                 {tab.label}
               </Text>
             </TouchableOpacity>
@@ -601,12 +624,12 @@ export default function MenuEditorScreen() {
         {/* Add Item button — lives in the tab bar on the right */}
         <View style={styles.tabBarRight}>
           <TouchableOpacity
-            style={[styles.addItemBtn, { backgroundColor: theme.colors.brand }]}
+            style={[styles.addItemBtn, { backgroundColor: c.brand }]}
             onPress={() => handleAddItem(categories[0] ?? { id: '' })}
             activeOpacity={0.85}
           >
-            <Ionicons name="add" size={15} color="#fff" />
-            <Text style={styles.addItemBtnText}>Add Item</Text>
+            <Ionicons name="add" size={15} color={c.brandText} />
+            <Text style={[styles.addItemBtnText, { color: c.brandText }]}>Add Item</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -614,7 +637,7 @@ export default function MenuEditorScreen() {
       {/* Main scroll area */}
       {loading && !categorizedMenu.length ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={theme.colors.brand} />
+          <ActivityIndicator size="large" color={c.brand} />
         </View>
       ) : (
         <ScrollView
@@ -625,7 +648,7 @@ export default function MenuEditorScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={theme.colors.brand}
+              tintColor={c.brand}
             />
           }
           showsVerticalScrollIndicator={false}
@@ -713,7 +736,6 @@ const sidebarStyles = StyleSheet.create({
   itemText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#444',
     lineHeight: 18,
   },
   editBtn: {
@@ -726,7 +748,6 @@ const sidebarStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   centered: {
     flex: 1,
@@ -744,9 +765,7 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
     paddingHorizontal: 16,
   },
   tab: {
@@ -759,13 +778,9 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
     marginBottom: -1,
   },
-  tabActive: {
-    borderBottomColor: '#007AFF',
-  },
   tabLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#9ca3af',
   },
   tabBarRight: {
     flex: 1,
@@ -781,16 +796,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   addItemBtnText: {
-    color: '#fff',
     fontSize: 13,
     fontWeight: '600',
   },
 
   // ── Info bar (mirrors MenuScreen)
   infoBar: {
-    backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e8e8e8',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -809,7 +821,6 @@ const styles = StyleSheet.create({
   infoName: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#111',
     marginBottom: 4,
   },
   infoMeta: {
@@ -825,7 +836,6 @@ const styles = StyleSheet.create({
   },
   infoMetaText: {
     fontSize: 12,
-    color: '#666',
   },
   statusPill: {
     paddingHorizontal: 8,
@@ -847,7 +857,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
   },
   phoneBtnText: {
     fontSize: 12,
@@ -880,9 +889,7 @@ const styles = StyleSheet.create({
 
   // ── Mobile nav
   mobileNav: {
-    backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e8e8e8',
     paddingHorizontal: 16,
     paddingTop: 12,
   },
@@ -895,7 +902,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    backgroundColor: '#fff',
     flexShrink: 0,
   },
   addCategoryChipText: {
