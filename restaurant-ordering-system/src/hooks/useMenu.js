@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as menuService from '../services/menuService';
+import { getModifiersByMenuItemIds } from '../services/modifierService';
 
 export const useMenu = (restaurantId, menuType = null) => {
   const [categories, setCategories] = useState([]);
@@ -27,14 +28,25 @@ export const useMenu = (restaurantId, menuType = null) => {
         menuService.getMenuItems(restaurantId),
       ]);
 
-      // Only keep items that belong to the fetched categories
-      const categoryIds = new Set(fetchedCategories.map(c => c.id));
-      const filteredItems = fetchedItems.filter(item => categoryIds.has(item.category_id));
+      const categoryIds = new Set(fetchedCategories.map((c) => c.id));
+      const filteredItems = fetchedItems.filter((item) => categoryIds.has(item.category_id));
+
+      let modifiersByItem = {};
+      try {
+        modifiersByItem = await getModifiersByMenuItemIds(filteredItems.map((i) => i.id));
+      } catch {
+        modifiersByItem = {};
+      }
+
+      const itemsWithMods = filteredItems.map((item) => ({
+        ...item,
+        modifier_groups: modifiersByItem[item.id] || [],
+      }));
 
       const grouped = fetchedCategories.reduce((acc, category) => {
         acc[category.id] = {
           ...category,
-          items: filteredItems.filter(
+          items: itemsWithMods.filter(
             (item) => item.category_id === category.id && item.is_available
           ),
         };
@@ -43,7 +55,7 @@ export const useMenu = (restaurantId, menuType = null) => {
 
       setCategories(fetchedCategories);
       setMenuByCategory(grouped);
-      setAllItems(filteredItems);
+      setAllItems(itemsWithMods);
     } catch (err) {
       setError(err.message || 'Failed to load menu');
     } finally {

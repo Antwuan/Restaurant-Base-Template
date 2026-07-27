@@ -3,6 +3,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   StyleSheet,
   TouchableOpacity,
   Switch,
@@ -26,11 +27,144 @@ import OrderCard from '../../components/admin/OrderCard';
 import AdminEmptyState from '../../components/admin/AdminEmptyState';
 
 const STATUS_TABS = ['pending', 'preparing', 'completed'];
+const VIEW_TABS = ['Regular', 'Catering'];
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function isTodayOrFuture(isoString) {
+  if (!isoString) return false;
+  const d = new Date(isoString);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d >= today;
+}
+
+function formatScheduled(isoString) {
+  if (!isoString) return null;
+  const d = new Date(isoString);
+  return d.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+// ── Catering section ─────────────────────────────────────────────────────────
+function CateringSection({
+  orders,
+  loading,
+  onRefresh,
+  onStatusUpdate,
+  cardWidth,
+  c,
+  activeTab,
+  onTabChange,
+}) {
+  const cateringOrders = orders
+    .filter((o) => o.menu_type === 'catering' && isTodayOrFuture(o.scheduled_time))
+    .sort((a, b) => new Date(a.scheduled_time) - new Date(b.scheduled_time));
+
+  const tabCount = (tab) => {
+    if (tab === 'preparing') {
+      return cateringOrders.filter((o) => o.status === 'preparing' || o.status === 'accepted').length;
+    }
+    return cateringOrders.filter((o) => o.status === tab).length;
+  };
+
+  const filtered = cateringOrders.filter((o) => {
+    if (activeTab === 'preparing') {
+      return o.status === 'preparing' || o.status === 'accepted';
+    }
+    return o.status === activeTab;
+  });
+
+  return (
+    <>
+      <View style={[styles.tabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
+        {STATUS_TABS.map((tab) => {
+          const count = tabCount(tab);
+          const isActive = activeTab === tab;
+          return (
+            <TouchableOpacity
+              key={tab}
+              style={[
+                styles.tab,
+                isActive && { borderBottomWidth: 2, borderBottomColor: c.brand },
+              ]}
+              onPress={() => onTabChange(tab)}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  { color: isActive ? c.brand : c.textSecondary },
+                  isActive && styles.activeTabText,
+                ]}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </Text>
+              {count > 0 && (
+                <View
+                  style={[
+                    styles.badge,
+                    { backgroundColor: c.textDisabled },
+                    tab === 'pending' && styles.badgeUrgent,
+                  ]}
+                >
+                  <Text style={styles.badgeText}>{count}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {loading && filtered.length === 0 ? null : filtered.length === 0 ? (
+        <AdminEmptyState
+          icon="🍱"
+          title={`No ${activeTab} catering orders`}
+          subtitle="Catering orders scheduled for today or the future will appear here."
+        />
+      ) : (
+        <ScrollView
+          contentContainerStyle={{ padding: LIST_PADDING, gap: 10 }}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} />}
+        >
+          {filtered.map((order) => (
+            <View key={order.id} style={{ marginBottom: 10, maxWidth: 420 }}>
+              <View style={[cat.timeBanner, { backgroundColor: c.brand + '18', borderColor: c.brand + '44' }]}>
+                <Text style={[cat.timeText, { color: c.brand }]}>
+                  📅 {formatScheduled(order.scheduled_time)}
+                </Text>
+              </View>
+              <OrderCard order={order} onStatusUpdate={onStatusUpdate} />
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </>
+  );
+}
+
+const cat = StyleSheet.create({
+  timeBanner: {
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: 0,
+  },
+  timeText: { fontSize: 13, fontWeight: '600' },
+});
+
+// ── Main screen ───────────────────────────────────────────────────────────────
 export default function OrdersScreen() {
   const { theme } = useTheme();
   const c = theme.colors;
   const { restaurant, patchRestaurant } = useRestaurantContext();
+  const [viewTab, setViewTab] = useState('Regular');
   const [activeTab, setActiveTab] = useState('pending');
   const [cardWidth, setCardWidth] = useState(getCardWidth);
   const [acceptingOrders, setAcceptingOrders] = useState(
@@ -54,10 +188,12 @@ export default function OrdersScreen() {
     }
   }, [orders.length, activeTab]);
 
-  const filteredOrders = orders
+  // Regular orders only
+  const regularOrders = orders.filter((o) => !o.menu_type || o.menu_type === 'regular');
+
+  const filteredOrders = regularOrders
     .filter((o) => {
       if (activeTab === 'preparing') {
-        // Include both accepted and preparing so legacy accepted orders are visible
         return o.status === 'preparing' || o.status === 'accepted';
       }
       return o.status === activeTab;
@@ -66,10 +202,15 @@ export default function OrdersScreen() {
 
   const tabCount = (tab) => {
     if (tab === 'preparing') {
-      return orders.filter((o) => o.status === 'preparing' || o.status === 'accepted').length;
+      return regularOrders.filter((o) => o.status === 'preparing' || o.status === 'accepted').length;
     }
-    return orders.filter((o) => o.status === tab).length;
+    return regularOrders.filter((o) => o.status === tab).length;
   };
+
+  // Catering badge count
+  const cateringCount = orders.filter(
+    (o) => o.menu_type === 'catering' && isTodayOrFuture(o.scheduled_time),
+  ).length;
 
   const handleToggleAccepting = async (value) => {
     if (!restaurant?.id) return;
@@ -134,43 +275,26 @@ export default function OrdersScreen() {
         </View>
       </View>
 
-      {/* Status Tabs */}
-      <View
-        style={[
-          styles.tabs,
-          { backgroundColor: c.backgroundCard, borderBottomColor: c.border },
-        ]}
-      >
-        {STATUS_TABS.map((tab) => {
-          const count = tabCount(tab);
-          const isActive = activeTab === tab;
+      {/* View tabs: Regular | Catering */}
+      <View style={[styles.viewTabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
+        {VIEW_TABS.map((vt) => {
+          const isActive = viewTab === vt;
+          const badge = vt === 'Catering' ? cateringCount : null;
           return (
             <TouchableOpacity
-              key={tab}
+              key={vt}
               style={[
-                styles.tab,
-                isActive && { borderBottomWidth: 2, borderBottomColor: c.brand },
+                styles.viewTab,
+                isActive && { borderBottomWidth: 2.5, borderBottomColor: c.brand },
               ]}
-              onPress={() => setActiveTab(tab)}
+              onPress={() => setViewTab(vt)}
             >
-              <Text
-                style={[
-                  styles.tabText,
-                  { color: isActive ? c.brand : c.textSecondary },
-                  isActive && styles.activeTabText,
-                ]}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              <Text style={[styles.viewTabText, { color: isActive ? c.brand : c.textSecondary }, isActive && { fontWeight: '700' }]}>
+                {vt}
               </Text>
-              {count > 0 && (
-                <View
-                  style={[
-                    styles.badge,
-                    { backgroundColor: c.textDisabled },
-                    tab === 'pending' && styles.badgeUrgent,
-                  ]}
-                >
-                  <Text style={styles.badgeText}>{count}</Text>
+              {badge > 0 && (
+                <View style={[styles.badge, { backgroundColor: c.brand }]}>
+                  <Text style={styles.badgeText}>{badge}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -178,33 +302,91 @@ export default function OrdersScreen() {
         })}
       </View>
 
-      {/* Orders Grid */}
-      <FlatList
-        ref={flatListRef}
-        data={filteredOrders}
-        keyExtractor={(item) => item.id}
-        numColumns={COLUMNS}
-        key="orders-5col"
-        columnWrapperStyle={styles.row}
-        onLayout={(e) => {
-          const containerWidth = e.nativeEvent.layout.width;
-          setCardWidth(
-            (containerWidth - LIST_PADDING * 2 - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS,
-          );
-        }}
-        renderItem={({ item }) => (
-          <View style={[styles.cardWrapper, { width: cardWidth }]}>
-            <OrderCard order={item} onStatusUpdate={updateStatus} />
+      {/* ── Regular orders ──────────────────────────────── */}
+      {viewTab === 'Regular' && (
+        <>
+          {/* Status Tabs */}
+          <View style={[styles.tabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
+            {STATUS_TABS.map((tab) => {
+              const count = tabCount(tab);
+              const isActive = activeTab === tab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[
+                    styles.tab,
+                    isActive && { borderBottomWidth: 2, borderBottomColor: c.brand },
+                  ]}
+                  onPress={() => setActiveTab(tab)}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      { color: isActive ? c.brand : c.textSecondary },
+                      isActive && styles.activeTabText,
+                    ]}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </Text>
+                  {count > 0 && (
+                    <View
+                      style={[
+                        styles.badge,
+                        { backgroundColor: c.textDisabled },
+                        tab === 'pending' && styles.badgeUrgent,
+                      ]}
+                    >
+                      <Text style={styles.badgeText}>{count}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
-        )}
-        contentContainerStyle={
-          filteredOrders.length === 0 ? styles.emptyList : styles.listContent
-        }
-        ListEmptyComponent={renderEmpty}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refreshOrders} />
-        }
-      />
+
+          {/* Orders Grid */}
+          <FlatList
+            ref={flatListRef}
+            data={filteredOrders}
+            keyExtractor={(item) => item.id}
+            numColumns={COLUMNS}
+            key="orders-5col"
+            columnWrapperStyle={styles.row}
+            onLayout={(e) => {
+              const containerWidth = e.nativeEvent.layout.width;
+              setCardWidth(
+                (containerWidth - LIST_PADDING * 2 - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS,
+              );
+            }}
+            renderItem={({ item }) => (
+              <View style={[styles.cardWrapper, { width: cardWidth }]}>
+                <OrderCard order={item} onStatusUpdate={updateStatus} />
+              </View>
+            )}
+            contentContainerStyle={
+              filteredOrders.length === 0 ? styles.emptyList : styles.listContent
+            }
+            ListEmptyComponent={renderEmpty}
+            refreshControl={
+              <RefreshControl refreshing={loading} onRefresh={refreshOrders} />
+            }
+          />
+        </>
+      )}
+
+      {/* ── Catering orders ─────────────────────────────── */}
+      {viewTab === 'Catering' && (
+        <CateringSection
+          orders={orders}
+          loading={loading}
+          onRefresh={refreshOrders}
+          onStatusUpdate={updateStatus}
+          cardWidth={cardWidth}
+          c={c}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        />
+      )}
     </View>
   );
 }
@@ -247,6 +429,24 @@ const styles = StyleSheet.create({
     maxWidth: 160,
     textAlign: 'right',
   },
+  // Top-level Regular / Catering switcher
+  viewTabs: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    paddingHorizontal: 8,
+  },
+  viewTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 6,
+  },
+  viewTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // Status tabs
   tabs: {
     flexDirection: 'row',
     borderBottomWidth: 1,

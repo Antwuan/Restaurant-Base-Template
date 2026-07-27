@@ -141,6 +141,7 @@ export default function AdminMenuItem({
       <View style={styles.media}>
         {item.image_url ? (
           <Image
+            key={item.image_url}
             source={{ uri: item.image_url }}
             style={[
               styles.image,
