@@ -55,7 +55,9 @@ export default function CartPanel({ onClose, onCheckout }) {
 
       <FlatList
         data={items}
-        keyExtractor={(item) => `${item.id}-${item.specialInstructions}`}
+        keyExtractor={(item) =>
+          `${item.id}-${item.specialInstructions}-${(item.selectedModifiers || []).map((m) => m.optionId).sort().join(',')}`
+        }
         renderItem={({ item }) => (
           <CartItem
             item={item}
@@ -64,6 +66,8 @@ export default function CartPanel({ onClose, onCheckout }) {
                 item.id,
                 item.quantity + 1,
                 item.specialInstructions,
+                'regular',
+                item.selectedModifiers,
               )
             }
             onDecrease={() =>
@@ -71,9 +75,13 @@ export default function CartPanel({ onClose, onCheckout }) {
                 item.id,
                 item.quantity - 1,
                 item.specialInstructions,
+                'regular',
+                item.selectedModifiers,
               )
             }
-            onRemove={() => removeItem(item.id, item.specialInstructions)}
+            onRemove={() =>
+              removeItem(item.id, item.specialInstructions, 'regular', item.selectedModifiers)
+            }
           />
         )}
         ListFooterComponent={(

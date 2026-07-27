@@ -48,7 +48,8 @@ export default function OrderCard({ order, onStatusUpdate }) {
   const [updatingStatus, setUpdatingStatus] = useState(null);
   const [checkedItems, setCheckedItems] = useState({});
 
-  const showTimer = SHOW_TIMER_STATUSES.includes(order.status);
+  const showTimer =
+    order.menu_type !== 'catering' && SHOW_TIMER_STATUSES.includes(order.status);
   const elapsed = useElapsedTimer(order.created_at, showTimer);
   const isUrgent = showTimer && elapsed >= URGENCY_THRESHOLD_MS;
 
@@ -185,6 +186,15 @@ export default function OrderCard({ order, onStatusUpdate }) {
                 {item.special_instructions ? (
                   <Text style={[styles.itemNote, { color: c.textSecondary }]}>
                     📝 {item.special_instructions}
+                  </Text>
+                ) : null}
+                {Array.isArray(item.selected_modifiers) && item.selected_modifiers.length > 0 ? (
+                  <Text style={[styles.itemNote, { color: c.textSecondary }]}>
+                    {item.selected_modifiers.map((m) => m.optionName || m.option_name).join(', ')}
+                  </Text>
+                ) : Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
+                  <Text style={[styles.itemNote, { color: c.textSecondary }]}>
+                    {item.selectedModifiers.map((m) => m.optionName).join(', ')}
                   </Text>
                 ) : null}
               </View>

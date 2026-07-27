@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { FadeInView } from '../../components/motion';
 
 export default function ConfirmationScreen({ route, navigation }) {
   const { order } = route.params || {};
@@ -70,121 +71,148 @@ export default function ConfirmationScreen({ route, navigation }) {
       <Animated.View
         style={{ opacity: contentOpacity, alignItems: 'center', width: '100%' }}
       >
-        <Text style={styles.successTitle}>Order Placed!</Text>
-        <Text style={styles.successSubtitle}>
-          We&apos;ve received your order and will start preparing it shortly.
-        </Text>
+        <FadeInView delay={0} duration={360} fromY={0}>
+          <Text style={styles.successTitle}>Order Placed!</Text>
+        </FadeInView>
+        <FadeInView delay={80} duration={360} fromY={8}>
+          <Text style={styles.successSubtitle}>
+            We&apos;ve received your order and will start preparing it shortly.
+          </Text>
+        </FadeInView>
 
         {/* Order Number */}
-        <View
-          style={[
-            styles.orderNumberCard,
-            { borderColor: theme.colors.brand },
-          ]}
-        >
-          <Text style={styles.orderNumberLabel}>Order Number</Text>
-          <Text
-            style={[styles.orderNumber, { color: theme.colors.brand }]}
+        <FadeInView delay={160} duration={380} fromY={14} style={{ width: '100%' }}>
+          <View
+            style={[
+              styles.orderNumberCard,
+              { borderColor: theme.colors.brand },
+            ]}
           >
-            {order?.order_number ?? '—'}
-          </Text>
-        </View>
+            <Text style={styles.orderNumberLabel}>Order Number</Text>
+            <Text
+              style={[styles.orderNumber, { color: theme.colors.brand }]}
+            >
+              {order?.order_number ?? '—'}
+            </Text>
+          </View>
+        </FadeInView>
 
         {/* Order Details */}
-        <View style={styles.detailsCard}>
-          <Text style={styles.detailsTitle}>Order Details</Text>
+        <FadeInView delay={240} duration={380} fromY={14} style={{ width: '100%' }}>
+          <View style={styles.detailsCard}>
+            <Text style={styles.detailsTitle}>Order Details</Text>
 
-          {(order?.items ?? []).map((item, i) => (
-            <View key={i} style={styles.lineItem}>
-              <Text style={styles.lineItemName}>
-                {item.quantity}× {item.name}
-              </Text>
-              <Text style={styles.lineItemPrice}>
-                ${(item.price * item.quantity).toFixed(2)}
+            {(order?.items ?? []).map((item, i) => (
+              <View key={i} style={styles.lineItemWrap}>
+                <View style={styles.lineItem}>
+                  <Text style={styles.lineItemName}>
+                    {item.quantity}× {item.name}
+                  </Text>
+                  <Text style={styles.lineItemPrice}>
+                    ${(item.price * item.quantity).toFixed(2)}
+                  </Text>
+                </View>
+                {Array.isArray(item.selected_modifiers) && item.selected_modifiers.length > 0 ? (
+                  <Text style={styles.lineItemMods}>
+                    {item.selected_modifiers.map((m) => m.optionName || m.option_name).join(', ')}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+
+            <View style={styles.divider} />
+
+            <View style={styles.lineItem}>
+              <Text style={styles.summaryLabel}>Subtotal</Text>
+              <Text style={styles.summaryValue}>
+                ${subtotal.toFixed(2)}
               </Text>
             </View>
-          ))}
-
-          <View style={styles.divider} />
-
-          <View style={styles.lineItem}>
-            <Text style={styles.summaryLabel}>Subtotal</Text>
-            <Text style={styles.summaryValue}>
-              ${subtotal.toFixed(2)}
-            </Text>
+            <View style={styles.lineItem}>
+              <Text style={styles.summaryLabel}>Tax</Text>
+              <Text style={styles.summaryValue}>
+                ${tax.toFixed(2)}
+              </Text>
+            </View>
+            <View style={[styles.lineItem, styles.totalRow]}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text
+                style={[
+                  styles.totalValue,
+                  { color: theme.colors.brand },
+                ]}
+              >
+                ${total.toFixed(2)}
+              </Text>
+            </View>
           </View>
-          <View style={styles.lineItem}>
-            <Text style={styles.summaryLabel}>Tax</Text>
-            <Text style={styles.summaryValue}>
-              ${tax.toFixed(2)}
-            </Text>
-          </View>
-          <View style={[styles.lineItem, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text
-              style={[
-                styles.totalValue,
-                { color: theme.colors.brand },
-              ]}
-            >
-              ${total.toFixed(2)}
-            </Text>
-          </View>
-        </View>
+        </FadeInView>
 
         {/* Estimated Time */}
-        <View style={styles.infoCard}>
-          <Text style={styles.infoIcon}>⏱</Text>
-          <View>
-            <Text style={styles.infoTitle}>Estimated Time</Text>
-            <Text style={styles.infoBody}>
-              {order?.scheduled_time
-                ? `Ready at ${order.scheduled_time}`
-                : order?.order_type === 'delivery'
-                  ? '30–45 minutes'
-                  : '15–20 minutes'}
-            </Text>
+        <FadeInView delay={320} duration={380} fromY={14} style={{ width: '100%' }}>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoIcon}>⏱</Text>
+            <View>
+              <Text style={styles.infoTitle}>Estimated Time</Text>
+              <Text style={styles.infoBody}>
+                {order?.scheduled_time
+                  ? `Pickup at ${new Date(order.scheduled_time).toLocaleString([], {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}`
+                  : order?.order_type === 'delivery'
+                    ? '30–45 minutes'
+                    : '15–20 minutes'}
+              </Text>
+            </View>
           </View>
-        </View>
+        </FadeInView>
 
         {/* Restaurant Contact */}
         {restaurant && (
-          <View style={styles.infoCard}>
-            <Text style={styles.infoIcon}>📍</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.infoTitle}>{restaurant.name}</Text>
-              {restaurant.address && (
-                <Text style={styles.infoBody}>{restaurant.address}</Text>
-              )}
-              {restaurant.phone && (
-                <Text
-                  style={[
-                    styles.infoBody,
-                    { color: theme.colors.brand },
-                  ]}
-                >
-                  {restaurant.phone}
-                </Text>
-              )}
+          <FadeInView delay={400} duration={380} fromY={14} style={{ width: '100%' }}>
+            <View style={styles.infoCard}>
+              <Text style={styles.infoIcon}>📍</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoTitle}>{restaurant.name}</Text>
+                {restaurant.address && (
+                  <Text style={styles.infoBody}>{restaurant.address}</Text>
+                )}
+                {restaurant.phone && (
+                  <Text
+                    style={[
+                      styles.infoBody,
+                      { color: theme.colors.brand },
+                    ]}
+                  >
+                    {restaurant.phone}
+                  </Text>
+                )}
+              </View>
             </View>
-          </View>
+          </FadeInView>
         )}
 
         {/* Actions */}
-        <TouchableOpacity
-          style={[
-            styles.primaryBtn,
-            { backgroundColor: theme.colors.brand },
-          ]}
-          onPress={handleOrderAgain}
-        >
-          <Text style={styles.primaryBtnText}>Order Again</Text>
-        </TouchableOpacity>
+        <FadeInView delay={480} duration={360} fromY={10} style={{ width: '100%' }}>
+          <TouchableOpacity
+            style={[
+              styles.primaryBtn,
+              { backgroundColor: theme.colors.brand },
+            ]}
+            onPress={handleOrderAgain}
+          >
+            <Text style={styles.primaryBtnText}>Order Again</Text>
+          </TouchableOpacity>
 
-        <Text style={styles.footerNote}>
-          Keep your order number handy. You&apos;ll be notified when your order
-          is ready.
-        </Text>
+          <Text style={styles.footerNote}>
+            Keep your order number handy. You&apos;ll be notified when your order
+            is ready.
+          </Text>
+        </FadeInView>
       </Animated.View>
     </ScrollView>
   );
@@ -263,6 +291,15 @@ const styles = StyleSheet.create({
   lineItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  lineItemWrap: {
+    marginBottom: 2,
+  },
+  lineItemMods: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: -4,
     marginBottom: 8,
   },
   lineItemName: {

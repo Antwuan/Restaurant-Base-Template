@@ -33,6 +33,11 @@ const CartItem = ({ item, onIncrease, onDecrease, onRemove }) => {
               Note: {item.specialInstructions}
             </Text>
           ) : null}
+          {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
+            <Text style={styles.instructions} numberOfLines={3}>
+              {item.selectedModifiers.map((m) => m.optionName).join(', ')}
+            </Text>
+          ) : null}
         </View>
 
         {/* Line total */}

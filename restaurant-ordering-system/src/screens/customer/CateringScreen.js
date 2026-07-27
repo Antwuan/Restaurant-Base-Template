@@ -1,6 +1,6 @@
 /**
  * CateringScreen — catering menu with an order-page layout:
- *   - Custom header (logo, restaurant name, address/phone/closed badge, Sign in)
+ *   - Slim location meta row (shared CustomerNavbar provides brand/sign-in)
  *   - "Catering Menu" tab bar
  *   - Left: menu items in a two-column grid
  *   - Right: "Your Order" panel (pickup location, scheduled time, cart items)
@@ -9,7 +9,7 @@
  * 15-minute slots within the restaurant's hours of operation.
  * Always renders in light theme (dark theme is admin-only).
  */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -33,12 +33,11 @@ import { useCartContext } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../theme';
 import MenuItemModal from '../../components/MenuItemModal';
-import CustomerSignInModal from '../../components/CustomerSignInModal';
 import LocationModal from '../../components/LocationModal';
 import MenuItem from '../../components/MenuItem';
 import OrderSummary from '../../components/OrderSummary';
 import { createPaymentIntent } from '../../services/stripeApi';
-import { createOrder } from '../../services/orderService';
+import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import {
   getEarliestCateringDate,
@@ -53,37 +52,116 @@ import {
 const DESKTOP_BP = 1024;
 const DAYS_AHEAD = 2;
 const SLOT_INTERVAL = 15;
-const DATE_RANGE = 21;
+const CALENDAR_SPAN_DAYS = 14; // ~2 weeks of selectable calendar days
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// Build pickup date options starting from the earliest catering date
-function buildDateOptions(hours_of_operation) {
-  const options = [];
+/** Build calendar cells for ~2 weeks from earliest catering date (closed/out-of-range disabled). */
+function buildCalendarCells(hours_of_operation) {
   const earliest = getEarliestCateringDate(hours_of_operation, DAYS_AHEAD);
   const hours = resolveHours(hours_of_operation);
-  for (let i = 0; i < DATE_RANGE; i++) {
-    const d = new Date(earliest);
-    d.setDate(d.getDate() + i);
-    const key = DAY_KEYS[d.getDay()];
-    if (hours[key] && !hours[key].closed) {
-      options.push(new Date(d));
-    }
-    if (options.length >= 14) break;
+  const rangeEnd = new Date(earliest);
+  rangeEnd.setDate(rangeEnd.getDate() + CALENDAR_SPAN_DAYS - 1);
+  rangeEnd.setHours(23, 59, 59, 999);
+
+  const gridStart = new Date(earliest);
+  gridStart.setHours(0, 0, 0, 0);
+  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+
+  const gridEnd = new Date(rangeEnd);
+  gridEnd.setHours(0, 0, 0, 0);
+  gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+
+  const cells = [];
+  const cursor = new Date(gridStart);
+  while (cursor <= gridEnd) {
+    const day = new Date(cursor);
+    day.setHours(0, 0, 0, 0);
+    const key = DAY_KEYS[day.getDay()];
+    const beforeEarliest = day < earliest;
+    const afterRange = day > rangeEnd;
+    const closed = !hours[key] || hours[key].closed;
+    cells.push({
+      date: day,
+      selectable: !beforeEarliest && !afterRange && !closed,
+      outside: beforeEarliest || afterRange,
+    });
+    cursor.setDate(cursor.getDate() + 1);
   }
-  return options;
+  return { cells, earliest, rangeEnd };
 }
 
 // ─── Schedule picker modal ────────────────────────────────────────────────────
 function ScheduleModal({ visible, onClose, restaurant, brandColor, selectedSlot, onSelect }) {
-  const dateOptions = useMemo(
-    () => buildDateOptions(restaurant?.hours_of_operation),
+  const { cells } = useMemo(
+    () => buildCalendarCells(restaurant?.hours_of_operation),
     [restaurant?.hours_of_operation],
   );
-  const [date, setDate] = useState(selectedSlot ? new Date(selectedSlot) : dateOptions[0] ?? null);
+
+  const [step, setStep] = useState('date'); // 'date' | 'time'
+  const [date, setDate] = useState(null);
+  const [bookedMs, setBookedMs] = useState(() => new Set());
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (selectedSlot) {
+      const d = new Date(selectedSlot);
+      d.setHours(0, 0, 0, 0);
+      setDate(d);
+      setStep('time');
+    } else {
+      setDate(null);
+      setStep('date');
+    }
+    setBookedMs(new Set());
+  }, [visible, selectedSlot]);
+
+  useEffect(() => {
+    if (!visible || step !== 'time' || !date || !restaurant?.id) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingSlots(true);
+      try {
+        const dayStart = new Date(date);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(date);
+        dayEnd.setHours(23, 59, 59, 999);
+        const booked = await getBookedCateringSlots(
+          restaurant.id,
+          dayStart.toISOString(),
+          dayEnd.toISOString(),
+        );
+        if (!cancelled) {
+          setBookedMs(new Set(booked.map((t) => new Date(t).getTime())));
+        }
+      } catch {
+        if (!cancelled) setBookedMs(new Set());
+      } finally {
+        if (!cancelled) setLoadingSlots(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible, step, date, restaurant?.id]);
 
   const slots = useMemo(
     () => (date ? getSlotTimesForDate(date, restaurant?.hours_of_operation, SLOT_INTERVAL) : []),
     [date, restaurant?.hours_of_operation],
   );
+
+  const availableSlots = useMemo(
+    () => slots.filter((slot) => !bookedMs.has(slot.getTime())),
+    [slots, bookedMs],
+  );
+
+  const handlePickDate = (d) => {
+    setDate(d);
+    setStep('time');
+  };
+
+  const monthLabel = useMemo(() => {
+    const ref = date || cells.find((c) => c.selectable)?.date || new Date();
+    return ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }, [date, cells]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -99,41 +177,80 @@ function ScheduleModal({ visible, onClose, restaurant, brandColor, selectedSlot,
             Catering pickups must be scheduled at least {DAYS_AHEAD} days in advance.
           </Text>
 
-          <Text style={sm.label}>Date</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
-            <View style={sm.chipRow}>
-              {dateOptions.map((d, i) => {
-                const selected = date?.toDateString() === d.toDateString();
-                return (
-                  <TouchableOpacity
-                    key={i}
-                    style={[sm.chip, selected && { backgroundColor: brandColor, borderColor: brandColor }]}
-                    onPress={() => setDate(d)}
-                  >
-                    <Text style={[sm.chipText, selected && { color: '#fff' }]}>{formatDateLabel(d)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
+          {step === 'date' ? (
+            <>
+              <Text style={sm.label}>Select a date</Text>
+              <Text style={sm.monthLabel}>{monthLabel}</Text>
+              <View style={sm.weekdayRow}>
+                {WEEKDAY_LABELS.map((w) => (
+                  <Text key={w} style={sm.weekday}>{w}</Text>
+                ))}
+              </View>
+              <View style={sm.calGrid}>
+                {cells.map((cell, i) => {
+                  const selected = date?.toDateString() === cell.date.toDateString();
+                  return (
+                    <TouchableOpacity
+                      key={i}
+                      style={[
+                        sm.calCell,
+                        cell.outside && sm.calCellOutside,
+                        !cell.selectable && sm.calCellDisabled,
+                        selected && { backgroundColor: brandColor, borderColor: brandColor },
+                      ]}
+                      disabled={!cell.selectable}
+                      onPress={() => handlePickDate(cell.date)}
+                      activeOpacity={0.75}
+                    >
+                      <Text
+                        style={[
+                          sm.calDayText,
+                          cell.outside && sm.calDayOutside,
+                          !cell.selectable && sm.calDayDisabled,
+                          selected && { color: '#fff' },
+                        ]}
+                      >
+                        {cell.date.getDate()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={sm.backRow} onPress={() => setStep('date')} activeOpacity={0.7}>
+                <Ionicons name="chevron-back" size={18} color="#555" />
+                <Text style={sm.backText}>
+                  {date ? formatDateLabel(date) : 'Change date'}
+                </Text>
+              </TouchableOpacity>
 
-          <Text style={sm.label}>Time</Text>
-          <ScrollView style={{ maxHeight: 220 }}>
-            <View style={sm.slotGrid}>
-              {slots.map((slot, i) => {
-                const selected = selectedSlot?.getTime?.() === slot.getTime();
-                return (
-                  <TouchableOpacity
-                    key={i}
-                    style={[sm.slotChip, selected && { backgroundColor: brandColor, borderColor: brandColor }]}
-                    onPress={() => { onSelect(slot); onClose(); }}
-                  >
-                    <Text style={[sm.chipText, selected && { color: '#fff' }]}>{formatDateTo12(slot)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
+              <Text style={sm.label}>Available times</Text>
+              {loadingSlots ? (
+                <ActivityIndicator color={brandColor} style={{ marginVertical: 24 }} />
+              ) : availableSlots.length === 0 ? (
+                <Text style={sm.emptySlots}>No available times for this date. Pick another day.</Text>
+              ) : (
+                <ScrollView style={{ maxHeight: 260 }}>
+                  <View style={sm.slotGrid}>
+                    {availableSlots.map((slot, i) => {
+                      const selected = selectedSlot?.getTime?.() === slot.getTime();
+                      return (
+                        <TouchableOpacity
+                          key={i}
+                          style={[sm.slotChip, selected && { backgroundColor: brandColor, borderColor: brandColor }]}
+                          onPress={() => { onSelect(slot); onClose(); }}
+                        >
+                          <Text style={[sm.chipText, selected && { color: '#fff' }]}>{formatDateTo12(slot)}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              )}
+            </>
+          )}
         </View>
       </View>
     </Modal>
@@ -148,8 +265,28 @@ const sm = StyleSheet.create({
   closeBtn: { padding: 4 },
   note: { fontSize: 12, color: '#777', marginTop: 4, marginBottom: 10, lineHeight: 17 },
   label: { fontSize: 12, fontWeight: '700', color: '#555', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 12, marginBottom: 8 },
-  chipRow: { flexDirection: 'row', gap: 8, paddingRight: 12 },
-  chip: { borderWidth: 1.5, borderColor: '#e3e3e3', borderRadius: 18, paddingHorizontal: 13, paddingVertical: 8 },
+  monthLabel: { fontSize: 14, fontWeight: '700', color: '#111', marginBottom: 10 },
+  weekdayRow: { flexDirection: 'row', marginBottom: 6 },
+  weekday: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '600', color: '#999' },
+  calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  calCell: {
+    width: '14.28%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    marginBottom: 4,
+  },
+  calCellOutside: { opacity: 0.35 },
+  calCellDisabled: { opacity: 0.4 },
+  calDayText: { fontSize: 14, fontWeight: '600', color: '#222' },
+  calDayOutside: { color: '#aaa' },
+  calDayDisabled: { color: '#bbb', textDecorationLine: 'line-through' },
+  backRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 4, marginBottom: 4 },
+  backText: { fontSize: 14, fontWeight: '600', color: '#555' },
+  emptySlots: { fontSize: 13, color: '#888', lineHeight: 18, marginVertical: 16 },
   chipText: { fontSize: 13, fontWeight: '500', color: '#555' },
   slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   slotChip: { borderWidth: 1.5, borderColor: '#e3e3e3', borderRadius: 18, paddingHorizontal: 13, paddingVertical: 8, marginBottom: 2 },
@@ -159,7 +296,7 @@ const sm = StyleSheet.create({
 function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, scheduledSlot, onBack }) {
   const stripe = useStripe();
   const elements = useElements();
-  const { items, subtotal, tax, total, clearCart } = useCartContext();
+  const { cateringItems: items, cateringSubtotal: subtotal, cateringTax: tax, cateringTotal: total, clearCart } = useCartContext();
   const { user } = useAuth();
 
   const [name, setName] = useState('');
@@ -199,8 +336,10 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
         customerName: name,
         customerPhone: phone,
         customerEmail: email || null,
-        items: items.map(({ id, name: n, price, quantity, specialInstructions }) => ({
-          id, name: n, price, quantity, special_instructions: specialInstructions || '',
+        items: items.map(({ id, name: n, price, quantity, specialInstructions, selectedModifiers }) => ({
+          id, name: n, price, quantity,
+          special_instructions: specialInstructions || '',
+          selected_modifiers: selectedModifiers || [],
         })),
         subtotal,
         tax,
@@ -221,7 +360,7 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
         });
       }
 
-      clearCart();
+      clearCart('catering');
       navigation.replace('Confirmation', { order });
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
@@ -392,8 +531,15 @@ const ic = StyleSheet.create({
 export default function CateringScreen({ navigation }) {
   const { restaurant } = useRestaurantContext();
   const { categoriesWithItems, menuByCategory, loading } = useMenu(restaurant?.id, 'catering');
-  const { items: cartItems, subtotal, tax, total, addItem, removeItem, updateQuantity } = useCartContext();
-  const { user, customerProfile } = useAuth();
+  const {
+    cateringItems: cartItems,
+    cateringSubtotal: subtotal,
+    cateringTax: tax,
+    cateringTotal: total,
+    addItem,
+    removeItem,
+    updateQuantity,
+  } = useCartContext();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BP;
@@ -402,7 +548,6 @@ export default function CateringScreen({ navigation }) {
 
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [signInVisible, setSignInVisible] = useState(false);
   const [scheduleVisible, setScheduleVisible] = useState(false);
   const [locationVisible, setLocationVisible] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -424,8 +569,8 @@ export default function CateringScreen({ navigation }) {
     setModalVisible(true);
   }, []);
 
-  const handleAddToCart = useCallback((item, quantity = 1, specialInstructions = '') => {
-    addItem(item, quantity, specialInstructions);
+  const handleAddToCart = useCallback((item, quantity = 1, specialInstructions = '', menuType = 'catering', selectedModifiers = [], unitPrice) => {
+    addItem(item, quantity, specialInstructions, menuType || 'catering', selectedModifiers, unitPrice);
   }, [addItem]);
 
   const getSuggestedItems = useCallback((forItem) => {
@@ -507,27 +652,8 @@ export default function CateringScreen({ navigation }) {
     <View style={s.root}>
       <ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* ── Header ──────────────────────────────────── */}
+        {/* ── Location meta (navbar handles brand / sign-in) ── */}
         <View style={s.header}>
-          <View style={s.headerTop}>
-            <TouchableOpacity style={s.brandRow} onPress={() => navigation?.navigate('Home')} activeOpacity={0.8}>
-              {restaurant?.logo_url ? (
-                <Image source={{ uri: restaurant.logo_url }} style={s.logo} resizeMode="cover" />
-              ) : (
-                <View style={[s.logo, { backgroundColor: brandColor, alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={s.logoInitial}>{(restaurant?.name || 'R').charAt(0)}</Text>
-                </View>
-              )}
-              <Text style={s.brandName}>{restaurant?.name || 'Restaurant'}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={s.signInBtn} onPress={() => setSignInVisible(true)} activeOpacity={0.8}>
-              <Ionicons name="person-circle-outline" size={18} color="#333" />
-              <Text style={s.signInText}>{user && customerProfile ? 'Account' : 'Sign in'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Meta row */}
           <View style={s.metaRow}>
             <View style={s.metaItem}>
               <Ionicons name="location-outline" size={14} color={brandColor} />
@@ -646,6 +772,9 @@ export default function CateringScreen({ navigation }) {
                   {restaurant?.address ? (
                     <Text style={s.infoValue}>{restaurant.address}</Text>
                   ) : null}
+                  {restaurant?.phone ? (
+                    <Text style={s.infoValueMuted}>{restaurant.phone}</Text>
+                  ) : null}
                 </View>
                 <TouchableOpacity style={s.smallBtn} onPress={() => setLocationVisible(true)}>
                   <Text style={s.smallBtnText}>View</Text>
@@ -681,21 +810,28 @@ export default function CateringScreen({ navigation }) {
                       <View style={s.qtyControls}>
                         <TouchableOpacity
                           style={s.qtyBtn}
-                          onPress={() => updateQuantity(item.id, item.quantity - 1, item.specialInstructions)}
+                          onPress={() => updateQuantity(item.id, item.quantity - 1, item.specialInstructions, 'catering', item.selectedModifiers)}
                         >
                           <Ionicons name="remove" size={14} color="#555" />
                         </TouchableOpacity>
                         <Text style={s.qtyText}>{item.quantity}</Text>
                         <TouchableOpacity
                           style={s.qtyBtn}
-                          onPress={() => updateQuantity(item.id, item.quantity + 1, item.specialInstructions)}
+                          onPress={() => updateQuantity(item.id, item.quantity + 1, item.specialInstructions, 'catering', item.selectedModifiers)}
                         >
                           <Ionicons name="add" size={14} color="#555" />
                         </TouchableOpacity>
                       </View>
-                      <Text style={s.cartItemName} numberOfLines={1}>{item.name}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.cartItemName} numberOfLines={1}>{item.name}</Text>
+                        {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
+                          <Text style={s.cartItemMods} numberOfLines={2}>
+                            {item.selectedModifiers.map((m) => m.optionName).join(', ')}
+                          </Text>
+                        ) : null}
+                      </View>
                       <Text style={s.cartItemPrice}>${(item.price * item.quantity).toFixed(2)}</Text>
-                      <TouchableOpacity onPress={() => removeItem(item.id, item.specialInstructions)} style={{ padding: 4 }}>
+                      <TouchableOpacity onPress={() => removeItem(item.id, item.specialInstructions, 'catering', item.selectedModifiers)} style={{ padding: 4 }}>
                         <Ionicons name="close" size={15} color="#aaa" />
                       </TouchableOpacity>
                     </View>
@@ -745,8 +881,8 @@ export default function CateringScreen({ navigation }) {
         onClose={() => setModalVisible(false)}
         onAddToCart={handleAddToCart}
         suggestedItems={getSuggestedItems(selectedItem)}
+        menuType="catering"
       />
-      <CustomerSignInModal visible={signInVisible} onClose={() => setSignInVisible(false)} />
       <LocationModal
         visible={locationVisible}
         onClose={() => setLocationVisible(false)}
@@ -770,42 +906,18 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#fff' },
   scroll: { flex: 1 },
 
-  // Header
+  // Slim location meta (navbar provides brand / sign-in)
   header: {
     paddingHorizontal: 24,
-    paddingTop: 18,
+    paddingTop: 14,
     paddingBottom: 10,
     backgroundColor: '#fff',
   },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  logo: { width: 56, height: 56, borderRadius: 10 },
-  logoInitial: { color: '#fff', fontSize: 24, fontWeight: '900' },
-  brandName: { fontSize: 26, fontWeight: '900', color: '#111', letterSpacing: -0.5 },
-
-  signInBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 100,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  signInText: { fontSize: 13, fontWeight: '600', color: '#333' },
-
-  // Meta row
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 14,
-    marginTop: 12,
   },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   metaText: { fontSize: 12, fontWeight: '500' },
@@ -870,30 +982,31 @@ const s = StyleSheet.create({
   },
   toggleText: { fontSize: 13, fontWeight: '700' },
 
-  // Info card
+  // Info card — enlarged pickup location + time
   infoCard: {
     borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    padding: 14,
+    borderColor: '#e5e5e5',
+    borderRadius: 14,
+    padding: 18,
     marginBottom: 16,
     backgroundColor: '#fff',
   },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   infoRowText: { flex: 1 },
-  infoLabel: { fontSize: 11, color: '#999', marginBottom: 3 },
-  infoValueBold: { fontSize: 13, fontWeight: '700', color: '#111' },
-  infoValue: { fontSize: 12, color: '#555', marginTop: 1, lineHeight: 17 },
-  infoDivider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 12 },
+  infoLabel: { fontSize: 12, color: '#999', marginBottom: 4, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3 },
+  infoValueBold: { fontSize: 15, fontWeight: '700', color: '#111' },
+  infoValue: { fontSize: 13, color: '#555', marginTop: 3, lineHeight: 18 },
+  infoValueMuted: { fontSize: 12, color: '#888', marginTop: 2 },
+  infoDivider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 14 },
   smallBtn: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     backgroundColor: '#f6f6f6',
   },
-  smallBtnText: { fontSize: 12, fontWeight: '600', color: '#333' },
+  smallBtnText: { fontSize: 13, fontWeight: '600', color: '#333' },
 
   // Items card
   itemsCard: {
@@ -919,6 +1032,7 @@ const s = StyleSheet.create({
   },
   qtyText: { fontSize: 13, fontWeight: '700', color: '#111', minWidth: 18, textAlign: 'center' },
   cartItemName: { flex: 1, fontSize: 13, color: '#333' },
+  cartItemMods: { fontSize: 11, color: '#888', marginTop: 2 },
   cartItemPrice: { fontSize: 13, fontWeight: '600', color: '#111' },
 
   totalsBlock: { borderTopWidth: 1, borderTopColor: '#f0f0f0', marginTop: 8, paddingTop: 10, gap: 5 },

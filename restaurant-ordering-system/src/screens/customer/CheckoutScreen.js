@@ -20,9 +20,12 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useAuth } from '../../context/AuthContext';
 import OrderSummary from '../../components/OrderSummary';
+import LocationCard from '../../components/LocationCard';
 import { createPaymentIntent } from '../../services/stripeApi';
 import { createOrder } from '../../services/orderService';
+import { awardPoints } from '../../services/rewardsService';
 
 const ORDER_TYPES = ['pickup', 'delivery'];
 const TIME_OPTIONS = ['ASAP', '15 min', '30 min', '45 min', '1 hour'];
@@ -33,6 +36,7 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
   const stripe = useStripe();
   const elements = useElements();
   const { items, subtotal, tax, total, clearCart } = useCartContext();
+  const { user } = useAuth();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -91,12 +95,13 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
         customerName: name,
         customerPhone: phone,
         customerEmail: email || null,
-        items: items.map(({ id, name: itemName, price, quantity, specialInstructions }) => ({
+        items: items.map(({ id, name: itemName, price, quantity, specialInstructions, selectedModifiers }) => ({
           id,
           name: itemName,
           price,
           quantity,
           special_instructions: specialInstructions || '',
+          selected_modifiers: selectedModifiers || [],
         })),
         subtotal,
         tax,
@@ -106,6 +111,16 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
         notes: notes || null,
         paymentIntentId: paymentIntent?.id,
       });
+
+      // Award points to signed-in customers (silent — never blocks order flow)
+      if (user?.id && restaurant?.id) {
+        awardPoints({
+          restaurantId: restaurant.id,
+          authUserId: user.id,
+          orderTotal: total,
+          pointsPerDollar: restaurant.points_per_dollar ?? 1,
+        });
+      }
 
       clearCart();
       navigation.replace('Confirmation', { order });
@@ -222,6 +237,20 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
             })}
           </View>
         </ScrollView>
+
+        {/* ── Pickup location confirmation ───── */}
+        {orderType === 'pickup' && (
+          <View style={{ marginTop: 20 }}>
+            <Text style={s.fieldLabel}>Pickup Location</Text>
+            <View style={{ marginTop: 8 }}>
+              <LocationCard
+                restaurant={restaurant}
+                variant="compact"
+                brandColor={theme.colors.brand}
+              />
+            </View>
+          </View>
+        )}
       </View>
 
       <View style={s.sectionDivider} />

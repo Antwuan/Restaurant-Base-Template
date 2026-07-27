@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal,
   View,
@@ -11,6 +11,7 @@ import {
   Platform,
   KeyboardAvoidingView,
   Pressable,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
@@ -61,30 +62,91 @@ export default function MenuItemModal({
   onClose,
   onAddToCart,
   suggestedItems = [],
+  menuType = 'regular',
 }) {
   const { theme } = useTheme();
   const { user } = useAuth();
   const [quantity, setQuantity] = useState(1);
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState(new Set());
+  // { [groupId]: string[] optionIds }
+  const [selectedByGroup, setSelectedByGroup] = useState({});
+  const [modifierError, setModifierError] = useState('');
+
+  // Entrance animation — scale + fade
+  const cardScale = useRef(new Animated.Value(0.88)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  const modifierGroups = Array.isArray(item?.modifier_groups) ? item.modifier_groups : [];
 
   useEffect(() => {
     if (visible) {
       setQuantity(1);
       setSpecialInstructions('');
       setSelectedSuggestionIds(new Set());
+      setModifierError('');
+
+      const defaults = {};
+      for (const g of item?.modifier_groups || []) {
+        const available = (g.options || []).filter((o) => o.is_available !== false);
+        const defaultOpts = available.filter((o) => o.is_default).map((o) => o.id);
+        if (g.selection_type === 'single') {
+          defaults[g.id] = defaultOpts.length
+            ? [defaultOpts[0]]
+            : (g.is_required && available[0] ? [available[0].id] : []);
+        } else {
+          defaults[g.id] = defaultOpts;
+        }
+      }
+      setSelectedByGroup(defaults);
+
+      cardScale.setValue(0.88);
+      cardOpacity.setValue(0);
+      backdropOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.timing(cardOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(cardScale, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 220,
+          friction: 18,
+        }),
+      ]).start();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, item?.id]);
 
   if (!item) return null;
 
   const isUnavailable = !item.is_available;
 
+  const selectedModifiers = [];
+  let modifiersDelta = 0;
+  for (const g of modifierGroups) {
+    const ids = selectedByGroup[g.id] || [];
+    for (const optId of ids) {
+      const opt = (g.options || []).find((o) => o.id === optId);
+      if (!opt) continue;
+      const delta = Number(opt.price_delta) || 0;
+      modifiersDelta += delta;
+      selectedModifiers.push({
+        groupId: g.id,
+        groupName: g.name,
+        optionId: opt.id,
+        optionName: opt.name,
+        priceDelta: delta,
+      });
+    }
+  }
+
   const suggestionsSubtotal = suggestedItems
     .filter((s) => selectedSuggestionIds.has(s.id))
     .reduce((sum, s) => sum + Number(s.price ?? 0), 0);
 
-  const totalPrice = (Number(item.price ?? 0) * quantity + suggestionsSubtotal).toFixed(2);
+  const unitPrice = Number(item.price ?? 0) + modifiersDelta;
+  const totalPrice = (unitPrice * quantity + suggestionsSubtotal).toFixed(2);
 
   const handleDecrease = () => setQuantity((q) => Math.max(1, q - 1));
   const handleIncrease = () => setQuantity((q) => q + 1);
@@ -101,12 +163,56 @@ export default function MenuItemModal({
     });
   };
 
+  const selectSingle = (groupId, optionId) => {
+    setSelectedByGroup((prev) => ({ ...prev, [groupId]: [optionId] }));
+    setModifierError('');
+  };
+
+  const toggleMulti = (group, optionId) => {
+    setSelectedByGroup((prev) => {
+      const current = prev[group.id] || [];
+      const exists = current.includes(optionId);
+      let next;
+      if (exists) {
+        next = current.filter((id) => id !== optionId);
+      } else {
+        const max = group.max_select || 99;
+        if (current.length >= max) {
+          next = [...current.slice(1), optionId];
+        } else {
+          next = [...current, optionId];
+        }
+      }
+      return { ...prev, [group.id]: next };
+    });
+    setModifierError('');
+  };
+
+  const validateModifiers = () => {
+    for (const g of modifierGroups) {
+      const count = (selectedByGroup[g.id] || []).length;
+      const min = g.is_required ? Math.max(1, g.min_select || 1) : (g.min_select || 0);
+      if (count < min) {
+        return `Please choose ${g.selection_type === 'single' ? 'an option' : 'options'} for ${g.name}`;
+      }
+      if (g.max_select && count > g.max_select) {
+        return `Too many options selected for ${g.name}`;
+      }
+    }
+    return '';
+  };
+
   const handleAdd = () => {
     if (isUnavailable) return;
-    onAddToCart(item, quantity, specialInstructions);
+    const err = validateModifiers();
+    if (err) {
+      setModifierError(err);
+      return;
+    }
+    onAddToCart(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
     suggestedItems
       .filter((s) => selectedSuggestionIds.has(s.id))
-      .forEach((s) => onAddToCart(s, 1, ''));
+      .forEach((s) => onAddToCart(s, 1, '', menuType, [], Number(s.price ?? 0)));
     onClose();
   };
 
@@ -116,7 +222,7 @@ export default function MenuItemModal({
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType="none"
       onRequestClose={onClose}
       statusBarTranslucent
     >
@@ -125,10 +231,17 @@ export default function MenuItemModal({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {/* Dimmed backdrop — tap to close */}
-        <Pressable style={styles.backdrop} onPress={onClose} />
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}>
+          <Pressable style={styles.backdrop} onPress={onClose} />
+        </Animated.View>
 
-        {/* Floating card */}
-        <View style={styles.card}>
+        {/* Floating card — scale + fade entrance */}
+        <Animated.View
+          style={[
+            styles.card,
+            { opacity: cardOpacity, transform: [{ scale: cardScale }] },
+          ]}
+        >
           {/* ── Image ── */}
           <View style={styles.imageWrap}>
             {item.image_url ? (
@@ -181,6 +294,65 @@ export default function MenuItemModal({
             </View>
 
             <View style={styles.divider} />
+
+            {/* ── Customizations ── */}
+            {!isUnavailable && modifierGroups.length > 0 && (
+              <>
+                {modifierGroups.map((group) => {
+                  const selectedIds = selectedByGroup[group.id] || [];
+                  const available = (group.options || []).filter((o) => o.is_available !== false);
+                  return (
+                    <View key={group.id} style={styles.section}>
+                      <Text style={styles.sectionTitle}>
+                        {group.name}
+                        {group.is_required ? ' *' : ''}
+                      </Text>
+                      <Text style={styles.sectionSubtitle}>
+                        {group.selection_type === 'single'
+                          ? 'Choose one'
+                          : `Choose up to ${group.max_select || available.length}`}
+                      </Text>
+                      {available.map((opt) => {
+                        const selected = selectedIds.includes(opt.id);
+                        const delta = Number(opt.price_delta) || 0;
+                        return (
+                          <TouchableOpacity
+                            key={opt.id}
+                            style={[styles.modOptionRow, selected && styles.modOptionSelected]}
+                            onPress={() =>
+                              group.selection_type === 'single'
+                                ? selectSingle(group.id, opt.id)
+                                : toggleMulti(group, opt.id)
+                            }
+                            activeOpacity={0.75}
+                          >
+                            <View style={[
+                              styles.modRadio,
+                              group.selection_type === 'multi' && styles.modCheck,
+                              selected && styles.modRadioSelected,
+                            ]}>
+                              {selected ? (
+                                <Ionicons name="checkmark" size={12} color="#fff" />
+                              ) : null}
+                            </View>
+                            <Text style={styles.modOptionName}>{opt.name}</Text>
+                            {delta > 0 ? (
+                              <Text style={styles.modOptionPrice}>+${delta.toFixed(2)}</Text>
+                            ) : delta < 0 ? (
+                              <Text style={styles.modOptionPrice}>-${Math.abs(delta).toFixed(2)}</Text>
+                            ) : null}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
+                {modifierError ? (
+                  <Text style={styles.modError}>{modifierError}</Text>
+                ) : null}
+                <View style={styles.divider} />
+              </>
+            )}
 
             {/* ── Special requests ── */}
             {!isUnavailable && (
@@ -281,7 +453,7 @@ export default function MenuItemModal({
               </TouchableOpacity>
             </View>
           )}
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -429,6 +601,55 @@ const styles = StyleSheet.create({
     minHeight: 80,
     backgroundColor: '#fafafa',
     ...Platform.select({ web: { outlineStyle: 'none' } }),
+  },
+  modOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ececec',
+    marginBottom: 8,
+    backgroundColor: '#fff',
+  },
+  modOptionSelected: {
+    borderColor: '#111',
+    backgroundColor: '#f7f7f7',
+  },
+  modRadio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderColor: '#bbb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modCheck: {
+    borderRadius: 4,
+  },
+  modRadioSelected: {
+    backgroundColor: '#111',
+    borderColor: '#111',
+  },
+  modOptionName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#222',
+  },
+  modOptionPrice: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  modError: {
+    color: '#dc2626',
+    fontSize: 13,
+    paddingHorizontal: 20,
+    marginBottom: 8,
   },
 
   // Pay with points

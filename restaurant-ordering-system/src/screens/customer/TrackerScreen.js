@@ -10,6 +10,7 @@ import {
   Platform,
   useWindowDimensions,
   Animated,
+  Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
@@ -46,60 +47,146 @@ function formatEta(createdAt) {
   return eta.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+function formatScheduledPickup(isoString) {
+  if (!isoString) return null;
+  const d = new Date(isoString);
+  return d.toLocaleString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
+// ─── Pulsing ring for active step ─────────────────────────────────────────────
 
-function ProgressBar({ stepIndex, brandColor }) {
-  const totalSteps = TRACKER_STEPS.length;
-  const progressAnim = useRef(new Animated.Value(0)).current;
+function PulsingRing({ color }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.6)).current;
 
   useEffect(() => {
-    const target = stepIndex / (totalSteps - 1);
-    Animated.timing(progressAnim, {
-      toValue: target,
-      duration: 600,
-      useNativeDriver: false,
-    }).start();
-  }, [stepIndex, totalSteps, progressAnim]);
+    const pulse = Animated.loop(
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(scale, {
+            toValue: 1.7,
+            duration: 900,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(scale, {
+            toValue: 1,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 0,
+            duration: 900,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.6,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    );
+    pulse.start();
+    return () => pulse.stop();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const widthInterpolated = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        {
+          borderRadius: 30,
+          borderWidth: 2,
+          borderColor: color,
+          opacity,
+          transform: [{ scale }],
+        },
+      ]}
+    />
+  );
+}
+
+// ─── Sub-components ────────────────────────────────────────────────────────────
+
+function ProgressBar({ stepIndex }) {
+  const DONE = '#22C55E';
+  const ACTIVE = '#3B82F6';
+  const UPCOMING = '#d1d5db';
+  const segmentCount = TRACKER_STEPS.length - 1;
+  const isFinalComplete = stepIndex >= TRACKER_STEPS.length - 1;
 
   return (
     <View style={styles.progressContainer}>
-      {/* Track */}
-      <View style={styles.progressTrack}>
-        <Animated.View
-          style={[styles.progressFill, { width: widthInterpolated, backgroundColor: brandColor }]}
-        />
+      {/* Segmented connectors between the 3 steps */}
+      <View style={styles.segmentsRow} pointerEvents="none">
+        {Array.from({ length: segmentCount }).map((_, i) => {
+          const completed = isFinalComplete || stepIndex > i;
+          const active = !isFinalComplete && stepIndex === i;
+          const color = completed ? DONE : active ? ACTIVE : UPCOMING;
+          return (
+            <View
+              key={i}
+              style={[
+                styles.segment,
+                { backgroundColor: color },
+                active && styles.segmentActiveGlow,
+              ]}
+            />
+          );
+        })}
       </View>
 
       {/* Step dots */}
       <View style={styles.stepsRow}>
         {TRACKER_STEPS.map((step, i) => {
-          const done = i <= stepIndex;
+          const done = isFinalComplete || i < stepIndex;
+          const isActiveStep = !isFinalComplete && i === stepIndex;
+          const upcoming = !done && !isActiveStep;
+          const dotColor = done ? DONE : isActiveStep ? ACTIVE : UPCOMING;
           return (
             <View key={step.key} style={styles.stepItem}>
-              <View
+              <View style={styles.stepDotWrap}>
+                {isActiveStep ? <PulsingRing color={ACTIVE} /> : null}
+                <View
+                  style={[
+                    styles.stepDot,
+                    done || isActiveStep
+                      ? { backgroundColor: dotColor, borderColor: dotColor }
+                      : styles.stepDotInactive,
+                    isActiveStep && styles.stepDotActiveGlow,
+                  ]}
+                >
+                  {done || isActiveStep ? (
+                    <Ionicons name={step.icon} size={16} color="#fff" />
+                  ) : (
+                    <View style={styles.stepDotEmpty} />
+                  )}
+                </View>
+              </View>
+              <Text
                 style={[
-                  styles.stepDot,
-                  done
-                    ? { backgroundColor: brandColor, borderColor: brandColor }
-                    : styles.stepDotInactive,
+                  styles.stepLabel,
+                  done && { color: DONE, fontWeight: '700' },
+                  isActiveStep && { color: ACTIVE, fontWeight: '700' },
+                  upcoming && { color: '#9ca3af' },
                 ]}
               >
-                {done ? (
-                  <Ionicons name={step.icon} size={16} color="#fff" />
-                ) : (
-                  <View style={styles.stepDotEmpty} />
-                )}
-              </View>
-              <Text style={[styles.stepLabel, done && { color: brandColor, fontWeight: '700' }]}>
                 {step.label}
               </Text>
             </View>
@@ -129,7 +216,9 @@ function OrderCard({ order, brandColor, onReset }) {
 
   const etaText = isCompleted
     ? 'Your order is ready for pickup!'
-    : `Estimated ready by ${formatEta(liveOrder.created_at)}`;
+    : liveOrder.scheduled_time
+      ? `Pickup at ${formatScheduledPickup(liveOrder.scheduled_time)}`
+      : `Estimated ready by ${formatEta(liveOrder.created_at)}`;
 
   return (
     <View style={styles.card}>
@@ -159,7 +248,7 @@ function OrderCard({ order, brandColor, onReset }) {
         </View>
       ) : (
         <>
-          <ProgressBar stepIndex={stepIndex} brandColor={brandColor} />
+          <ProgressBar stepIndex={stepIndex} />
 
           <View style={[styles.etaBox, { backgroundColor: isCompleted ? '#f0fdf4' : '#f8faff', borderColor: isCompleted ? '#86efac' : '#dbeafe' }]}>
             <Ionicons
@@ -179,10 +268,17 @@ function OrderCard({ order, brandColor, onReset }) {
       <View style={styles.itemsList}>
         <Text style={styles.itemsTitle}>Order Summary</Text>
         {(liveOrder.items || []).map((item, idx) => (
-          <View key={idx} style={styles.itemRow}>
-            <Text style={styles.itemQty}>{item.quantity}x</Text>
-            <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-            <Text style={styles.itemPrice}>{formatCurrency(item.price * item.quantity)}</Text>
+          <View key={idx} style={styles.itemRowWrap}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemQty}>{item.quantity}x</Text>
+              <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+              <Text style={styles.itemPrice}>{formatCurrency(item.price * item.quantity)}</Text>
+            </View>
+            {Array.isArray(item.selected_modifiers) && item.selected_modifiers.length > 0 ? (
+              <Text style={styles.itemMods}>
+                {item.selected_modifiers.map((m) => m.optionName || m.option_name).join(', ')}
+              </Text>
+            ) : null}
           </View>
         ))}
         <View style={styles.totalRow}>
@@ -504,27 +600,53 @@ const styles = StyleSheet.create({
   // ── Progress bar
   progressContainer: {
     marginBottom: 20,
+    position: 'relative',
   },
-  progressTrack: {
+  segmentsRow: {
+    position: 'absolute',
+    left: 40,
+    right: 40,
+    top: 12,
     height: 6,
-    backgroundColor: '#e5e7eb',
-    borderRadius: 3,
-    marginBottom: 0,
-    marginHorizontal: 20,
-    overflow: 'hidden',
+    flexDirection: 'row',
+    gap: 0,
+    zIndex: 0,
   },
-  progressFill: {
-    height: '100%',
+  segment: {
+    flex: 1,
+    height: 6,
     borderRadius: 3,
+    backgroundColor: '#e5e7eb',
+  },
+  segmentActiveGlow: {
+    ...Platform.select({
+      web: { boxShadow: '0 0 10px rgba(59,130,246,0.55)' },
+      ios: {
+        shadowColor: '#3B82F6',
+        shadowOpacity: 0.55,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 0 },
+      },
+      android: { elevation: 3 },
+    }),
   },
   stepsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: -12,
+    position: 'relative',
+    zIndex: 1,
   },
   stepItem: {
     alignItems: 'center',
     width: 80,
+  },
+  stepDotWrap: {
+    position: 'relative',
+    width: 30,
+    height: 30,
+    marginBottom: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   stepDot: {
     width: 30,
@@ -534,7 +656,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     backgroundColor: '#fff',
-    marginBottom: 6,
+  },
+  stepDotActiveGlow: {
+    ...Platform.select({
+      web: { boxShadow: '0 0 12px rgba(59,130,246,0.65)' },
+      ios: {
+        shadowColor: '#3B82F6',
+        shadowOpacity: 0.65,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 0 },
+      },
+      android: { elevation: 4 },
+    }),
   },
   stepDotInactive: {
     borderColor: '#d1d5db',
@@ -600,8 +733,16 @@ const styles = StyleSheet.create({
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
     gap: 8,
+  },
+  itemRowWrap: {
+    marginBottom: 8,
+  },
+  itemMods: {
+    fontSize: 12,
+    color: '#9ca3af',
+    paddingLeft: 36,
   },
   itemQty: {
     fontSize: 13,

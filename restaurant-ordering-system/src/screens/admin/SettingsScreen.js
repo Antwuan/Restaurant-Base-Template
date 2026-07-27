@@ -203,7 +203,20 @@ export default function SettingsScreen() {
     >
       {/* ── Restaurant Info ───────────────────────────────── */}
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
-        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Restaurant Info</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={[styles.sectionTitle, { color: c.textSecondary, marginBottom: 0 }]}>Restaurant Info</Text>
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: c.brand }, saving && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.saveBtnText}>Save</Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.field}>
           <Text style={[styles.label, { color: c.textSecondary }]}>Phone Number</Text>
@@ -242,26 +255,29 @@ export default function SettingsScreen() {
             numberOfLines={2}
           />
         </View>
-
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: c.brand }, saving && styles.saveBtnDisabled]}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveBtnText}>Save Changes</Text>
-          )}
-        </TouchableOpacity>
       </View>
 
       {/* ── Hours of Service ──────────────────────────────── */}
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
-        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Hours of Service</Text>
-        <Text style={[styles.sectionSub, { color: c.textSecondary }]}>
-          Used on the location card and for catering scheduling.
-        </Text>
+        <View style={styles.sectionHeaderRow}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={[styles.sectionTitle, { color: c.textSecondary, marginBottom: 2 }]}>Hours of Service</Text>
+            <Text style={[styles.sectionSub, { color: c.textSecondary, marginBottom: 0 }]}>
+              Used on the location card and for catering scheduling.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: c.brand }, saving && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.saveBtnText}>Save</Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
         {DAY_KEYS.map((key) => {
           const day = hours[key] || {};
@@ -320,18 +336,6 @@ export default function SettingsScreen() {
             </View>
           );
         })}
-
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: c.brand, marginTop: 16 }, saving && styles.saveBtnDisabled]}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveBtnText}>Save Hours</Text>
-          )}
-        </TouchableOpacity>
       </View>
 
       {/* ── Appearance ────────────────────────────────────── */}
@@ -354,7 +358,16 @@ export default function SettingsScreen() {
 
       {/* ── Order Settings ────────────────────────────────── */}
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
-        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Order Settings</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={[styles.sectionTitle, { color: c.textSecondary, marginBottom: 0 }]}>Order Settings</Text>
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: c.brand }, saving && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Save</Text>}
+          </TouchableOpacity>
+        </View>
         <View style={styles.row}>
           <View>
             <Text style={[styles.rowLabel, { color: c.textPrimary }]}>Accepting Orders</Text>
@@ -368,13 +381,6 @@ export default function SettingsScreen() {
             trackColor={{ true: '#34C759', false: '#ccc' }}
           />
         </View>
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: c.brand, marginTop: 12 }, saving && styles.saveBtnDisabled]}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save</Text>}
-        </TouchableOpacity>
       </View>
 
       {/* ── Account ───────────────────────────────────────── */}
@@ -394,7 +400,7 @@ export default function SettingsScreen() {
           disabled={signingOut}
         >
           {signingOut ? (
-            <ActivityIndicator color="#FF3B30" />
+            <ActivityIndicator color="#FF3B30" size="small" />
           ) : (
             <Text style={styles.signOutText}>Sign Out</Text>
           )}
@@ -410,79 +416,89 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { padding: 16, paddingBottom: 60 },
+  content: { padding: 12, paddingBottom: 48 },
   section: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
     borderWidth: 1,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    gap: 10,
+  },
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
     marginBottom: 4,
   },
   sectionSub: {
-    fontSize: 12,
-    marginBottom: 14,
-    lineHeight: 17,
+    fontSize: 11,
+    marginBottom: 10,
+    lineHeight: 15,
   },
-  field: { marginBottom: 14 },
-  label: { fontSize: 13, marginBottom: 6, fontWeight: '500' },
+  field: { marginBottom: 10 },
+  label: { fontSize: 12, marginBottom: 4, fontWeight: '500' },
   input: {
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 15,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
   },
-  inputMultiline: { height: 64, textAlignVertical: 'top' },
+  inputMultiline: { height: 52, textAlignVertical: 'top' },
   saveBtn: {
-    borderRadius: 8,
-    padding: 14,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     alignItems: 'center',
-    marginTop: 4,
+    justifyContent: 'center',
+    minWidth: 56,
   },
   saveBtnDisabled: { opacity: 0.55 },
-  saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  saveBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
   // Hours rows
   hoursRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderTopWidth: 1,
-    gap: 12,
+    gap: 10,
   },
-  hoursDayCol: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
-  hoursSwitch: { transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }] },
-  hoursDay: { fontSize: 14, fontWeight: '600' },
-  hoursTimeCol: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  hoursTimeGroup: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  hoursTimeLabel: { fontSize: 12, color: '#999', minWidth: 26 },
+  hoursDayCol: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 6 },
+  hoursSwitch: { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] },
+  hoursDay: { fontSize: 13, fontWeight: '600' },
+  hoursTimeCol: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  hoursTimeGroup: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  hoursTimeLabel: { fontSize: 11, color: '#999', minWidth: 24 },
   closedSlot: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 72 },
-  closedSlotText: { fontSize: 12 },
+  closedSlotText: { fontSize: 11 },
 
   // Other rows
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 2,
   },
-  rowLabel: { fontSize: 15, fontWeight: '500' },
-  rowSub: { fontSize: 12, marginTop: 2 },
+  rowLabel: { fontSize: 14, fontWeight: '500' },
+  rowSub: { fontSize: 11, marginTop: 1 },
   linkRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
-  linkText: { fontSize: 15 },
-  chevron: { fontSize: 20 },
-  divider: { height: 1, marginVertical: 4 },
-  signOutBtn: { paddingVertical: 10, alignItems: 'center' },
-  signOutText: { color: '#FF3B30', fontSize: 15, fontWeight: '600' },
-  version: { textAlign: 'center', fontSize: 12, marginTop: 8 },
+  linkText: { fontSize: 14 },
+  chevron: { fontSize: 18 },
+  divider: { height: 1, marginVertical: 2 },
+  signOutBtn: { paddingVertical: 8, alignItems: 'flex-start' },
+  signOutText: { color: '#FF3B30', fontSize: 14, fontWeight: '600' },
+  version: { textAlign: 'center', fontSize: 11, marginTop: 4 },
 });

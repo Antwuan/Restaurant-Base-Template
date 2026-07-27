@@ -9,6 +9,16 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Cell,
+} from 'recharts';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { getOrders } from '../../services/orderService';
 import { getMenuItems } from '../../services/menuService';
@@ -327,103 +337,72 @@ function MarginBadge({ margin }) {
   );
 }
 
-function RevenueBarChart({ buckets, selectedKey, onSelect }) {
-  const { theme } = useTheme();
-  const c = theme.colors;
+function RevenueTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  return (
+    <View style={styles.rechartsTooltip}>
+      <Text style={styles.rechartsTooltipTitle}>
+        {row.label}{row.subLabel ? ` · ${row.subLabel}` : ''}
+      </Text>
+      <Text style={styles.rechartsTooltipValue}>{formatCurrency(row.revenue)}</Text>
+      <Text style={styles.rechartsTooltipCount}>
+        {row.count} order{row.count !== 1 ? 's' : ''}
+      </Text>
+    </View>
+  );
+}
 
-  const maxRevenue = Math.max(...buckets.map((b) => b.revenue), 0);
-  const yTicks = maxRevenue > 0
-    ? [maxRevenue, maxRevenue / 2, 0]
-    : [0];
+function RevenueBarChart({ buckets, selectedKey, onSelect, brandColor, brandDark, gridColor, tickColor }) {
+  const chartData = buckets.map((b) => ({
+    ...b,
+    name: b.label,
+  }));
 
   return (
-    <View>
-      <View style={styles.chartBody}>
-        {/* Y-axis labels */}
-        <View style={styles.yAxis}>
-          {yTicks.map((tick, i) => (
-            <Text key={i} style={[styles.yTick, { color: c.textDisabled }]}>
-              {formatCurrencyShort(tick)}
-            </Text>
-          ))}
-        </View>
-
-        {/* Bars */}
-        <View style={styles.barsArea}>
-          {/* Grid lines */}
-          <View style={[styles.gridLine, { top: 0, backgroundColor: c.border }]} />
-          <View style={[styles.gridLine, { top: '50%', backgroundColor: c.border }]} />
-          <View style={[styles.gridLine, { bottom: 0, backgroundColor: c.border }]} />
-
-          <View style={styles.barsRow}>
-            {buckets.map((b) => {
-              const heightPct = maxRevenue > 0 ? (b.revenue / maxRevenue) * 100 : 0;
-              const isSelected = selectedKey === b.key;
-              const isEmpty = b.revenue === 0;
-              return (
-                <TouchableOpacity
-                  key={b.key}
-                  style={styles.barCol}
-                  onPress={() => onSelect(isSelected ? null : b.key)}
-                  activeOpacity={0.75}
-                >
-                  {isSelected && (
-                    <View style={styles.barTooltip}>
-                      <Text style={[styles.barTooltipValue, { color: c.textPrimary }]}>
-                        {formatCurrency(b.revenue)}
-                      </Text>
-                      <Text style={[styles.barTooltipCount, { color: c.textSecondary }]}>
-                        {b.count} order{b.count !== 1 ? 's' : ''}
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.barTrack}>
-                    <View
-                      style={[
-                        styles.barFill,
-                        {
-                          height: `${Math.max(heightPct, isEmpty ? 0 : 2)}%`,
-                          backgroundColor: isSelected ? c.brandDark : c.brand,
-                          opacity: isEmpty ? 0.15 : 1,
-                        },
-                      ]}
-                    />
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      </View>
-
-      {/* X-axis labels */}
-      <View style={styles.xAxis}>
-        <View style={styles.yAxisSpacer} />
-        <View style={styles.xLabelsRow}>
-          {buckets.map((b) => {
-            const isSelected = selectedKey === b.key;
-            return (
-              <View key={b.key} style={styles.xLabelCol}>
-                <Text
-                  style={[
-                    styles.xLabel,
-                    { color: isSelected ? c.brand : c.textSecondary },
-                    isSelected && styles.xLabelSelected,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {b.label}
-                </Text>
-                {b.subLabel ? (
-                  <Text style={[styles.xSubLabel, { color: c.textDisabled }]} numberOfLines={1}>
-                    {b.subLabel}
-                  </Text>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
-      </View>
+    <View style={styles.rechartsWrap}>
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT + 40}>
+        <BarChart
+          data={chartData}
+          margin={{ top: 12, right: 8, left: 0, bottom: 4 }}
+          onClick={(state) => {
+            const key = state?.activePayload?.[0]?.payload?.key;
+            if (!key) return;
+            onSelect(selectedKey === key ? null : key);
+          }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fill: tickColor, fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tickFormatter={(v) => formatCurrencyShort(v)}
+            tick={{ fill: tickColor, fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            width={48}
+          />
+          <Tooltip
+            cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+            content={<RevenueTooltip />}
+          />
+          <Bar dataKey="revenue" radius={[4, 4, 0, 0]} maxBarSize={42}>
+            {chartData.map((entry) => (
+              <Cell
+                key={entry.key}
+                fill={selectedKey === entry.key ? brandDark : brandColor}
+                opacity={entry.revenue === 0 ? 0.2 : 1}
+                cursor="pointer"
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </View>
   );
 }
@@ -674,6 +653,10 @@ export default function AnalyticsScreen() {
           buckets={chartBuckets}
           selectedKey={selectedBar}
           onSelect={setSelectedBar}
+          brandColor={c.brand}
+          brandDark={c.brandDark || c.brand}
+          gridColor={c.border}
+          tickColor={c.textDisabled}
         />
       </View>
 
@@ -987,7 +970,39 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Bar chart
+  rechartsWrap: {
+    width: '100%',
+    height: CHART_HEIGHT + 40,
+    minHeight: CHART_HEIGHT + 40,
+  },
+  rechartsTooltip: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    ...Platform.select({
+      web: { boxShadow: '0 4px 12px rgba(0,0,0,0.12)' },
+    }),
+  },
+  rechartsTooltipTitle: {
+    fontSize: 11,
+    color: '#666',
+    marginBottom: 2,
+  },
+  rechartsTooltipValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111',
+  },
+  rechartsTooltipCount: {
+    fontSize: 11,
+    color: '#888',
+    marginTop: 2,
+  },
+
+  // Bar chart (legacy layout helpers kept for mix charts below)
   chartBody: {
     flexDirection: 'row',
     height: CHART_HEIGHT,

@@ -24,6 +24,7 @@ import MenuItemModal from '../../components/MenuItemModal';
 
 const SIDEBAR_WIDTH = 188;
 const DESKTOP_BREAKPOINT = 768;
+const NAVBAR_OFFSET = 60;
 
 export default function MenuScreen() {
   const { restaurant } = useRestaurantContext();
@@ -78,8 +79,8 @@ export default function MenuScreen() {
     return results;
   }, [categoriesWithItems, menuByCategory]);
 
-  const handleAddToCart = useCallback((item, quantity = 1, specialInstructions = '') => {
-    addItem(item, quantity, specialInstructions);
+  const handleAddToCart = useCallback((item, quantity = 1, specialInstructions = '', menuType = 'regular', selectedModifiers = [], unitPrice) => {
+    addItem(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
   }, [addItem]);
 
   const handleModalClose = useCallback(() => {
@@ -88,13 +89,40 @@ export default function MenuScreen() {
 
   const handleSidebarPress = useCallback((categoryId) => {
     setActiveCategoryId(categoryId);
-    const ref = sectionRefs.current[categoryId];
-    if (ref) {
-      // On web, use scrollIntoView for smooth scrolling
-      if (Platform.OS === 'web' && ref.scrollIntoView) {
-        ref.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const section = sectionRefs.current[categoryId];
+    const scroll = scrollRef.current;
+    if (!section || !scroll) return;
+
+    const scrollToSection = (y) => {
+      scroll.scrollTo({ y: Math.max(0, y - NAVBAR_OFFSET), animated: true });
+    };
+
+    const webFallback = () => {
+      if (Platform.OS === 'web' && typeof section.scrollIntoView === 'function') {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    // Prefer measureLayout + scrollTo (web + native); scrollIntoView as web fallback
+    if (typeof section.measureLayout === 'function' && typeof scroll.scrollTo === 'function') {
+      const relativeTo =
+        (typeof scroll.getInnerViewNode === 'function' && scroll.getInnerViewNode()) ||
+        (typeof scroll.getInnerViewRef === 'function' && scroll.getInnerViewRef()) ||
+        scroll;
+      try {
+        section.measureLayout(
+          relativeTo?.current ?? relativeTo,
+          (_x, y) => scrollToSection(y),
+          webFallback,
+        );
+        return;
+      } catch (_) {
+        webFallback();
+        return;
       }
     }
+
+    webFallback();
   }, []);
 
   const isEmpty = !loading && !error && categoriesWithItems.length === 0;
@@ -360,6 +388,7 @@ export default function MenuScreen() {
         onClose={handleModalClose}
         onAddToCart={handleAddToCart}
         suggestedItems={getSuggestedItems(selectedItem)}
+        menuType="regular"
       />
     </View>
   );
@@ -467,9 +496,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // ── Menu layout
+  // ── Menu layout (no flex:1 — lets outer ScrollView grow with content)
   menuLayout: {
-    flex: 1,
     flexDirection: 'column',
   },
   menuLayoutDesktop: {

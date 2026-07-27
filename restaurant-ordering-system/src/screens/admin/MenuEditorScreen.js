@@ -56,6 +56,7 @@ import { useCarousel } from '../../hooks/useCarousel';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
 import * as menuService from '../../services/menuService';
+import { replaceItemModifiers } from '../../services/modifierService';
 import {
   uploadFileFromUri,
   menuImageStoragePath,
@@ -312,7 +313,7 @@ export default function MenuEditorScreen() {
   }, [refreshMenu]);
 
   const persistMenuItem = useCallback(async ({
-    name, description, price, category_id, image_url, is_available, localImageUri,
+    name, description, price, cost, category_id, image_url, is_available, localImageUri, modifierGroups,
   }) => {
     const isNew = !selectedItem?.id;
     const itemId = selectedItem?.id ?? newItemId();
@@ -325,13 +326,15 @@ export default function MenuEditorScreen() {
         uri: localImageUri,
         contentType: 'image/jpeg',
       });
-      finalImageUrl = publicUrl;
+      // Cache-bust so browsers/CDN pick up the replaced object at the same path
+      finalImageUrl = `${publicUrl.split('?')[0]}?v=${Date.now()}`;
     }
 
     const payload = {
       name,
       description: description || null,
       price: typeof price === 'number' ? price : parseFloat(price),
+      cost: cost == null || cost === '' ? null : (typeof cost === 'number' ? cost : parseFloat(cost)),
       category_id,
       image_url: finalImageUrl || null,
       is_available: is_available ?? true,
@@ -348,6 +351,15 @@ export default function MenuEditorScreen() {
       });
     } else {
       await menuService.updateMenuItem(selectedItem.id, { restaurant_id: restaurant.id, ...payload });
+    }
+
+    if (Array.isArray(modifierGroups)) {
+      try {
+        await replaceItemModifiers(itemId, modifierGroups);
+      } catch (e) {
+        // Surface but don't block item save if migration isn't applied yet
+        console.warn('Failed to save modifiers:', e?.message || e);
+      }
     }
 
     await refreshMenu();

@@ -145,7 +145,7 @@ const s = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 680,
+    maxWidth: 880,
     backgroundColor: '#fff',
     borderRadius: 20,
     overflow: 'hidden',
@@ -157,7 +157,8 @@ const s = StyleSheet.create({
   },
   cardDesktop: {
     flexDirection: 'row',
-    maxHeight: 420,
+    maxHeight: 620,
+    minHeight: 620,
   },
 
   // Info panel
@@ -229,12 +230,13 @@ const s = StyleSheet.create({
 
   // Map panel
   mapPanel: {
-    height: 220,
+    height: 420,
     backgroundColor: '#e8ecef',
   },
   mapPanelDesktop: {
     flex: 1,
     height: 'auto',
+    minHeight: 620,
   },
   mapPlaceholder: {
     flex: 1,

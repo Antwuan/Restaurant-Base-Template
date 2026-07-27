@@ -36,6 +36,11 @@ const OrderSummary = ({ items = [], subtotal, tax, total, orderType, scheduledTi
                       {item.specialInstructions}
                     </Text>
                   ) : null}
+                  {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
+                    <Text style={styles.lineItemNote} numberOfLines={2}>
+                      {item.selectedModifiers.map((m) => m.optionName).join(', ')}
+                    </Text>
+                  ) : null}
                 </View>
               </View>
               <Text style={styles.lineItemPrice}>
