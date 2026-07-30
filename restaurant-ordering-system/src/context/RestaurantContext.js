@@ -11,12 +11,15 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { restaurantService } from '../services/restaurantService';
+import { useAuth } from './AuthContext';
+import { getRestaurantForUser } from '../services/authService';
 
 const RestaurantContext = createContext(null);
 
 const SESSION_SLUG_KEY = 'restaurant_slug';
 
 const RESERVED_PATH_SEGMENTS = new Set([
+  'home',
   'menu',
   'cart',
   'checkout',
@@ -82,7 +85,12 @@ function persistSlug(slug) {
   }
 }
 
+function isAdminPath() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+}
+
 export function RestaurantProvider({ children }) {
+  const { user } = useAuth();
   const [restaurant, setRestaurant] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -92,6 +100,22 @@ export function RestaurantProvider({ children }) {
     setError(null);
 
     try {
+      // Admin routes use the restaurant linked to the signed-in staff account.
+      if (isAdminPath() && user?.id) {
+        try {
+          const staffData = await getRestaurantForUser(user.id);
+          setRestaurant(staffData.restaurant);
+          return;
+        } catch (staffErr) {
+          setError(
+            staffErr.message ||
+              'No restaurant is linked to this admin account. Add a row to restaurant_staff in Supabase.',
+          );
+          setRestaurant(null);
+          return;
+        }
+      }
+
       const identifier = getRestaurantIdentifierFromURL();
 
       if (!identifier) {
@@ -132,7 +156,7 @@ export function RestaurantProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     loadRestaurant();
@@ -140,12 +164,19 @@ export function RestaurantProvider({ children }) {
     return () => window.removeEventListener('popstate', loadRestaurant);
   }, [loadRestaurant]);
 
+  // Silently apply a partial update to the local restaurant state without
+  // triggering a full reload (avoids flashing the app-wide loading spinner).
+  const patchRestaurant = useCallback((updates) => {
+    setRestaurant((prev) => (prev ? { ...prev, ...updates } : prev));
+  }, []);
+
   const contextValue = {
     restaurant,
     loading,
     error,
     refetch: loadRestaurant,
     refreshRestaurant: loadRestaurant,
+    patchRestaurant,
   };
 
   return (

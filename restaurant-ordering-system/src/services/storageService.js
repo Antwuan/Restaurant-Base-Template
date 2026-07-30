@@ -41,6 +41,14 @@ export function menuImageStoragePath(restaurantId, itemId, extension) {
   return `${restaurantId}/menu/${itemId}.${extension}`;
 }
 
+export function galleryStoragePath(restaurantId, imageId, extension = 'jpg') {
+  return `${restaurantId}/gallery/${imageId}.${extension}`;
+}
+
+export function aboutImageStoragePath(restaurantId, extension = 'jpg') {
+  return `${restaurantId}/about.${extension}`;
+}
+
 // ─── Applications (resume PDFs) ──────────────────────────────────────────────
 
 export const APPLICATIONS_BUCKET = 'applications';
