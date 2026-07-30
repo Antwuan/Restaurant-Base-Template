@@ -22,6 +22,25 @@ export function friendlySupabaseError(error, context = 'save') {
     );
   }
 
+  if (code === 'PGRST204' && message.includes('menu_carousel_slides')) {
+    return (
+      'The carousel slides table is missing a column the app expects. ' +
+      'Run supabase/migrations/20260728_carousel_slides_missing_columns.sql in the Supabase SQL Editor.'
+    );
+  }
+
+  if (
+    code === 'PGRST204' &&
+    (message.includes('menu_gallery_images') ||
+      message.includes('about_image_url') ||
+      message.includes('gallery_layout'))
+  ) {
+    return (
+      'Gallery tables/columns are missing. ' +
+      'Run supabase/migrations/20260728_gallery_settings.sql in the Supabase SQL Editor.'
+    );
+  }
+
   if (code === '23505') {
     return 'A category with that name already exists.';
   }

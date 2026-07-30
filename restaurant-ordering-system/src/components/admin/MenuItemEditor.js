@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme';
 import { confirmAsync } from '../../utils/confirm';
+import ImageFrameEditor from './ImageFrameEditor';
 
 const DEFAULT_FORM = {
   name: '',
@@ -91,6 +92,7 @@ export default function MenuItemEditor({
   const c = theme.colors;
   const [form, setForm] = useState(DEFAULT_FORM);
   const [localImageUri, setLocalImageUri] = useState(null);
+  const [frameUri, setFrameUri] = useState(null);
   const [modifierGroups, setModifierGroups] = useState([]);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -188,13 +190,17 @@ export default function MenuItemEditor({
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
+      allowsEditing: false,
+      quality: 1,
     });
     if (!result.canceled && result.assets?.[0]) {
-      setLocalImageUri(result.assets[0].uri);
+      setFrameUri(result.assets[0].uri);
     }
+  };
+
+  const handleReframeImage = () => {
+    const uri = localImageUri || form.image_url;
+    if (uri) setFrameUri(uri);
   };
 
   const handleSave = async () => {
@@ -270,12 +276,12 @@ export default function MenuItemEditor({
         <Pressable style={styles.backdrop} onPress={onClose} />
 
         <View style={[styles.card, { backgroundColor: c.backgroundCard }]}>
-          {/* Hero image — tap to pick */}
+          {/* Hero image — tap to reframe when present, otherwise pick */}
           <TouchableOpacity
             style={[styles.heroZone, { backgroundColor: c.backgroundSunken }]}
-            onPress={handlePickImage}
+            onPress={imageSource ? handleReframeImage : handlePickImage}
             activeOpacity={0.88}
-            accessibilityLabel="Tap to change photo"
+            accessibilityLabel={imageSource ? 'Tap to reframe photo' : 'Tap to add photo'}
           >
             {imageSource ? (
               <Image source={{ uri: imageSource }} style={styles.heroImage} resizeMode="cover" />
@@ -287,12 +293,21 @@ export default function MenuItemEditor({
                 </Text>
               </View>
             )}
-            {/* Edit overlay */}
             <View style={styles.heroOverlay}>
-              <Ionicons name="camera" size={16} color="#fff" />
-              <Text style={styles.heroOverlayText}>{imageSource ? 'Change' : 'Add Photo'}</Text>
+              <Ionicons name={imageSource ? 'crop-outline' : 'camera'} size={16} color="#fff" />
+              <Text style={styles.heroOverlayText}>{imageSource ? 'Reframe' : 'Add Photo'}</Text>
             </View>
           </TouchableOpacity>
+          {imageSource ? (
+            <TouchableOpacity
+              style={[styles.changePhotoBtn, { backgroundColor: c.backgroundCard }]}
+              onPress={handlePickImage}
+              accessibilityLabel="Change photo"
+            >
+              <Ionicons name="images-outline" size={14} color={c.textPrimary} />
+              <Text style={[styles.changePhotoText, { color: c.textPrimary }]}>Change photo</Text>
+            </TouchableOpacity>
+          ) : null}
 
           {/* Close button */}
           <TouchableOpacity
@@ -719,6 +734,18 @@ export default function MenuItemEditor({
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      <ImageFrameEditor
+        visible={!!frameUri}
+        uri={frameUri}
+        aspectRatio={4 / 3}
+        title="Frame menu item image"
+        onCancel={() => setFrameUri(null)}
+        onConfirm={(framed) => {
+          setLocalImageUri(framed);
+          setFrameUri(null);
+        }}
+      />
     </Modal>
   );
 }
@@ -779,6 +806,26 @@ const styles = StyleSheet.create({
   },
   heroOverlayText: {
     color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  changePhotoBtn: {
+    position: 'absolute',
+    bottom: 10,
+    left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    ...Platform.select({
+      web: { boxShadow: '0 2px 8px rgba(0,0,0,0.12)' },
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.12, shadowRadius: 3 },
+      android: { elevation: 3 },
+    }),
+  },
+  changePhotoText: {
     fontSize: 12,
     fontWeight: '600',
   },

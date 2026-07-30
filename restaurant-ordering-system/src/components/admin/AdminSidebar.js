@@ -14,12 +14,12 @@ const NAV_ITEMS = [
   { key: 'Orders',       label: 'Orders',       icon: 'receipt',          iconOutline: 'receipt-outline'          },
   { key: 'Analytics',    label: 'Analytics',    icon: 'bar-chart',        iconOutline: 'bar-chart-outline'        },
   { key: 'Menu',         label: 'Menu',         icon: 'restaurant',       iconOutline: 'restaurant-outline'       },
-  { key: 'Promo',        label: 'Promo',        icon: 'images',           iconOutline: 'images-outline'           },
+  { key: 'HomePage',     label: 'Home Page',    icon: 'home',             iconOutline: 'home-outline'             },
   { key: 'Rewards',      label: 'Rewards',      icon: 'gift',             iconOutline: 'gift-outline'             },
   { key: 'Applications', label: 'Applications', icon: 'document-text',    iconOutline: 'document-text-outline'    },
   { key: 'Reviews',      label: 'Reviews',      icon: 'star',             iconOutline: 'star-outline'             },
   { key: 'Marketing',    label: 'Marketing',    icon: 'megaphone',        iconOutline: 'megaphone-outline'        },
-  { key: 'Settings',     label: 'Settings',     icon: 'settings',         iconOutline: 'settings-outline'         },
+  { key: 'Settings',     label: 'Settings',     icon: 'settings',         iconOutline: 'settings-outline'        },
 ];
 
 export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {

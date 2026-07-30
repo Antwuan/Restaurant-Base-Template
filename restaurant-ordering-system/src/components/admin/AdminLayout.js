@@ -15,7 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 
 import OrdersScreen from '../../screens/admin/OrdersScreen';
 import MenuEditorScreen from '../../screens/admin/MenuEditorScreen';
-import CarouselEditorScreen from '../../screens/admin/CarouselEditorScreen';
+import HomePageEditorScreen from '../../screens/admin/HomePageEditorScreen';
 import SettingsScreen from '../../screens/admin/SettingsScreen';
 import AnalyticsScreen from '../../screens/admin/AnalyticsScreen';
 import AdminRewardsScreen from '../../screens/admin/RewardsScreen';
@@ -29,7 +29,7 @@ const SCREENS = {
   Orders:       OrdersScreen,
   Analytics:    AnalyticsScreen,
   Menu:         MenuEditorScreen,
-  Promo:        CarouselEditorScreen,
+  HomePage:     HomePageEditorScreen,
   Rewards:      AdminRewardsScreen,
   Applications: ApplicationsScreen,
   Reviews:      ReviewsScreen,
@@ -80,7 +80,8 @@ export default function AdminLayout() {
 
   const ActiveScreen = SCREENS[activeSection] ?? OrdersScreen;
 
-  const sectionTitle = activeSection === 'Promo' ? 'Promo Carousel' : activeSection;
+  const sectionTitle =
+    activeSection === 'HomePage' ? 'Home Page' : activeSection;
 
   return (
     <View style={[styles.shell, { backgroundColor: theme.colors.background }]}>

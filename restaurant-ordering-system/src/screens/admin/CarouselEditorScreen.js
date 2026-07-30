@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,12 @@ import {
   RefreshControl,
   Image,
   ScrollView,
+  Platform,
+  KeyboardAvoidingView,
+  Pressable,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useCarousel } from '../../hooks/useCarousel';
 import { useTheme } from '../../theme';
@@ -24,7 +28,9 @@ import {
   carouselStoragePath,
 } from '../../services/storageService';
 import AdminEmptyState from '../../components/admin/AdminEmptyState';
+import ImageFrameEditor from '../../components/admin/ImageFrameEditor';
 import { confirmAsync } from '../../utils/confirm';
+import { friendlySupabaseError } from '../../utils/supabaseErrors';
 
 const DEFAULT_FORM = {
   media_type: 'image',
@@ -44,6 +50,7 @@ function SlideEditorForm({ slide, restaurantId, onSave, onCancel }) {
     media_url: slide?.media_url || '',
   }));
   const [localUri, setLocalUri] = useState(null);
+  const [frameUri, setFrameUri] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const setField = (key, value) => {
@@ -62,16 +69,27 @@ function SlideEditorForm({ slide, restaurantId, onSave, onCancel }) {
       mediaTypes: isVideo
         ? ImagePicker.MediaTypeOptions.Videos
         : ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: !isVideo,
-      aspect: isVideo ? undefined : [16, 9],
-      quality: 0.85,
+      allowsEditing: false,
+      quality: isVideo ? 0.85 : 1,
     });
 
     if (!result.canceled && result.assets?.[0]) {
       const asset = result.assets[0];
-      setLocalUri(asset.uri);
-      setField('media_type', isVideo ? 'video' : 'image');
+      if (isVideo) {
+        setLocalUri(asset.uri);
+        setField('media_type', 'video');
+      } else {
+        setField('media_type', 'image');
+        setFrameUri(asset.uri);
+      }
     }
+  };
+
+  const reframeCurrent = () => {
+    const uri = localUri || form.media_url;
+    if (!uri) return;
+    setField('media_type', 'image');
+    setFrameUri(uri);
   };
 
   const handleSave = async () => {
@@ -84,7 +102,7 @@ function SlideEditorForm({ slide, restaurantId, onSave, onCancel }) {
     try {
       await onSave({ form, localUri });
     } catch (e) {
-      Alert.alert('Error', e.message || 'Could not save slide.');
+      Alert.alert('Error', friendlySupabaseError(e, 'save slide'));
     } finally {
       setSaving(false);
     }
@@ -93,155 +111,170 @@ function SlideEditorForm({ slide, restaurantId, onSave, onCancel }) {
   const previewUri = localUri || form.media_url;
 
   return (
-    <ScrollView
-      style={[editorStyles.container, { backgroundColor: c.backgroundCard }]}
-      contentContainerStyle={editorStyles.content}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={[editorStyles.title, { color: c.textPrimary }]}>
-        {slide?.id ? 'Edit slide' : 'New slide'}
-      </Text>
-
-      <View style={editorStyles.typeRow}>
-        <TouchableOpacity
-          style={[
-            editorStyles.typeChip,
-            { borderColor: c.border },
-            form.media_type === 'image' && {
-              backgroundColor: c.brand,
-              borderColor: c.brand,
-            },
-          ]}
-          onPress={() => setField('media_type', 'image')}
-        >
-          <Text
-            style={[
-              editorStyles.typeChipText,
-              { color: c.textPrimary },
-              form.media_type === 'image' && { color: c.brandText },
-            ]}
-          >
-            Image
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            editorStyles.typeChip,
-            { borderColor: c.border },
-            form.media_type === 'video' && {
-              backgroundColor: c.brand,
-              borderColor: c.brand,
-            },
-          ]}
-          onPress={() => setField('media_type', 'video')}
-        >
-          <Text
-            style={[
-              editorStyles.typeChipText,
-              { color: c.textPrimary },
-              form.media_type === 'video' && { color: c.brandText },
-            ]}
-          >
-            Video
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity
-        style={[editorStyles.uploadBtn, { backgroundColor: c.backgroundSunken }]}
-        onPress={() => pickMedia(form.media_type)}
+    <>
+      <ScrollView
+        style={editorStyles.body}
+        contentContainerStyle={editorStyles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <Text style={[editorStyles.uploadBtnText, { color: c.textPrimary }]}>
-          {form.media_type === 'video' ? 'Pick video' : 'Pick image'}
-        </Text>
-      </TouchableOpacity>
+        <View style={editorStyles.typeRow}>
+          <TouchableOpacity
+            style={[
+              editorStyles.typeChip,
+              { borderColor: c.border },
+              form.media_type === 'image' && {
+                backgroundColor: c.brand,
+                borderColor: c.brand,
+              },
+            ]}
+            onPress={() => setField('media_type', 'image')}
+          >
+            <Text
+              style={[
+                editorStyles.typeChipText,
+                { color: c.textPrimary },
+                form.media_type === 'image' && { color: c.brandText },
+              ]}
+            >
+              Image
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              editorStyles.typeChip,
+              { borderColor: c.border },
+              form.media_type === 'video' && {
+                backgroundColor: c.brand,
+                borderColor: c.brand,
+              },
+            ]}
+            onPress={() => setField('media_type', 'video')}
+          >
+            <Text
+              style={[
+                editorStyles.typeChipText,
+                { color: c.textPrimary },
+                form.media_type === 'video' && { color: c.brandText },
+              ]}
+            >
+              Video
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-      {previewUri && form.media_type === 'image' ? (
-        <Image source={{ uri: previewUri }} style={editorStyles.preview} />
-      ) : null}
+        <TouchableOpacity
+          style={[editorStyles.uploadBtn, { backgroundColor: c.backgroundSunken }]}
+          onPress={() => pickMedia(form.media_type)}
+        >
+          <Text style={[editorStyles.uploadBtnText, { color: c.textPrimary }]}>
+            {form.media_type === 'video' ? 'Pick video' : 'Pick image'}
+          </Text>
+        </TouchableOpacity>
 
-      <Text style={[editorStyles.label, { color: c.textSecondary }]}>Or media URL</Text>
-      <TextInput
-        style={[
-          editorStyles.input,
-          {
-            color: c.textPrimary,
-            backgroundColor: c.backgroundSunken,
-            borderColor: c.border,
-          },
-        ]}
-        value={form.media_url}
-        onChangeText={(v) => setField('media_url', v)}
-        placeholder="https://..."
-        placeholderTextColor={c.textDisabled}
-        autoCapitalize="none"
-      />
+        {previewUri && form.media_type === 'image' ? (
+          <>
+            <Image source={{ uri: previewUri }} style={editorStyles.preview} />
+            <View style={editorStyles.imageActions}>
+              <TouchableOpacity onPress={reframeCurrent}>
+                <Text style={{ color: c.brand, fontWeight: '600', fontSize: 13 }}>
+                  Reframe
+                </Text>
+              </TouchableOpacity>
+              <Text style={{ color: c.textSecondary }}>·</Text>
+              <TouchableOpacity onPress={() => pickMedia('image')}>
+                <Text style={{ color: c.brand, fontWeight: '600', fontSize: 13 }}>
+                  Change image
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : null}
 
-      <Text style={[editorStyles.label, { color: c.textSecondary }]}>Title (caption)</Text>
-      <TextInput
-        style={[
-          editorStyles.input,
-          {
-            color: c.textPrimary,
-            backgroundColor: c.backgroundSunken,
-            borderColor: c.border,
-          },
-        ]}
-        value={form.title}
-        onChangeText={(v) => setField('title', v)}
-        placeholder="Optional"
-        placeholderTextColor={c.textDisabled}
-      />
-
-      <Text style={[editorStyles.label, { color: c.textSecondary }]}>Alt text (images)</Text>
-      <TextInput
-        style={[
-          editorStyles.input,
-          {
-            color: c.textPrimary,
-            backgroundColor: c.backgroundSunken,
-            borderColor: c.border,
-          },
-        ]}
-        value={form.alt_text}
-        onChangeText={(v) => setField('alt_text', v)}
-        placeholder="Accessibility description"
-        placeholderTextColor={c.textDisabled}
-      />
-
-      <Text style={[editorStyles.label, { color: c.textSecondary }]}>Link URL (tap-through)</Text>
-      <TextInput
-        style={[
-          editorStyles.input,
-          {
-            color: c.textPrimary,
-            backgroundColor: c.backgroundSunken,
-            borderColor: c.border,
-          },
-        ]}
-        value={form.link_url}
-        onChangeText={(v) => setField('link_url', v)}
-        placeholder="https://..."
-        placeholderTextColor={c.textDisabled}
-        autoCapitalize="none"
-      />
-
-      <View style={editorStyles.toggleRow}>
-        <Text style={[editorStyles.label, { color: c.textSecondary, marginBottom: 0 }]}>
-          Active on menu
-        </Text>
-        <Switch
-          value={form.is_active}
-          onValueChange={(v) => setField('is_active', v)}
+        <Text style={[editorStyles.label, { color: c.textSecondary }]}>Or media URL</Text>
+        <TextInput
+          style={[
+            editorStyles.input,
+            {
+              color: c.textPrimary,
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
+          value={form.media_url}
+          onChangeText={(v) => setField('media_url', v)}
+          placeholder="https://..."
+          placeholderTextColor={c.textDisabled}
+          autoCapitalize="none"
         />
-      </View>
 
-      <View style={editorStyles.actions}>
+        <Text style={[editorStyles.label, { color: c.textSecondary }]}>Title (caption)</Text>
+        <TextInput
+          style={[
+            editorStyles.input,
+            {
+              color: c.textPrimary,
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
+          value={form.title}
+          onChangeText={(v) => setField('title', v)}
+          placeholder="Optional"
+          placeholderTextColor={c.textDisabled}
+        />
+
+        <Text style={[editorStyles.label, { color: c.textSecondary }]}>Alt text (images)</Text>
+        <TextInput
+          style={[
+            editorStyles.input,
+            {
+              color: c.textPrimary,
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
+          value={form.alt_text}
+          onChangeText={(v) => setField('alt_text', v)}
+          placeholder="Accessibility description"
+          placeholderTextColor={c.textDisabled}
+        />
+
+        <Text style={[editorStyles.label, { color: c.textSecondary }]}>Link URL (tap-through)</Text>
+        <TextInput
+          style={[
+            editorStyles.input,
+            {
+              color: c.textPrimary,
+              backgroundColor: c.backgroundSunken,
+              borderColor: c.border,
+            },
+          ]}
+          value={form.link_url}
+          onChangeText={(v) => setField('link_url', v)}
+          placeholder="https://..."
+          placeholderTextColor={c.textDisabled}
+          autoCapitalize="none"
+        />
+
+        <View style={editorStyles.toggleRow}>
+          <Text style={[editorStyles.label, { color: c.textSecondary, marginBottom: 0 }]}>
+            Active on menu
+          </Text>
+          <Switch
+            value={form.is_active}
+            onValueChange={(v) => setField('is_active', v)}
+          />
+        </View>
+      </ScrollView>
+
+      <View style={editorStyles.footer}>
         <TouchableOpacity
           style={[editorStyles.cancelBtn, { borderColor: c.border }]}
           onPress={onCancel}
+          disabled={saving}
         >
-          <Text style={{ color: c.textPrimary }}>Cancel</Text>
+          <Text style={[editorStyles.cancelBtnText, { color: c.textSecondary }]}>Cancel</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[
@@ -259,7 +292,19 @@ function SlideEditorForm({ slide, restaurantId, onSave, onCancel }) {
           )}
         </TouchableOpacity>
       </View>
-    </ScrollView>
+
+      <ImageFrameEditor
+        visible={!!frameUri}
+        uri={frameUri}
+        aspectRatio={16 / 9}
+        title="Frame promo image"
+        onCancel={() => setFrameUri(null)}
+        onConfirm={(framed) => {
+          setLocalUri(framed);
+          setFrameUri(null);
+        }}
+      />
+    </>
   );
 }
 
@@ -270,7 +315,7 @@ function newSlideId() {
   return `slide-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export default function CarouselEditorScreen() {
+export default function CarouselEditorScreen({ embedded = false, refreshToken = 0 }) {
   const { restaurant } = useRestaurantContext();
   const { theme } = useTheme();
   const c = theme.colors;
@@ -278,6 +323,10 @@ export default function CarouselEditorScreen() {
   const [editorVisible, setEditorVisible] = useState(false);
   const [selectedSlide, setSelectedSlide] = useState(null);
   const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    if (refreshToken > 0) refetch();
+  }, [refreshToken, refetch]);
 
   const openNew = () => {
     setSelectedSlide({
@@ -454,10 +503,100 @@ export default function CarouselEditorScreen() {
     </View>
   );
 
+  const listHeader = (
+    <View style={[styles.header, embedded && styles.headerEmbedded]}>
+      <Text style={[styles.headerText, { color: c.textSecondary }]}>
+        {slides.length} slide{slides.length === 1 ? '' : 's'}
+      </Text>
+      <TouchableOpacity
+        style={[styles.addBtn, { backgroundColor: c.brand }]}
+        onPress={openNew}
+      >
+        <Text style={[styles.addBtnText, { color: c.brandText }]}>+ Add slide</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const emptyState = (
+    <AdminEmptyState
+      icon="🖼️"
+      title="No promo slides yet"
+      subtitle="Add a slide to showcase specials, events, or featured items at the top of your menu."
+      actionLabel="+ Add Slide"
+      onAction={openNew}
+    />
+  );
+
+  const editorModal = (
+    <Modal
+      visible={editorVisible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={() => {
+        setEditorVisible(false);
+        setSelectedSlide(null);
+      }}
+    >
+      <KeyboardAvoidingView
+        style={modalStyles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <Pressable
+          style={modalStyles.backdrop}
+          onPress={() => {
+            setEditorVisible(false);
+            setSelectedSlide(null);
+          }}
+        />
+        <View style={[modalStyles.card, { backgroundColor: c.backgroundCard }]}>
+          <View style={modalStyles.header}>
+            <Text style={[modalStyles.title, { color: c.textPrimary }]}>
+              {selectedSlide?.id ? 'Edit slide' : 'New slide'}
+            </Text>
+            <TouchableOpacity
+              style={[modalStyles.closeBtn, { backgroundColor: c.backgroundSunken }]}
+              onPress={() => {
+                setEditorVisible(false);
+                setSelectedSlide(null);
+              }}
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={20} color={c.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          <SlideEditorForm
+            slide={selectedSlide}
+            restaurantId={restaurant?.id}
+            onSave={persistSlide}
+            onCancel={() => {
+              setEditorVisible(false);
+              setSelectedSlide(null);
+            }}
+          />
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
   if (loading && !slides.length) {
     return (
-      <View style={[styles.centered, { backgroundColor: c.background }]}>
+      <View style={[embedded ? styles.centeredEmbedded : styles.centered, { backgroundColor: c.background }]}>
         <ActivityIndicator size="large" color={c.brand} />
+      </View>
+    );
+  }
+
+  if (embedded) {
+    return (
+      <View>
+        {listHeader}
+        {!slides.length
+          ? emptyState
+          : slides.map((item, index) => (
+              <View key={item.id}>{renderSlide({ item, index })}</View>
+            ))}
+        {editorModal}
       </View>
     );
   }
@@ -471,47 +610,11 @@ export default function CarouselEditorScreen() {
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={refetch} tintColor={c.brand} />
         }
-        ListHeaderComponent={(
-          <View style={styles.header}>
-            <Text style={[styles.headerText, { color: c.textSecondary }]}>
-              {slides.length} slide{slides.length === 1 ? '' : 's'}
-            </Text>
-            <TouchableOpacity
-              style={[styles.addBtn, { backgroundColor: c.brand }]}
-              onPress={openNew}
-            >
-              <Text style={[styles.addBtnText, { color: c.brandText }]}>+ Add slide</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        ListEmptyComponent={(
-          <AdminEmptyState
-            icon="🖼️"
-            title="No promo slides yet"
-            subtitle="Add a slide to showcase specials, events, or featured items at the top of your menu."
-            actionLabel="+ Add Slide"
-            onAction={openNew}
-          />
-        )}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={emptyState}
         contentContainerStyle={styles.listContent}
       />
-
-      <Modal
-        visible={editorVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setEditorVisible(false)}
-      >
-        <SlideEditorForm
-          slide={selectedSlide}
-          restaurantId={restaurant?.id}
-          onSave={persistSlide}
-          onCancel={() => {
-            setEditorVisible(false);
-            setSelectedSlide(null);
-          }}
-        />
-      </Modal>
+      {editorModal}
     </View>
   );
 }
@@ -519,6 +622,7 @@ export default function CarouselEditorScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  centeredEmbedded: { paddingVertical: 40, alignItems: 'center' },
   listContent: { padding: 16, paddingBottom: 40 },
   header: {
     flexDirection: 'row',
@@ -526,6 +630,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  headerEmbedded: { marginBottom: 10 },
   headerText: { fontSize: 13 },
   addBtn: {
     paddingHorizontal: 12,
@@ -553,10 +658,54 @@ const styles = StyleSheet.create({
   deleteText: { fontSize: 16, color: '#FF3B30', paddingHorizontal: 4 },
 });
 
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 48,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 560,
+    maxHeight: '100%',
+    borderRadius: 20,
+    overflow: 'hidden',
+    ...Platform.select({
+      web: { boxShadow: '0 8px 40px rgba(0,0,0,0.22)' },
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 16 },
+      android: { elevation: 12 },
+    }),
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 4,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
 const editorStyles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: '700', marginBottom: 16 },
+  body: { flexShrink: 1 },
+  content: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
   input: {
     borderWidth: 1,
     borderRadius: 8,
@@ -579,7 +728,13 @@ const editorStyles = StyleSheet.create({
     marginBottom: 12,
   },
   uploadBtnText: { fontWeight: '600' },
-  preview: { width: '100%', height: 160, borderRadius: 8, marginBottom: 12 },
+  preview: { width: '100%', height: 160, borderRadius: 8, marginBottom: 8 },
+  imageActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
   label: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
   toggleRow: {
     flexDirection: 'row',
@@ -587,20 +742,29 @@ const editorStyles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 12,
   },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  footer: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e5e5e5',
+  },
   cancelBtn: {
     flex: 1,
-    padding: 14,
-    borderRadius: 8,
-    borderWidth: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
     alignItems: 'center',
   },
+  cancelBtnText: { fontSize: 15, fontWeight: '600' },
   saveBtn: {
     flex: 2,
-    padding: 14,
-    borderRadius: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  saveBtnText: { fontWeight: '700' },
+  saveBtnText: { fontSize: 15, fontWeight: '700' },
   disabled: { opacity: 0.6 },
 });
