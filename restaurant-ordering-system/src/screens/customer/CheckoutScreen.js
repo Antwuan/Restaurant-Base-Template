@@ -3,7 +3,7 @@
  * Two-column layout on desktop (≥768 px), single column on mobile.
  * Each restaurant's stripe_account_id scopes the Stripe instance for Connect.
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -26,42 +26,35 @@ import LocationCard from '../../components/LocationCard';
 import { createPaymentIntent } from '../../services/stripeApi';
 import { createOrder } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
+import { syncMarketingContact } from '../../services/emailApi';
 
 const ORDER_TYPES = ['pickup', 'delivery'];
 const TIME_OPTIONS = ['ASAP', '15 min', '30 min', '45 min', '1 hour'];
 const BREAKPOINT = 768;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ─── Inner form — must live inside <Elements> to use Stripe hooks ─────────────
-function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
+function CheckoutForm({
+  navigation,
+  isDesktop,
+  theme,
+  restaurant,
+  contact,
+  onEditContact,
+}) {
   const stripe = useStripe();
   const elements = useElements();
   const { items, subtotal, tax, total, clearCart } = useCartContext();
   const { user } = useAuth();
 
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
+  const { name, phone, email, marketingOptIn } = contact;
   const [orderType, setOrderType] = useState('pickup');
   const [scheduledTime, setScheduledTime] = useState('ASAP');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
   const [summaryOpen, setSummaryOpen] = useState(false);
 
-  const validate = () => {
-    const errs = {};
-    if (!name.trim()) errs.name = 'Name is required';
-    if (!phone.trim()) errs.phone = 'Phone number is required';
-    return errs;
-  };
-
   const handleSubmit = async () => {
-    const validationErrors = validate();
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
-      return;
-    }
-    setErrors({});
     if (!stripe || !elements) return;
     setLoading(true);
 
@@ -73,7 +66,7 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
             billing_details: {
               name,
               phone,
-              email: email || undefined,
+              email,
             },
           },
           return_url:
@@ -94,7 +87,7 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
         restaurantId: restaurant.id,
         customerName: name,
         customerPhone: phone,
-        customerEmail: email || null,
+        customerEmail: email,
         items: items.map(({ id, name: itemName, price, quantity, specialInstructions, selectedModifiers }) => ({
           id,
           name: itemName,
@@ -120,6 +113,16 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
           orderTotal: total,
           pointsPerDollar: restaurant.points_per_dollar ?? 1,
         });
+      }
+
+      if (marketingOptIn && email) {
+        syncMarketingContact({
+          restaurantId: restaurant.id,
+          email,
+          fullName: name,
+          phone,
+          marketingOptIn: true,
+        }).catch(() => {});
       }
 
       clearCart();
@@ -149,48 +152,17 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
   const formPanel = (
     <View style={[s.formPanel, isDesktop && s.formPanelDesktop]}>
 
-      {/* ── Contact ─────────────────────────────── */}
+      {/* ── Contact (locked after PI create) ─────── */}
       <View style={s.section}>
-        <Text style={s.sectionLabel}>Contact</Text>
-        <View style={[isDesktop && s.twoCol]}>
-          <View style={[isDesktop && s.colHalf]}>
-            <Text style={s.fieldLabel}>
-              Name <Text style={s.required}>*</Text>
-            </Text>
-            <TextInput
-              style={[s.input, errors.name && s.inputError]}
-              placeholder="Full name"
-              value={name}
-              onChangeText={setName}
-              autoCapitalize="words"
-            />
-            {errors.name ? <Text style={s.errorText}>{errors.name}</Text> : null}
-          </View>
-          <View style={[isDesktop && s.colHalf]}>
-            <Text style={s.fieldLabel}>
-              Phone <Text style={s.required}>*</Text>
-            </Text>
-            <TextInput
-              style={[s.input, errors.phone && s.inputError]}
-              placeholder="(555) 555-5555"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-            />
-            {errors.phone ? <Text style={s.errorText}>{errors.phone}</Text> : null}
-          </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <Text style={[s.sectionLabel, { marginBottom: 0 }]}>Contact</Text>
+          <TouchableOpacity onPress={onEditContact}>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.brand }}>Edit</Text>
+          </TouchableOpacity>
         </View>
-        <Text style={[s.fieldLabel, { marginTop: 14 }]}>
-          Email <Text style={s.optional}>(optional)</Text>
-        </Text>
-        <TextInput
-          style={s.input}
-          placeholder="you@example.com"
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
+        <Text style={{ fontSize: 15, fontWeight: '600', color: '#0a2540' }}>{name}</Text>
+        <Text style={{ fontSize: 14, color: '#697386', marginTop: 4 }}>{phone}</Text>
+        <Text style={{ fontSize: 14, color: '#697386', marginTop: 2 }}>{email}</Text>
       </View>
 
       <View style={s.sectionDivider} />
@@ -335,7 +307,101 @@ function CheckoutForm({ navigation, isDesktop, theme, restaurant }) {
   );
 }
 
-// ─── Outer component — creates PaymentIntent, wraps with Elements ─────────────
+// ─── Contact step — collect email before creating PaymentIntent ───────────────
+function ContactStep({ theme, isDesktop, contact, setContact, onContinue, loading, error }) {
+  const s = makeFormStyles(theme);
+  const [errors, setErrors] = useState({});
+
+  const handleContinue = () => {
+    const errs = {};
+    if (!contact.name.trim()) errs.name = 'Name is required';
+    if (!contact.phone.trim()) errs.phone = 'Phone number is required';
+    if (!contact.email.trim()) errs.email = 'Email is required';
+    else if (!EMAIL_RE.test(contact.email.trim())) errs.email = 'Enter a valid email';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+    onContinue();
+  };
+
+  return (
+    <View style={[s.formPanel, isDesktop && s.formPanelDesktop, { marginTop: 24, alignSelf: 'center', maxWidth: 560, width: '100%' }]}>
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Contact</Text>
+        <Text style={{ fontSize: 13, color: '#697386', marginBottom: 16, lineHeight: 18 }}>
+          Email is required for your receipt and order updates.
+        </Text>
+        <View style={[isDesktop && s.twoCol]}>
+          <View style={[isDesktop && s.colHalf]}>
+            <Text style={s.fieldLabel}>Name <Text style={s.required}>*</Text></Text>
+            <TextInput
+              style={[s.input, errors.name && s.inputError]}
+              placeholder="Full name"
+              value={contact.name}
+              onChangeText={(name) => setContact((c) => ({ ...c, name }))}
+              autoCapitalize="words"
+            />
+            {errors.name ? <Text style={s.errorText}>{errors.name}</Text> : null}
+          </View>
+          <View style={[isDesktop && s.colHalf]}>
+            <Text style={s.fieldLabel}>Phone <Text style={s.required}>*</Text></Text>
+            <TextInput
+              style={[s.input, errors.phone && s.inputError]}
+              placeholder="(555) 555-5555"
+              value={contact.phone}
+              onChangeText={(phone) => setContact((c) => ({ ...c, phone }))}
+              keyboardType="phone-pad"
+            />
+            {errors.phone ? <Text style={s.errorText}>{errors.phone}</Text> : null}
+          </View>
+        </View>
+        <Text style={[s.fieldLabel, { marginTop: 14 }]}>Email <Text style={s.required}>*</Text></Text>
+        <TextInput
+          style={[s.input, errors.email && s.inputError]}
+          placeholder="you@example.com"
+          value={contact.email}
+          onChangeText={(email) => setContact((c) => ({ ...c, email }))}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+        {errors.email ? <Text style={s.errorText}>{errors.email}</Text> : null}
+
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 }}
+          onPress={() => setContact((c) => ({ ...c, marketingOptIn: !c.marketingOptIn }))}
+          activeOpacity={0.7}
+        >
+          <View style={{
+            width: 20, height: 20, borderRadius: 4, borderWidth: 1.5,
+            borderColor: contact.marketingOptIn ? theme.colors.brand : '#cfd7e3',
+            backgroundColor: contact.marketingOptIn ? theme.colors.brand : '#fff',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            {contact.marketingOptIn ? <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>✓</Text> : null}
+          </View>
+          <Text style={{ fontSize: 14, color: '#0a2540', flex: 1 }}>
+            Email me deals &amp; updates
+          </Text>
+        </TouchableOpacity>
+
+        {error ? <Text style={[s.errorText, { marginTop: 12 }]}>{error}</Text> : null}
+
+        <TouchableOpacity
+          style={[s.submitBtn, { backgroundColor: theme.colors.brand, marginTop: 24 }, loading && { opacity: 0.6 }]}
+          onPress={handleContinue}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={s.submitText}>Continue to payment</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+// ─── Outer component — creates PaymentIntent after valid email ────────────────
 export default function CheckoutScreen({ navigation }) {
   const { restaurant } = useRestaurantContext();
   const { total } = useCartContext();
@@ -343,8 +409,15 @@ export default function CheckoutScreen({ navigation }) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT;
 
+  const [contact, setContact] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    marketingOptIn: false,
+  });
   const [clientSecret, setClientSecret] = useState(null);
   const [piError, setPiError] = useState(null);
+  const [piLoading, setPiLoading] = useState(false);
 
   const hasConnectAccount = Boolean(restaurant?.stripe_account_id);
 
@@ -354,12 +427,26 @@ export default function CheckoutScreen({ navigation }) {
     return loadStripe(pk);
   }, []);
 
-  useEffect(() => {
+  const handleContinueToPayment = async () => {
     if (!restaurant?.id || !hasConnectAccount || !total) return;
-    createPaymentIntent(total, restaurant.id)
-      .then(setClientSecret)
-      .catch((e) => setPiError(e.message));
-  }, [restaurant?.id, hasConnectAccount, total]);
+    setPiLoading(true);
+    setPiError(null);
+    try {
+      const secret = await createPaymentIntent(total, restaurant.id, {
+        email: contact.email.trim(),
+      });
+      setClientSecret(secret);
+    } catch (e) {
+      setPiError(e.message);
+    } finally {
+      setPiLoading(false);
+    }
+  };
+
+  const handleEditContact = () => {
+    setClientSecret(null);
+    setPiError(null);
+  };
 
   const appearance = {
     theme: 'stripe',
@@ -395,17 +482,8 @@ export default function CheckoutScreen({ navigation }) {
     );
   }
 
-  if (piError) {
-    return (
-      <View style={s.errorPage}>
-        <Text style={s.errorMsg}>{piError}</Text>
-      </View>
-    );
-  }
-
   return (
     <ScrollView style={s.page} contentContainerStyle={s.pageContent}>
-      {/* Header */}
       <View style={[s.header, isDesktop && s.headerDesktop]}>
         {restaurant?.name ? (
           <Text style={s.restaurantName}>{restaurant.name}</Text>
@@ -413,20 +491,32 @@ export default function CheckoutScreen({ navigation }) {
         <Text style={s.pageTitle}>Checkout</Text>
       </View>
 
-      {clientSecret ? (
+      {!clientSecret ? (
+        <ContactStep
+          theme={theme}
+          isDesktop={isDesktop}
+          contact={contact}
+          setContact={setContact}
+          onContinue={handleContinueToPayment}
+          loading={piLoading}
+          error={piError}
+        />
+      ) : (
         <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
           <CheckoutForm
             navigation={navigation}
             isDesktop={isDesktop}
             theme={theme}
             restaurant={restaurant}
+            contact={{
+              ...contact,
+              email: contact.email.trim(),
+              name: contact.name.trim(),
+              phone: contact.phone.trim(),
+            }}
+            onEditContact={handleEditContact}
           />
         </Elements>
-      ) : (
-        <View style={s.loadingWrap}>
-          <ActivityIndicator size="large" color={theme.colors.brand} />
-          <Text style={s.loadingText}>Preparing checkout…</Text>
-        </View>
       )}
     </ScrollView>
   );

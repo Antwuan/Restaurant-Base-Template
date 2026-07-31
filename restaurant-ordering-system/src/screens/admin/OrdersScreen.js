@@ -26,7 +26,7 @@ import * as restaurantService from '../../services/restaurantService';
 import OrderCard from '../../components/admin/OrderCard';
 import AdminEmptyState from '../../components/admin/AdminEmptyState';
 
-const STATUS_TABS = ['pending', 'preparing', 'completed'];
+const STATUS_TABS = ['pending', 'preparing', 'ready', 'completed'];
 const VIEW_TABS = ['Regular', 'Catering'];
 
 // ── helpers ──────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 // Admin settings screen. Lets staff edit restaurant contact info, hours of operation,
 // toggle accepting orders, switch dark theme, contact support, and sign out.
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
 import * as restaurantService from '../../services/restaurantService';
+import { manageEmailDomain } from '../../services/emailApi';
 import { confirmAsync } from '../../utils/confirm';
 import {
   DAY_KEYS,
@@ -146,6 +147,19 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
+  // Email domain onboarding
+  const [sendDomain, setSendDomain] = useState('');
+  const [fromLocal, setFromLocal] = useState('hello');
+  const [dnsRecords, setDnsRecords] = useState([]);
+  const [domainBusy, setDomainBusy] = useState(false);
+  const [domainStatus, setDomainStatus] = useState(restaurant?.email_domain_status ?? 'pending');
+  const [fromEmailDisplay, setFromEmailDisplay] = useState(restaurant?.resend_from_email ?? '');
+
+  useEffect(() => {
+    setDomainStatus(restaurant?.email_domain_status ?? 'pending');
+    setFromEmailDisplay(restaurant?.resend_from_email ?? '');
+  }, [restaurant?.email_domain_status, restaurant?.resend_from_email]);
+
   const updateDayHours = (dayKey, field, value) => {
     setHours((prev) => ({
       ...prev,
@@ -194,7 +208,81 @@ export default function SettingsScreen() {
     Linking.openURL('mailto:support@yourdomain.com');
   };
 
+  const handleCreateDomain = async () => {
+    if (!restaurant?.id) return;
+    if (!sendDomain.trim()) {
+      Alert.alert('Domain required', 'Enter a sending subdomain (e.g. mail.yourrestaurant.com).');
+      return;
+    }
+    setDomainBusy(true);
+    try {
+      const result = await manageEmailDomain({
+        action: 'create',
+        restaurantId: restaurant.id,
+        domain: sendDomain.trim().toLowerCase(),
+        fromLocalPart: fromLocal.trim() || 'hello',
+      });
+      setDnsRecords(result.records || []);
+      setDomainStatus(result.status || 'pending');
+      setFromEmailDisplay(result.fromEmail || '');
+      await refreshRestaurant();
+      Alert.alert('Domain created', 'Add the DNS records below, then click Verify.');
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not create domain.');
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const handleVerifyDomain = async () => {
+    if (!restaurant?.id) return;
+    setDomainBusy(true);
+    try {
+      const result = await manageEmailDomain({
+        action: 'verify',
+        restaurantId: restaurant.id,
+      });
+      setDnsRecords(result.records || []);
+      setDomainStatus(result.status || 'pending');
+      if (result.fromEmail) setFromEmailDisplay(result.fromEmail);
+      await refreshRestaurant();
+      if (result.status === 'verified') {
+        Alert.alert('Verified', 'Your sending domain is ready.');
+      } else {
+        Alert.alert('Still pending', `Status: ${result.status}. DNS can take a few minutes to propagate.`);
+      }
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not verify domain.');
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const handleRefreshDomainStatus = async () => {
+    if (!restaurant?.id || !restaurant?.resend_domain_id) return;
+    setDomainBusy(true);
+    try {
+      const result = await manageEmailDomain({
+        action: 'status',
+        restaurantId: restaurant.id,
+      });
+      setDnsRecords(result.records || []);
+      setDomainStatus(result.status || 'pending');
+      await refreshRestaurant();
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not refresh domain status.');
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
   const c = theme.colors;
+  const statusColor =
+    domainStatus === 'verified' ? '#155724' :
+    domainStatus === 'failed' ? '#721C24' : '#856404';
+  const statusBg =
+    domainStatus === 'verified' ? '#D4EDDA' :
+    domainStatus === 'failed' ? '#F8D7DA' : '#FFF3CD';
 
   return (
     <ScrollView
@@ -356,6 +444,95 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* ── Email / Resend domain ─────────────────────────── */}
+      <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
+        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Transactional email</Text>
+        <Text style={[styles.sectionSub, { color: c.textSecondary }]}>
+          Verify a sending subdomain in Resend so order confirmations, pickup alerts, and marketing send from your brand.
+        </Text>
+
+        <View style={[styles.domainStatusPill, { backgroundColor: statusBg }]}>
+          <Text style={[styles.domainStatusText, { color: statusColor }]}>
+            Status: {domainStatus || 'pending'}
+          </Text>
+        </View>
+
+        {fromEmailDisplay ? (
+          <Text style={[styles.rowSub, { color: c.textSecondary, marginBottom: 10 }]}>
+            From: {fromEmailDisplay}
+          </Text>
+        ) : null}
+
+        {!restaurant?.resend_domain_id ? (
+          <>
+            <View style={styles.field}>
+              <Text style={[styles.label, { color: c.textSecondary }]}>Sending domain</Text>
+              <TextInput
+                style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+                value={sendDomain}
+                onChangeText={setSendDomain}
+                placeholder="mail.yourrestaurant.com"
+                placeholderTextColor={c.textDisabled}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={[styles.label, { color: c.textSecondary }]}>From local-part</Text>
+              <TextInput
+                style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+                value={fromLocal}
+                onChangeText={setFromLocal}
+                placeholder="hello"
+                placeholderTextColor={c.textDisabled}
+                autoCapitalize="none"
+              />
+            </View>
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: c.brand, alignSelf: 'flex-start' }, domainBusy && styles.saveBtnDisabled]}
+              onPress={handleCreateDomain}
+              disabled={domainBusy}
+            >
+              {domainBusy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Create domain</Text>}
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: c.brand }, domainBusy && styles.saveBtnDisabled]}
+              onPress={handleVerifyDomain}
+              disabled={domainBusy}
+            >
+              {domainBusy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Verify DNS</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: c.backgroundSunken, borderWidth: 1, borderColor: c.border }, domainBusy && styles.saveBtnDisabled]}
+              onPress={handleRefreshDomainStatus}
+              disabled={domainBusy}
+            >
+              <Text style={[styles.saveBtnText, { color: c.textPrimary }]}>Refresh status</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {dnsRecords.length > 0 ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={[styles.label, { color: c.textSecondary }]}>DNS records to add</Text>
+            {dnsRecords.map((rec, idx) => (
+              <View key={idx} style={[styles.dnsRow, { borderColor: c.border, backgroundColor: c.backgroundSunken }]}>
+                <Text style={[styles.dnsType, { color: c.brand }]}>{rec.type || rec.record}</Text>
+                <Text style={[styles.dnsLine, { color: c.textPrimary }]} selectable>
+                  Name: {rec.name || rec.host || '—'}
+                </Text>
+                <Text style={[styles.dnsLine, { color: c.textSecondary }]} selectable>
+                  Value: {rec.value || rec.content || '—'}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+
       {/* ── Order Settings ────────────────────────────────── */}
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
         <View style={styles.sectionHeaderRow}>
@@ -501,4 +678,21 @@ const styles = StyleSheet.create({
   signOutBtn: { paddingVertical: 8, alignItems: 'flex-start' },
   signOutText: { color: '#FF3B30', fontSize: 14, fontWeight: '600' },
   version: { textAlign: 'center', fontSize: 11, marginTop: 4 },
+  domainStatusPill: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  domainStatusText: { fontSize: 12, fontWeight: '700' },
+  dnsRow: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    gap: 2,
+  },
+  dnsType: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginBottom: 2 },
+  dnsLine: { fontSize: 12, lineHeight: 16 },
 });

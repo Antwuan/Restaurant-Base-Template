@@ -79,12 +79,57 @@ POST {EXPO_PUBLIC_BACKEND_URL}/create-payment-intent
 Authorization: Bearer {EXPO_PUBLIC_SUPABASE_ANON_KEY}
 Content-Type: application/json
 
-{ "amount": <cents>, "restaurantId": "<uuid>", "currency": "usd" }
+{ "amount": <cents>, "restaurantId": "<uuid>", "currency": "usd", "email": "customer@example.com" }
 ```
 
-Response must include `{ "clientSecret": "pi_..." }`.
+Response must include `{ "clientSecret": "pi_..." }`. Email is required at checkout so Stripe can set `receipt_email` on the PaymentIntent.
 
 Ensure your deployed function matches that contract. Set `restaurants.stripe_account_id` for Connect destinations.
+
+## Resend email (order / marketing / reviews)
+
+### 1. Run migration
+
+```bash
+# File: supabase/migrations/20260730_email_resend.sql
+```
+
+Adds restaurant domain columns, customer `marketing_opt_in`, and order `*_email_sent_at` timestamps.
+
+### 2. Deploy Edge Functions + secrets
+
+```bash
+supabase secrets set RESEND_API_KEY=re_... RESEND_WEBHOOK_SECRET=whsec_...
+supabase functions deploy create-payment-intent
+supabase functions deploy send-order-email
+supabase functions deploy sync-marketing-contact
+supabase functions deploy send-broadcast
+supabase functions deploy manage-email-domain
+supabase functions deploy resend-webhook
+```
+
+Do **not** put Resend keys in `EXPO_PUBLIC_*` env vars.
+
+### 3. Database Webhooks (recommended)
+
+Dashboard → Database → Webhooks:
+
+| Name | Table | Events | URL |
+|------|-------|--------|-----|
+| order-email-insert | `orders` | INSERT | `…/functions/v1/send-order-email` |
+| order-email-update | `orders` | UPDATE | `…/functions/v1/send-order-email` |
+
+Header: `Authorization: Bearer <SERVICE_ROLE_KEY>`.
+
+The function is idempotent (`order-confirm/{id}`, `order-ready/{id}`, `review-request/{id}`). The client also invokes it as a fallback after `createOrder` / status updates.
+
+### 4. Resend webhook
+
+Point Resend → `…/functions/v1/resend-webhook` for `email.bounced`, `email.complained`, and store the signing secret as `RESEND_WEBHOOK_SECRET`.
+
+### 5. Per-restaurant domain
+
+Admin → Settings → Transactional email: create sending subdomain, add DNS, verify. Marketing/Reviews stay blocked until `email_domain_status = verified`.
 
 ### Test cards
 

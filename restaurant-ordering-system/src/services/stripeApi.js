@@ -55,8 +55,11 @@ export async function createCheckoutSession({ items, restaurantId, currency = 'u
   return clientSecret;
 }
 
-/** @deprecated Use createCheckoutSession instead. Kept for backward compatibility. */
-export async function createPaymentIntent(amount, restaurantId) {
+/**
+ * Creates a PaymentIntent with optional receipt_email for Stripe automatic receipts.
+ * Pass email so the PI is created with receipt_email set before confirmPayment.
+ */
+export async function createPaymentIntent(amount, restaurantId, { email } = {}) {
   if (!BACKEND_URL) {
     throw new Error(
       'Payment backend URL is not configured. Set EXPO_PUBLIC_BACKEND_URL or EXPO_PUBLIC_SUPABASE_URL in .env',
@@ -71,6 +74,7 @@ export async function createPaymentIntent(amount, restaurantId) {
       restaurantId,
       restaurant_id: restaurantId,
       currency: 'usd',
+      email: email || undefined,
     }),
   });
 
