@@ -20,10 +20,8 @@ import SettingsScreen from '../../screens/admin/SettingsScreen';
 import AnalyticsScreen from '../../screens/admin/AnalyticsScreen';
 import AdminRewardsScreen from '../../screens/admin/RewardsScreen';
 import ApplicationsScreen from '../../screens/admin/ApplicationsScreen';
-import {
-  ReviewsScreen,
-  MarketingScreen,
-} from '../../screens/admin/PlaceholderScreens';
+import ReviewsScreen from '../../screens/admin/ReviewsScreen';
+import MarketingScreen from '../../screens/admin/MarketingScreen';
 
 const SCREENS = {
   Orders:       OrdersScreen,

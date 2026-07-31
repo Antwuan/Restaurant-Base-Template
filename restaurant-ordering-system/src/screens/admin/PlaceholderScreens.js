@@ -41,26 +41,6 @@ export function ApplicationsScreen() {
   );
 }
 
-export function ReviewsScreen() {
-  return (
-    <AdminPlaceholderScreen
-      title="Reviews"
-      icon="star-outline"
-      description="Customer reviews will live here."
-    />
-  );
-}
-
-export function MarketingScreen() {
-  return (
-    <AdminPlaceholderScreen
-      title="Marketing"
-      icon="megaphone-outline"
-      description="Campaigns and promotions will live here."
-    />
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,

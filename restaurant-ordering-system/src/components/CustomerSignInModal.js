@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
 import { useAuth } from '../context/AuthContext';
 import { confirmAsync } from '../utils/confirm';
+import { syncMarketingContact } from '../services/emailApi';
+import * as customerService from '../services/customerService';
 
 export default function CustomerSignInModal({ visible, onClose }) {
   const { restaurant } = useRestaurantContext();
@@ -34,6 +36,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
   const [mode, setMode] = useState('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -123,7 +126,24 @@ export default function CustomerSignInModal({ visible, onClose }) {
         return;
       }
 
-      await linkCustomer(restaurant.id, email);
+      const profile = await linkCustomer(restaurant.id, email);
+
+      if (marketingOptIn && profile?.id) {
+        try {
+          await customerService.updateCustomerProfile(profile.id, {
+            marketing_opt_in: true,
+            marketing_opt_in_at: new Date().toISOString(),
+          });
+          await syncMarketingContact({
+            restaurantId: restaurant.id,
+            email,
+            marketingOptIn: true,
+          });
+        } catch {
+          // Non-blocking — account still created
+        }
+      }
+
       onClose();
     } catch (error) {
       Alert.alert('Sign up failed', error.message || 'Could not create account.');
@@ -254,6 +274,22 @@ export default function CustomerSignInModal({ visible, onClose }) {
                   onChangeText={setPassword}
                   secureTextEntry
                 />
+
+                {mode === 'signup' ? (
+                  <TouchableOpacity
+                    style={styles.optInRow}
+                    onPress={() => setMarketingOptIn((v) => !v)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[
+                      styles.checkbox,
+                      marketingOptIn && { backgroundColor: brandColor, borderColor: brandColor },
+                    ]}>
+                      {marketingOptIn ? <Text style={styles.checkmark}>✓</Text> : null}
+                    </View>
+                    <Text style={styles.optInText}>Email me deals &amp; updates</Text>
+                  </TouchableOpacity>
+                ) : null}
 
                 <TouchableOpacity
                   style={[styles.button, { backgroundColor: brandColor }, loading && styles.buttonDisabled]}
@@ -393,4 +429,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  optInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+    marginTop: 2,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#ccc',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkmark: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  optInText: { fontSize: 14, color: '#333', flex: 1 },
 });

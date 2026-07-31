@@ -39,6 +39,9 @@ import OrderSummary from '../../components/OrderSummary';
 import { createPaymentIntent } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
+import { syncMarketingContact } from '../../services/emailApi';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import {
   getEarliestCateringDate,
   getSlotTimesForDate,
@@ -293,25 +296,26 @@ const sm = StyleSheet.create({
 });
 
 // ─── Catering checkout form (inside <Elements>) ───────────────────────────────
-function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, scheduledSlot, onBack }) {
+function CateringCheckoutForm({
+  navigation,
+  isDesktop,
+  brandColor,
+  restaurant,
+  scheduledSlot,
+  onBack,
+  contact,
+  onEditContact,
+}) {
   const stripe = useStripe();
   const elements = useElements();
   const { cateringItems: items, cateringSubtotal: subtotal, cateringTax: tax, cateringTotal: total, clearCart } = useCartContext();
   const { user } = useAuth();
 
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
+  const { name, phone, email, marketingOptIn } = contact;
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
 
   const handleSubmit = async () => {
-    const errs = {};
-    if (!name.trim()) errs.name = 'Name is required';
-    if (!phone.trim()) errs.phone = 'Phone is required';
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-    setErrors({});
     if (!stripe || !elements) return;
     setLoading(true);
 
@@ -319,7 +323,7 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
       const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          payment_method_data: { billing_details: { name, phone, email: email || undefined } },
+          payment_method_data: { billing_details: { name, phone, email } },
           return_url: typeof window !== 'undefined' ? window.location.href : 'https://localhost:19006/confirmation',
         },
         redirect: 'if_required',
@@ -335,7 +339,7 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
         restaurantId: restaurant.id,
         customerName: name,
         customerPhone: phone,
-        customerEmail: email || null,
+        customerEmail: email,
         items: items.map(({ id, name: n, price, quantity, specialInstructions, selectedModifiers }) => ({
           id, name: n, price, quantity,
           special_instructions: specialInstructions || '',
@@ -360,6 +364,16 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
         });
       }
 
+      if (marketingOptIn && email) {
+        syncMarketingContact({
+          restaurantId: restaurant.id,
+          email,
+          fullName: name,
+          phone,
+          marketingOptIn: true,
+        }).catch(() => {});
+      }
+
       clearCart('catering');
       navigation.replace('Confirmation', { order });
     } catch (err) {
@@ -377,7 +391,6 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
       </TouchableOpacity>
 
       <View style={[cf.columns, isDesktop && cf.columnsDesktop]}>
-        {/* Summary */}
         <View style={[cf.summaryPanel, isDesktop && cf.summaryPanelDesktop]}>
           <OrderSummary
             items={items}
@@ -387,7 +400,6 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
             orderType="pickup"
             scheduledTime={scheduledSlot ? scheduledSlot.toISOString() : null}
           />
-          {/* Scheduled time reminder */}
           {scheduledSlot && (
             <View style={[cf.scheduleBox, { borderColor: brandColor }]}>
               <Ionicons name="calendar-outline" size={16} color={brandColor} />
@@ -398,24 +410,17 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
           )}
         </View>
 
-        {/* Form */}
         <View style={[cf.formPanel, isDesktop && cf.formPanelDesktop]}>
           <View style={cf.section}>
-            <Text style={cf.sectionLabel}>Contact</Text>
-            <View style={[isDesktop && cf.twoCol]}>
-              <View style={[isDesktop && cf.colHalf]}>
-                <Text style={cf.fieldLabel}>Name *</Text>
-                <TextInput style={[cf.input, errors.name && cf.inputError]} value={name} onChangeText={setName} placeholder="Full name" autoCapitalize="words" />
-                {errors.name ? <Text style={cf.errorText}>{errors.name}</Text> : null}
-              </View>
-              <View style={[isDesktop && cf.colHalf]}>
-                <Text style={cf.fieldLabel}>Phone *</Text>
-                <TextInput style={[cf.input, errors.phone && cf.inputError]} value={phone} onChangeText={setPhone} placeholder="(555) 555-5555" keyboardType="phone-pad" />
-                {errors.phone ? <Text style={cf.errorText}>{errors.phone}</Text> : null}
-              </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={[cf.sectionLabel, { marginBottom: 0 }]}>Contact</Text>
+              <TouchableOpacity onPress={onEditContact}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: brandColor }}>Edit</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={[cf.fieldLabel, { marginTop: 14 }]}>Email <Text style={cf.optional}>(optional)</Text></Text>
-            <TextInput style={cf.input} value={email} onChangeText={setEmail} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" />
+            <Text style={{ fontSize: 15, fontWeight: '600', color: '#0a2540' }}>{name}</Text>
+            <Text style={{ fontSize: 14, color: '#697386', marginTop: 4 }}>{phone}</Text>
+            <Text style={{ fontSize: 14, color: '#697386', marginTop: 2 }}>{email}</Text>
           </View>
 
           <View style={cf.divider} />
@@ -449,6 +454,126 @@ function CateringCheckoutForm({ navigation, isDesktop, brandColor, restaurant, s
               disabled={loading || !stripe}
             >
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={cf.submitText}>Pay ${total.toFixed(2)} · Place Catering Order</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+function CateringContactStep({
+  brandColor,
+  isDesktop,
+  contact,
+  setContact,
+  onContinue,
+  onBack,
+  loading,
+  error,
+  scheduledSlot,
+  items,
+  subtotal,
+  tax,
+  total,
+}) {
+  const [errors, setErrors] = useState({});
+
+  const handleContinue = () => {
+    const errs = {};
+    if (!contact.name.trim()) errs.name = 'Name is required';
+    if (!contact.phone.trim()) errs.phone = 'Phone is required';
+    if (!contact.email.trim()) errs.email = 'Email is required';
+    else if (!EMAIL_RE.test(contact.email.trim())) errs.email = 'Enter a valid email';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+    onContinue();
+  };
+
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: '#f6f9fc' }} contentContainerStyle={cf.wrap}>
+      <TouchableOpacity style={cf.backBtn} onPress={onBack}>
+        <Ionicons name="arrow-back" size={18} color={brandColor} />
+        <Text style={[cf.backText, { color: brandColor }]}>Back to menu</Text>
+      </TouchableOpacity>
+
+      <View style={[cf.columns, isDesktop && cf.columnsDesktop]}>
+        <View style={[cf.summaryPanel, isDesktop && cf.summaryPanelDesktop]}>
+          <OrderSummary
+            items={items}
+            subtotal={subtotal}
+            tax={tax}
+            total={total}
+            orderType="pickup"
+            scheduledTime={scheduledSlot ? scheduledSlot.toISOString() : null}
+          />
+        </View>
+
+        <View style={[cf.formPanel, isDesktop && cf.formPanelDesktop]}>
+          <View style={cf.section}>
+            <Text style={cf.sectionLabel}>Contact</Text>
+            <Text style={{ fontSize: 13, color: '#697386', marginBottom: 14, lineHeight: 18 }}>
+              Email is required for your receipt and order updates.
+            </Text>
+            <View style={[isDesktop && cf.twoCol]}>
+              <View style={[isDesktop && cf.colHalf]}>
+                <Text style={cf.fieldLabel}>Name *</Text>
+                <TextInput
+                  style={[cf.input, errors.name && cf.inputError]}
+                  value={contact.name}
+                  onChangeText={(name) => setContact((c) => ({ ...c, name }))}
+                  placeholder="Full name"
+                  autoCapitalize="words"
+                />
+                {errors.name ? <Text style={cf.errorText}>{errors.name}</Text> : null}
+              </View>
+              <View style={[isDesktop && cf.colHalf]}>
+                <Text style={cf.fieldLabel}>Phone *</Text>
+                <TextInput
+                  style={[cf.input, errors.phone && cf.inputError]}
+                  value={contact.phone}
+                  onChangeText={(phone) => setContact((c) => ({ ...c, phone }))}
+                  placeholder="(555) 555-5555"
+                  keyboardType="phone-pad"
+                />
+                {errors.phone ? <Text style={cf.errorText}>{errors.phone}</Text> : null}
+              </View>
+            </View>
+            <Text style={[cf.fieldLabel, { marginTop: 14 }]}>Email *</Text>
+            <TextInput
+              style={[cf.input, errors.email && cf.inputError]}
+              value={contact.email}
+              onChangeText={(email) => setContact((c) => ({ ...c, email }))}
+              placeholder="you@example.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            {errors.email ? <Text style={cf.errorText}>{errors.email}</Text> : null}
+
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 }}
+              onPress={() => setContact((c) => ({ ...c, marketingOptIn: !c.marketingOptIn }))}
+              activeOpacity={0.7}
+            >
+              <View style={{
+                width: 20, height: 20, borderRadius: 4, borderWidth: 1.5,
+                borderColor: contact.marketingOptIn ? brandColor : '#cfd7e3',
+                backgroundColor: contact.marketingOptIn ? brandColor : '#fff',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                {contact.marketingOptIn ? <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>✓</Text> : null}
+              </View>
+              <Text style={{ fontSize: 14, color: '#0a2540', flex: 1 }}>Email me deals &amp; updates</Text>
+            </TouchableOpacity>
+
+            {error ? <Text style={[cf.errorText, { marginTop: 12 }]}>{error}</Text> : null}
+
+            <TouchableOpacity
+              style={[cf.submitBtn, { backgroundColor: brandColor, marginTop: 24 }, loading && { opacity: 0.6 }]}
+              onPress={handleContinue}
+              disabled={loading}
+            >
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={cf.submitText}>Continue to payment</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -554,6 +679,13 @@ export default function CateringScreen({ navigation }) {
   const [phase, setPhase] = useState('menu'); // 'menu' | 'checkout'
   const [clientSecret, setClientSecret] = useState(null);
   const [piError, setPiError] = useState(null);
+  const [piLoading, setPiLoading] = useState(false);
+  const [contact, setContact] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    marketingOptIn: false,
+  });
 
   const hasConnectAccount = Boolean(restaurant?.stripe_account_id);
   const closedLabel = getClosedUntilLabel(restaurant?.hours_of_operation);
@@ -601,14 +733,37 @@ export default function CateringScreen({ navigation }) {
       return;
     }
     setPhase('checkout');
-    if (restaurant?.id && hasConnectAccount && total) {
-      createPaymentIntent(total, restaurant.id)
-        .then(setClientSecret)
-        .catch((e) => setPiError(e.message));
+    setClientSecret(null);
+    setPiError(null);
+  };
+
+  const handleContinueToPayment = async () => {
+    if (!restaurant?.id || !hasConnectAccount || !total) return;
+    setPiLoading(true);
+    setPiError(null);
+    try {
+      const secret = await createPaymentIntent(total, restaurant.id, {
+        email: contact.email.trim(),
+      });
+      setClientSecret(secret);
+    } catch (e) {
+      setPiError(e.message);
+    } finally {
+      setPiLoading(false);
     }
   };
 
-  const handleBack = () => { setPhase('menu'); setClientSecret(null); setPiError(null); };
+  const handleBack = () => {
+    setPhase('menu');
+    setClientSecret(null);
+    setPiError(null);
+    setPiLoading(false);
+  };
+
+  const handleEditContact = () => {
+    setClientSecret(null);
+    setPiError(null);
+  };
 
   const appearance = {
     theme: 'stripe',
@@ -617,20 +772,31 @@ export default function CateringScreen({ navigation }) {
 
   // ── Checkout phase ─────────────────────────────────────
   if (phase === 'checkout') {
-    if (!process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || !hasConnectAccount || piError) {
+    if (!process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || !hasConnectAccount) {
       return (
         <View style={s.errorPage}>
-          <Text style={s.errorMsg}>{piError || 'Payments are not configured.'}</Text>
+          <Text style={s.errorMsg}>Payments are not configured.</Text>
           <TouchableOpacity onPress={handleBack}><Text style={{ color: brandColor, marginTop: 12 }}>← Back</Text></TouchableOpacity>
         </View>
       );
     }
     if (!clientSecret) {
       return (
-        <View style={s.loadingWrap}>
-          <ActivityIndicator size="large" color={brandColor} />
-          <Text style={s.loadingText}>Preparing checkout…</Text>
-        </View>
+        <CateringContactStep
+          brandColor={brandColor}
+          isDesktop={isDesktop}
+          contact={contact}
+          setContact={setContact}
+          onContinue={handleContinueToPayment}
+          onBack={handleBack}
+          loading={piLoading}
+          error={piError}
+          scheduledSlot={selectedSlot}
+          items={cartItems}
+          subtotal={subtotal}
+          tax={tax}
+          total={total}
+        />
       );
     }
     return (
@@ -642,6 +808,13 @@ export default function CateringScreen({ navigation }) {
           restaurant={restaurant}
           scheduledSlot={selectedSlot}
           onBack={handleBack}
+          contact={{
+            ...contact,
+            name: contact.name.trim(),
+            phone: contact.phone.trim(),
+            email: contact.email.trim(),
+          }}
+          onEditContact={handleEditContact}
         />
       </Elements>
     );

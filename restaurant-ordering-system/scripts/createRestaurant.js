@@ -174,16 +174,17 @@ export default restaurantConfig;
   console.log(`  2. Add menu items under each category.\n`);
   console.log(`  3. Connect a Stripe account:`);
   console.log(`       Update restaurants.stripe_account_id for id: ${data.id}\n`);
+  console.log(`  4. Set up Resend sending domain (Admin → Settings → Transactional email):`);
+  console.log(`       Create subdomain (e.g. mail.${argv.domain || argv.slug + '.com'}), add DNS, Verify.`);
+  console.log(`       Required before order / marketing / review emails send.\n`);
   if (!data.notification_email) {
-    console.log(`  4. ⚠️  No notification_email set — new order emails won't be sent.`);
+    console.log(`  5. ⚠️  No notification_email set — optional staff alert address.`);
     console.log(`       Update it in Supabase or re-run with --notification-email.\n`);
   } else {
-    console.log(`  4. Test order notification:`);
-    console.log(`       Insert a test row in the orders table and confirm an email`);
-    console.log(`       arrives at ${data.notification_email} within 10 seconds.\n`);
+    console.log(`  5. Staff notification email: ${data.notification_email}\n`);
   }
   if (data.domain) {
-    console.log(`  5. Configure DNS for ${data.domain}:`);
+    console.log(`  6. Configure DNS for ${data.domain}:`);
     console.log(`       Add a CNAME record pointing to your Vercel deployment.\n`);
   }
   console.log('─'.repeat(60));

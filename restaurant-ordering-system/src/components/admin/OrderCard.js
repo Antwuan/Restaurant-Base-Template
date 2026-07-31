@@ -12,14 +12,15 @@ const STATUS_COLORS = {
   cancelled: { bg: '#F8D7DA', text: '#721C24', border: '#F5C6CB' },
 };
 
-// pending → preparing (skip accepted), preparing → completed (skip ready)
+// pending → preparing → ready → completed
 const NEXT_STATUS = {
-  pending:   { label: 'Accept Order',   next: 'preparing' },
-  preparing: { label: 'Complete Order', next: 'completed' },
+  pending:   { label: 'Accept Order', next: 'preparing' },
+  preparing: { label: 'Mark Ready',   next: 'ready' },
+  ready:     { label: 'Complete',     next: 'completed' },
 };
 
 const URGENCY_THRESHOLD_MS = 15 * 60 * 1000;
-const SHOW_TIMER_STATUSES = ['pending', 'accepted', 'preparing'];
+const SHOW_TIMER_STATUSES = ['pending', 'accepted', 'preparing', 'ready'];
 
 function useElapsedTimer(createdAt, active) {
   const [elapsed, setElapsed] = useState(Date.now() - new Date(createdAt).getTime());

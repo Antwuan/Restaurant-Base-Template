@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase';
+import { sendOrderEmail } from './emailApi';
 
 export function validateOrderData(orderData) {
   const errors = [];
@@ -8,6 +9,14 @@ export function validateOrderData(orderData) {
   if (!['pickup', 'delivery'].includes(orderData.orderType)) errors.push('Order type must be pickup or delivery');
   if (orderData.total <= 0) errors.push('Order total must be greater than zero');
   return errors;
+}
+
+/** Fire-and-forget email invoke — DB webhook is preferred; this is a client fallback. */
+function triggerOrderEmail(orderId, type) {
+  if (!orderId) return;
+  sendOrderEmail(orderId, type).catch((err) => {
+    console.warn(`[email] ${type} failed:`, err?.message || err);
+  });
 }
 
 export async function createOrder(orderData) {
@@ -24,6 +33,7 @@ export async function createOrder(orderData) {
       total: orderData.total,
       status: 'pending',
       order_type: orderData.orderType,
+      menu_type: orderData.menuType || 'regular',
       scheduled_time: orderData.scheduledTime || null,
       stripe_payment_intent_id: orderData.paymentIntentId || null,
       notes: orderData.notes || null,
@@ -32,7 +42,32 @@ export async function createOrder(orderData) {
     .single();
 
   if (error) throw error;
+
+  // Fallback if Database Webhook is not configured yet
+  if (data?.customer_email) {
+    triggerOrderEmail(data.id, 'confirm');
+  }
+
   return data;
+}
+
+/**
+ * Returns scheduled_time values for non-cancelled catering orders in range.
+ * Used to exclude already-booked 15-minute catering pickup slots.
+ */
+export async function getBookedCateringSlots(restaurantId, fromISO, toISO) {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('scheduled_time')
+    .eq('restaurant_id', restaurantId)
+    .eq('menu_type', 'catering')
+    .neq('status', 'cancelled')
+    .not('scheduled_time', 'is', null)
+    .gte('scheduled_time', fromISO)
+    .lte('scheduled_time', toISO);
+
+  if (error) throw error;
+  return (data || []).map((row) => row.scheduled_time).filter(Boolean);
 }
 
 export async function getOrders(restaurantId, filters = {}) {
@@ -64,6 +99,11 @@ export async function updateOrderStatus(orderId, newStatus) {
     .single();
 
   if (error) throw error;
+
+  // Fallback if Database Webhook is not configured yet
+  if (newStatus === 'ready') triggerOrderEmail(orderId, 'ready');
+  if (newStatus === 'completed') triggerOrderEmail(orderId, 'review');
+
   return data;
 }
 
