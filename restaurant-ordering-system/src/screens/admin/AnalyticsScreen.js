@@ -33,7 +33,7 @@ const GRANULARITIES = [
   { key: 'month', label: 'Month' },
 ];
 
-const CHART_HEIGHT = 180;
+const CHART_HEIGHT = 360;
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -68,6 +68,24 @@ function getWeekRange(weeksAgo = 0) {
   sun.setDate(mon.getDate() + 6);
   sun.setHours(23, 59, 59, 999);
   return { from: mon, to: sun };
+}
+
+function getMonthRange(monthsAgo = 0) {
+  const start = startOfMonth(new Date());
+  start.setMonth(start.getMonth() - monthsAgo);
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59, 999);
+  return { from: start, to: end };
+}
+
+function formatPeriodLabel(type, offset, range) {
+  if (type === 'week') {
+    if (offset === 0) return 'This week';
+    if (offset === 1) return 'Last week';
+    return `${range.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${range.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+  }
+  if (offset === 0) return 'This month';
+  if (offset === 1) return 'Last month';
+  return range.from.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function isoDate(d) {
@@ -418,13 +436,15 @@ export default function AnalyticsScreen() {
   const [error, setError] = useState(null);
 
   const [allOrders, setAllOrders] = useState([]);
+  const [menuItems, setMenuItems] = useState([]);
   const [thisWeek, setThisWeek] = useState(null);
   const [lastWeek, setLastWeek] = useState(null);
-  const [itemStats, setItemStats] = useState([]);
   const [lastRefresh, setLastRefresh] = useState(null);
 
   const [granularity, setGranularity] = useState('day');
   const [selectedBar, setSelectedBar] = useState(null);
+  const [itemPeriodType, setItemPeriodType] = useState('week'); // 'week' | 'month'
+  const [itemPeriodOffset, setItemPeriodOffset] = useState(0); // 0 = current
 
   const load = useCallback(async () => {
     if (!restaurant?.id) return;
@@ -438,7 +458,7 @@ export default function AnalyticsScreen() {
       const chartFrom = startOfMonth(new Date());
       chartFrom.setMonth(chartFrom.getMonth() - 11);
 
-      const [historyOrders, menuItems] = await Promise.all([
+      const [historyOrders, menuData] = await Promise.all([
         getOrders(restaurant.id, { from: isoDate(chartFrom) }),
         getMenuItems(restaurant.id),
       ]);
@@ -453,9 +473,9 @@ export default function AnalyticsScreen() {
       });
 
       setAllOrders(historyOrders);
+      setMenuItems(menuData);
       setThisWeek(aggregateOrders(twOrders));
       setLastWeek(aggregateOrders(lwOrders));
-      setItemStats(aggregateMenuItems(twOrders, menuItems));
       setLastRefresh(new Date());
       setSelectedBar(null);
     } catch (e) {
@@ -480,9 +500,31 @@ export default function AnalyticsScreen() {
     [chartBuckets],
   );
 
+  const itemPeriodRange = useMemo(() => {
+    return itemPeriodType === 'week'
+      ? getWeekRange(itemPeriodOffset)
+      : getMonthRange(itemPeriodOffset);
+  }, [itemPeriodType, itemPeriodOffset]);
+
+  const itemStats = useMemo(() => {
+    const { from, to } = itemPeriodRange;
+    const periodOrders = allOrders.filter((o) => {
+      const t = new Date(o.created_at).getTime();
+      return t >= from.getTime() && t <= to.getTime();
+    });
+    return aggregateMenuItems(periodOrders, menuItems);
+  }, [allOrders, menuItems, itemPeriodRange]);
+
+  const itemPeriodLabel = formatPeriodLabel(itemPeriodType, itemPeriodOffset, itemPeriodRange);
+
   const handleGranularity = (key) => {
     setGranularity(key);
     setSelectedBar(null);
+  };
+
+  const setItemPeriod = (type) => {
+    setItemPeriodType(type);
+    setItemPeriodOffset(0);
   };
 
   if (loading) {
@@ -606,7 +648,32 @@ export default function AnalyticsScreen() {
           </Text>
         </View>
 
-        {/* Granularity toggles */}
+        {selectedBucket && (
+          <View style={[styles.selectedSummary, { backgroundColor: c.brandLight }]}>
+            <Text style={[styles.selectedSummaryLabel, { color: c.textPrimary }]}>
+              {selectedBucket.label}
+              {selectedBucket.subLabel ? ` ${selectedBucket.subLabel}` : ''}
+            </Text>
+            <Text style={[styles.selectedSummaryValue, { color: c.brand }]}>
+              {formatCurrency(selectedBucket.revenue)}
+              <Text style={[styles.selectedSummaryCount, { color: c.textSecondary }]}>
+                {'  '}· {selectedBucket.count} order{selectedBucket.count !== 1 ? 's' : ''}
+              </Text>
+            </Text>
+          </View>
+        )}
+
+        <RevenueBarChart
+          buckets={chartBuckets}
+          selectedKey={selectedBar}
+          onSelect={setSelectedBar}
+          brandColor={c.brand}
+          brandDark={c.brandDark || c.brand}
+          gridColor={c.border}
+          tickColor={c.textDisabled}
+        />
+
+        {/* Granularity toggles — below chart */}
         <View style={[styles.granularityRow, { backgroundColor: c.backgroundSunken }]}>
           {GRANULARITIES.map((g) => {
             const active = granularity === g.key;
@@ -633,31 +700,6 @@ export default function AnalyticsScreen() {
             );
           })}
         </View>
-
-        {selectedBucket && (
-          <View style={[styles.selectedSummary, { backgroundColor: c.brandLight }]}>
-            <Text style={[styles.selectedSummaryLabel, { color: c.textPrimary }]}>
-              {selectedBucket.label}
-              {selectedBucket.subLabel ? ` ${selectedBucket.subLabel}` : ''}
-            </Text>
-            <Text style={[styles.selectedSummaryValue, { color: c.brand }]}>
-              {formatCurrency(selectedBucket.revenue)}
-              <Text style={[styles.selectedSummaryCount, { color: c.textSecondary }]}>
-                {'  '}· {selectedBucket.count} order{selectedBucket.count !== 1 ? 's' : ''}
-              </Text>
-            </Text>
-          </View>
-        )}
-
-        <RevenueBarChart
-          buckets={chartBuckets}
-          selectedKey={selectedBar}
-          onSelect={setSelectedBar}
-          brandColor={c.brand}
-          brandDark={c.brandDark || c.brand}
-          gridColor={c.border}
-          tickColor={c.textDisabled}
-        />
       </View>
 
       {/* Pickup vs delivery */}
@@ -715,14 +757,78 @@ export default function AnalyticsScreen() {
           { backgroundColor: c.backgroundCard, borderColor: c.border },
         ]}
       >
-        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>
-          Menu Item Performance
-        </Text>
+        <View style={styles.itemPerfHeader}>
+          <Text style={[styles.sectionTitle, { color: c.textSecondary, marginBottom: 0 }]}>
+            Menu Item Performance
+          </Text>
+          <View style={[styles.itemPeriodTypeRow, { backgroundColor: c.backgroundSunken }]}>
+            {['week', 'month'].map((type) => {
+              const active = itemPeriodType === type;
+              return (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.itemPeriodTypeChip,
+                    active && { backgroundColor: c.backgroundCard },
+                  ]}
+                  onPress={() => setItemPeriod(type)}
+                >
+                  <Text
+                    style={[
+                      styles.itemPeriodTypeText,
+                      { color: active ? c.brand : c.textSecondary },
+                      active && { fontWeight: '700' },
+                    ]}
+                  >
+                    {type === 'week' ? 'Week' : 'Month'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.itemPeriodNav}>
+          <TouchableOpacity
+            style={[styles.itemPeriodNavBtn, { borderColor: c.border }]}
+            onPress={() => setItemPeriodOffset((o) => o + 1)}
+            accessibilityLabel="Previous period"
+          >
+            <Ionicons name="chevron-back" size={18} color={c.textPrimary} />
+          </TouchableOpacity>
+          <View style={styles.itemPeriodLabelWrap}>
+            <Text style={[styles.itemPeriodLabel, { color: c.textPrimary }]}>
+              {itemPeriodLabel}
+            </Text>
+            <Text style={[styles.itemPeriodDates, { color: c.textDisabled }]}>
+              {itemPeriodRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {' – '}
+              {itemPeriodRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.itemPeriodNavBtn,
+              { borderColor: c.border },
+              itemPeriodOffset === 0 && styles.itemPeriodNavBtnDisabled,
+            ]}
+            onPress={() => setItemPeriodOffset((o) => Math.max(0, o - 1))}
+            disabled={itemPeriodOffset === 0}
+            accessibilityLabel="Next period"
+          >
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={itemPeriodOffset === 0 ? c.textDisabled : c.textPrimary}
+            />
+          </TouchableOpacity>
+        </View>
+
         {itemStats.length === 0 ? (
           <View style={styles.emptyItems}>
             <Ionicons name="restaurant-outline" size={32} color={c.textDisabled} />
             <Text style={[styles.emptyItemsText, { color: c.textDisabled }]}>
-              No orders this week
+              No orders in this period
             </Text>
           </View>
         ) : (
@@ -1207,5 +1313,56 @@ const styles = StyleSheet.create({
   },
   emptyItemsText: {
     fontSize: 14,
+  },
+
+  itemPerfHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  itemPeriodTypeRow: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    padding: 3,
+    gap: 2,
+  },
+  itemPeriodTypeChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  itemPeriodTypeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  itemPeriodNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  itemPeriodNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemPeriodNavBtnDisabled: {
+    opacity: 0.45,
+  },
+  itemPeriodLabelWrap: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  itemPeriodLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  itemPeriodDates: {
+    fontSize: 11,
+    marginTop: 2,
   },
 });

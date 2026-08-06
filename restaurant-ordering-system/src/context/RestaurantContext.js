@@ -24,6 +24,11 @@ const RESERVED_PATH_SEGMENTS = new Set([
   'cart',
   'checkout',
   'confirmation',
+  'catering',
+  'rewards',
+  'hiring',
+  'tracker',
+  'review',
   'admin',
 ]);
 
@@ -90,7 +95,7 @@ function isAdminPath() {
 }
 
 export function RestaurantProvider({ children }) {
-  const { user } = useAuth();
+  const { user, isStaffUser, signOut, loading: authLoading } = useAuth();
   const [restaurant, setRestaurant] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -100,20 +105,32 @@ export function RestaurantProvider({ children }) {
     setError(null);
 
     try {
-      // Admin routes use the restaurant linked to the signed-in staff account.
+      // Admin routes: wait for session restore so we don't flash "restaurant not
+      // found" / wrong slug resolution before staff auth is available.
+      if (isAdminPath() && authLoading) {
+        return;
+      }
+
+      // Admin routes: staff load their linked restaurant; customer sessions are
+      // cleared so slug/domain resolution can mount LoginScreen (no dead-end error).
       if (isAdminPath() && user?.id) {
-        try {
-          const staffData = await getRestaurantForUser(user.id);
-          setRestaurant(staffData.restaurant);
-          return;
-        } catch (staffErr) {
-          setError(
-            staffErr.message ||
-              'No restaurant is linked to this admin account. Add a row to restaurant_staff in Supabase.',
-          );
-          setRestaurant(null);
-          return;
+        const staff = await isStaffUser(user.id);
+        if (staff) {
+          try {
+            const staffData = await getRestaurantForUser(user.id);
+            setRestaurant(staffData.restaurant);
+            return;
+          } catch (staffErr) {
+            setError(
+              staffErr.message ||
+                'No restaurant is linked to this admin account. Add a row to restaurant_staff in Supabase.',
+            );
+            setRestaurant(null);
+            return;
+          }
         }
+        await signOut();
+        // Fall through to slug/domain/sessionStorage resolution for LoginScreen.
       }
 
       const identifier = getRestaurantIdentifierFromURL();
@@ -154,9 +171,13 @@ export function RestaurantProvider({ children }) {
       setError(err.message || 'Failed to load restaurant.');
       setRestaurant(null);
     } finally {
-      setLoading(false);
+      // Keep the app spinner up while auth session is still restoring on /admin.
+      if (!(isAdminPath() && authLoading)) {
+        setLoading(false);
+      }
     }
-  }, [user?.id]);
+    // signOut is intentionally omitted: AuthContext does not memoize it.
+  }, [user?.id, isStaffUser, authLoading]);
 
   useEffect(() => {
     loadRestaurant();

@@ -99,9 +99,10 @@ Adds restaurant domain columns, customer `marketing_opt_in`, and order `*_email_
 ### 2. Deploy Edge Functions + secrets
 
 ```bash
-supabase secrets set RESEND_API_KEY=re_... RESEND_WEBHOOK_SECRET=whsec_...
+supabase secrets set RESEND_API_KEY=re_... RESEND_WEBHOOK_SECRET=whsec_... REVIEW_TOKEN_SECRET=<long-random> PUBLIC_APP_ORIGIN=https://your-app.example
 supabase functions deploy create-payment-intent
 supabase functions deploy send-order-email
+supabase functions deploy submit-order-review
 supabase functions deploy sync-marketing-contact
 supabase functions deploy send-broadcast
 supabase functions deploy manage-email-domain
@@ -109,6 +110,8 @@ supabase functions deploy resend-webhook
 ```
 
 Do **not** put Resend keys in `EXPO_PUBLIC_*` env vars.
+
+Also run `supabase/migrations/20260731_order_reviews_broadcasts.sql` for `order_reviews`, `email_broadcasts`, and webhook event idempotency.
 
 ### 3. Database Webhooks (recommended)
 
@@ -125,7 +128,12 @@ The function is idempotent (`order-confirm/{id}`, `order-ready/{id}`, `review-re
 
 ### 4. Resend webhook
 
-Point Resend → `…/functions/v1/resend-webhook` for `email.bounced`, `email.complained`, and store the signing secret as `RESEND_WEBHOOK_SECRET`.
+Point Resend → `…/functions/v1/resend-webhook` and subscribe to at least:
+
+- `email.bounced`, `email.complained` (opt-out sync)
+- `email.delivered`, `email.opened`, `email.clicked` (Marketing broadcast counters)
+
+Store the signing secret as `RESEND_WEBHOOK_SECRET`. Open/click/delivered events are attributed to a row in `email_broadcasts` when the payload includes `broadcast_id` (idempotent via `email_broadcast_events`).
 
 ### 5. Per-restaurant domain
 

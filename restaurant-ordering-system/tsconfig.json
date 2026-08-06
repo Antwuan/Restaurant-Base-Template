@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler"
+  },
+  "extends": "expo/tsconfig.base",
+  "exclude": ["supabase/functions"]
+}

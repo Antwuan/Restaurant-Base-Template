@@ -25,13 +25,23 @@ const linking = {
           openCart: (value) => value === 'true' || value === '1' || value === true,
         },
       },
+      Catering: 'catering',
+      Rewards: 'rewards',
+      Hiring: 'hiring',
       Checkout: 'checkout',
       Confirmation: 'confirmation',
       OrderTracker: 'tracker',
+      Review: {
+        path: 'review',
+        parse: {
+          token: (value) => value || '',
+        },
+      },
     },
   },
   getStateFromPath(path, options) {
-    const clean = (path || '').replace(/^\//, '').split('?')[0];
+    const raw = path || '';
+    const clean = raw.replace(/^\//, '').split('?')[0];
     if (clean === 'cart') {
       return {
         routes: [{ name: 'Menu', params: { openCart: true } }],
@@ -39,6 +49,13 @@ const linking = {
     }
     if (clean === '' || clean === 'home') {
       return { routes: [{ name: 'Home' }] };
+    }
+    if (clean === 'review') {
+      const qs = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : '';
+      const params = new URLSearchParams(qs);
+      return {
+        routes: [{ name: 'Review', params: { token: params.get('token') || '' } }],
+      };
     }
     return defaultGetStateFromPath(path, options);
   },

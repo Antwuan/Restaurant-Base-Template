@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { orderService } from '../services/orderService';
+import * as orderService from '../services/orderService';
 import { supabase } from '../config/supabase';
 
 export const useOrders = (restaurantId, { statusFilter = null, autoRefresh = true } = {}) => {

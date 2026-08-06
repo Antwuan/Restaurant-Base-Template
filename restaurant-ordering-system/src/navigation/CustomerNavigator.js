@@ -6,6 +6,10 @@ import MenuScreen from '../screens/customer/MenuScreen';
 import CheckoutScreen from '../screens/customer/CheckoutScreen';
 import ConfirmationScreen from '../screens/customer/ConfirmationScreen';
 import TrackerScreen from '../screens/customer/TrackerScreen';
+import RewardsScreen from '../screens/customer/RewardsScreen';
+import HiringScreen from '../screens/customer/HiringScreen';
+import CateringScreen from '../screens/customer/CateringScreen';
+import ReviewScreen from '../screens/customer/ReviewScreen';
 import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
 
@@ -64,6 +68,32 @@ function TrackerScreenWithNav({ navigation }) {
   return <TrackerScreen navigation={navigation} />;
 }
 
+function RewardsScreenWithNav({ navigation }) {
+  return <RewardsScreen navigation={navigation} />;
+}
+
+function HiringScreenWithNav({ navigation }) {
+  return (
+    <>
+      <CustomerNavbar navigation={navigation} currentRoute="Hiring" />
+      <HiringScreen navigation={navigation} />
+    </>
+  );
+}
+
+function CateringScreenWithNav({ navigation, route }) {
+  return (
+    <>
+      <CustomerNavbar navigation={navigation} currentRoute="Catering" />
+      <CateringScreen navigation={navigation} route={route} />
+    </>
+  );
+}
+
+function ReviewScreenWithNav({ navigation, route }) {
+  return <ReviewScreen navigation={navigation} route={route} />;
+}
+
 export default function CustomerNavigator() {
   return (
     <Stack.Navigator
@@ -73,12 +103,16 @@ export default function CustomerNavigator() {
     >
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="Menu" component={MenuScreenWithCart} />
+      <Stack.Screen name="Catering" component={CateringScreenWithNav} />
+      <Stack.Screen name="Rewards" component={RewardsScreenWithNav} />
+      <Stack.Screen name="Hiring" component={HiringScreenWithNav} />
       <Stack.Screen name="Checkout" component={CheckoutScreenWithNav} />
       <Stack.Screen
         name="Confirmation"
         component={ConfirmationScreenWithNav}
       />
       <Stack.Screen name="OrderTracker" component={TrackerScreenWithNav} />
+      <Stack.Screen name="Review" component={ReviewScreenWithNav} />
     </Stack.Navigator>
   );
 }

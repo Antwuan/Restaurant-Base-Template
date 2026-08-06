@@ -52,7 +52,6 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMenu } from '../../hooks/useMenu';
-import { useCarousel } from '../../hooks/useCarousel';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
 import * as menuService from '../../services/menuService';
@@ -61,7 +60,6 @@ import {
   uploadFileFromUri,
   menuImageStoragePath,
 } from '../../services/storageService';
-import MenuCarousel from '../../components/MenuCarousel';
 import AdminCategorySection from '../../components/admin/AdminCategorySection';
 import AdminEmptyState from '../../components/admin/AdminEmptyState';
 import MenuItemEditor from '../../components/admin/MenuItemEditor';
@@ -227,8 +225,6 @@ export default function MenuEditorScreen() {
     loading,
     refetch: refreshMenu,
   } = useMenu(restaurant?.id, activeMenuType);
-
-  const { slides, refetch: refreshCarousel } = useCarousel(restaurant?.id);
 
   const [itemEditorVisible, setItemEditorVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -414,9 +410,9 @@ export default function MenuEditorScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refreshMenu(), refreshCarousel()]);
+    await Promise.all([refreshMenu()]);
     setRefreshing(false);
-  }, [refreshMenu, refreshCarousel]);
+  }, [refreshMenu]);
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -665,9 +661,6 @@ export default function MenuEditorScreen() {
           }
           showsVerticalScrollIndicator={false}
         >
-          {/* Carousel (regular menu only) */}
-          {activeMenuType === 'regular' && <MenuCarousel slides={slides} />}
-
           {/* Info bar */}
           {renderInfoBar()}
 

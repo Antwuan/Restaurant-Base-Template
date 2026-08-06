@@ -13,3 +13,5 @@ export { default as CartPanel } from './CartPanel';
 export { default as CartDrawer } from './CartDrawer';
 export { default as MenuHeaderActions } from './MenuHeaderActions';
 export { default as CustomerSignInModal } from './CustomerSignInModal';
+export { default as CustomerNavbar } from './CustomerNavbar';
+export { default as MenuItemModal } from './MenuItemModal';

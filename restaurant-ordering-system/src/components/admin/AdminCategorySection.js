@@ -30,6 +30,8 @@ import { useTheme } from '../../theme';
 import AdminMenuItem from './AdminMenuItem';
 
 const DESKTOP_BREAKPOINT = 768;
+const GUTTER = 12;
+const HALF_GUTTER = GUTTER / 2;
 
 // Sortable wrapper for each item cell — renders as a div on web so
 // @dnd-kit's pointer listeners and CSS transforms work correctly.
@@ -37,8 +39,10 @@ function SortableItemCell({ id, isDesktop, children }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
   const divStyle = {
-    width: isDesktop ? 'calc(50% - 6px)' : '100%',
+    // Web CSS supports calc; keep two columns with a 12px gutter
+    width: isDesktop ? `calc(50% - ${HALF_GUTTER}px)` : '100%',
     flexShrink: 0,
+    boxSizing: 'border-box',
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.45 : 1,
@@ -198,19 +202,21 @@ const styles = StyleSheet.create({
   emptyCategoryText: {
     fontSize: 13,
   },
-  // Native fallback grid
+  // Native fallback grid (RN StyleSheet has no calc())
   grid: {
     flexDirection: 'column',
-    gap: 12,
+    rowGap: GUTTER,
   },
   gridDesktop: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    marginHorizontal: -HALF_GUTTER,
   },
   cell: {
     width: '100%',
   },
   cellDesktop: {
-    width: 'calc(50% - 6px)',
+    width: '50%',
+    paddingHorizontal: HALF_GUTTER,
   },
 });

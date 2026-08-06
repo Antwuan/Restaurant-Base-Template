@@ -47,3 +47,17 @@ export async function sendBroadcast({ restaurantId, subject, html, previewText, 
 export async function manageEmailDomain(payload) {
   return invoke('manage-email-domain', payload);
 }
+
+/** Admin: list persisted promo broadcasts with webhook engagement counters. */
+export async function listEmailBroadcasts(restaurantId) {
+  if (!restaurantId) return [];
+  const { data, error } = await supabase
+    .from('email_broadcasts')
+    .select(
+      'id, restaurant_id, resend_broadcast_id, subject, preview_text, name, sent_at, delivered_count, opened_count, clicked_count, bounced_count, complained_count',
+    )
+    .eq('restaurant_id', restaurantId)
+    .order('sent_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}

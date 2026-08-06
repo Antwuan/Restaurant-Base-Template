@@ -1,54 +1,73 @@
-// =============================================================================
-// FILE: src/components/CategorySection.js
-// Phase 7: Customer app – section for a category and its items
-// =============================================================================
-
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import MenuItem from './MenuItem';
+import { FadeInView } from './motion';
 
-const CategorySection = ({ category, items, onAddToCart }) => {
+const DESKTOP_BREAKPOINT = 768;
+const GUTTER = 12;
+const HALF_GUTTER = GUTTER / 2;
+
+const CategorySection = ({ category, items, onAddToCart, onItemPress, sectionRef }) => {
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= DESKTOP_BREAKPOINT;
+
   if (!items || items.length === 0) return null;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerRow}>
+    <View ref={sectionRef} style={styles.container}>
+      <FadeInView duration={380} fromY={12}>
         <Text style={styles.headerText}>{category.name}</Text>
-        <View style={styles.headerLine} />
+      </FadeInView>
+      <View style={[styles.grid, isDesktop && styles.gridDesktop]}>
+        {items.map((item, idx) => (
+          <FadeInView
+            key={item.id}
+            delay={idx * 60}
+            duration={400}
+            fromY={16}
+            style={[styles.cell, isDesktop && styles.cellDesktop]}
+          >
+            <MenuItem
+              item={item}
+              onAddToCart={onAddToCart}
+              onItemPress={onItemPress}
+              index={idx}
+            />
+          </FadeInView>
+        ))}
       </View>
-      {items.map((item) => (
-        <MenuItem
-          key={item.id}
-          item={item}
-          onAddToCart={onAddToCart}
-        />
-      ))}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 28,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 36,
   },
   headerText: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '800',
     color: '#1a1a1a',
-    marginRight: 12,
+    marginBottom: 14,
   },
-  headerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#e8e8e8',
+  grid: {
+    flexDirection: 'column',
+    rowGap: GUTTER,
+  },
+  gridDesktop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    // Cancel cell horizontal padding so outer edges stay flush
+    marginHorizontal: -HALF_GUTTER,
+  },
+  cell: {
+    width: '100%',
+  },
+  cellDesktop: {
+    // Two columns with a 12px gutter (RN StyleSheet has no calc())
+    width: '50%',
+    paddingHorizontal: HALF_GUTTER,
   },
 });
 
 export default CategorySection;
-

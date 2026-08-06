@@ -28,6 +28,8 @@ function genFileId() {
 }
 
 const DESKTOP_BP = 768;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_RESUME_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export default function HiringScreen({ navigation }) {
   const { restaurant } = useRestaurantContext();
@@ -43,24 +45,71 @@ export default function HiringScreen({ navigation }) {
   const [fileObj, setFileObj] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const clearError = (key) => {
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   const handleFileChange = (e) => {
     const f = e?.target?.files?.[0];
-    if (f) {
-      setFileName(f.name);
-      setFileObj(f);
+    if (!f) return;
+
+    const isPdf =
+      f.type === 'application/pdf' ||
+      (f.name || '').toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setFileName('');
+      setFileObj(null);
+      setErrors((prev) => ({ ...prev, resume: 'Resume must be a PDF file.' }));
+      e.target.value = '';
+      return;
     }
+    if (f.size > MAX_RESUME_BYTES) {
+      setFileName('');
+      setFileObj(null);
+      setErrors((prev) => ({ ...prev, resume: 'Resume must be 5 MB or smaller.' }));
+      e.target.value = '';
+      return;
+    }
+
+    setFileName(f.name);
+    setFileObj(f);
+    clearError('resume');
+  };
+
+  const validate = () => {
+    const errs = {};
+    if (!name.trim()) errs.name = 'Name is required';
+    if (!email.trim()) {
+      errs.email = 'Email is required';
+    } else if (!EMAIL_RE.test(email.trim())) {
+      errs.email = 'Enter a valid email address';
+    }
+    const digits = phone.replace(/\D/g, '');
+    if (!phone.trim()) {
+      errs.phone = 'Phone number is required';
+    } else if (digits.length < 10) {
+      errs.phone = 'Enter a valid phone number (at least 10 digits)';
+    }
+    if (!comment.trim() && !fileObj) {
+      errs.resume = 'Please provide a comment or attach your resume (PDF).';
+    }
+    return errs;
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !email.trim()) {
-      Alert.alert('Required Fields', 'Please fill in your name and email.');
+    const validationErrors = validate();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
       return;
     }
-    if (!comment.trim() && !fileObj) {
-      Alert.alert('Application Incomplete', 'Please provide a comment or attach your resume (PDF).');
-      return;
-    }
+    setErrors({});
 
     setSubmitting(true);
     try {
@@ -164,37 +213,40 @@ export default function HiringScreen({ navigation }) {
 
             <Text style={s.fieldLabel}>Full name</Text>
             <TextInput
-              style={s.input}
+              style={[s.input, errors.name && s.inputError]}
               value={name}
-              onChangeText={setName}
+              onChangeText={(v) => { setName(v); clearError('name'); }}
               placeholder="Your name"
               autoCapitalize="words"
             />
+            {errors.name ? <Text style={s.errorText}>{errors.name}</Text> : null}
 
             <Text style={s.fieldLabel}>Email</Text>
             <TextInput
-              style={s.input}
+              style={[s.input, errors.email && s.inputError]}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(v) => { setEmail(v); clearError('email'); }}
               placeholder="Email"
               keyboardType="email-address"
               autoCapitalize="none"
             />
+            {errors.email ? <Text style={s.errorText}>{errors.email}</Text> : null}
 
             <Text style={s.fieldLabel}>Phone number</Text>
             <TextInput
-              style={s.input}
+              style={[s.input, errors.phone && s.inputError]}
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(v) => { setPhone(v); clearError('phone'); }}
               placeholder="(555) 555-5555"
               keyboardType="phone-pad"
             />
+            {errors.phone ? <Text style={s.errorText}>{errors.phone}</Text> : null}
 
             <Text style={s.fieldLabel}>Comment</Text>
             <TextInput
-              style={[s.input, s.textArea]}
+              style={[s.input, s.textArea, errors.resume && !fileObj && s.inputError]}
               value={comment}
-              onChangeText={setComment}
+              onChangeText={(v) => { setComment(v); clearError('resume'); }}
               placeholder="Anything to share as we consider your application?"
               multiline
               numberOfLines={4}
@@ -202,7 +254,7 @@ export default function HiringScreen({ navigation }) {
 
             <Text style={s.fieldLabel}>Attachment</Text>
             {Platform.OS === 'web' ? (
-              <View style={[s.fileRow, { backgroundColor: '#fff' }]}>
+              <View style={[s.fileRow, { backgroundColor: '#fff' }, errors.resume && s.inputError]}>
                 <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{
                     padding: '8px 14px',
@@ -220,19 +272,20 @@ export default function HiringScreen({ navigation }) {
                   </span>
                   <input
                     type="file"
-                    accept=".pdf"
+                    accept=".pdf,application/pdf"
                     style={{ display: 'none' }}
                     onChange={handleFileChange}
                   />
                 </label>
               </View>
             ) : (
-              <View style={[s.fileRow, { backgroundColor: '#fff' }]}>
+              <View style={[s.fileRow, { backgroundColor: '#fff' }, errors.resume && s.inputError]}>
                 <Text style={s.fileText}>File upload available on web</Text>
               </View>
             )}
+            {errors.resume ? <Text style={s.errorText}>{errors.resume}</Text> : null}
             <Text style={s.fileHint}>
-              Upload a PDF resume. Either a comment or an attachment is required.
+              Upload a PDF resume (max 5 MB). Either a comment or an attachment is required.
             </Text>
 
             <TouchableOpacity
@@ -322,6 +375,8 @@ const s = StyleSheet.create({
     fontSize: 14,
     color: '#222',
   },
+  inputError: { borderColor: '#c0392b' },
+  errorText: { fontSize: 12, color: '#c0392b', marginTop: 4 },
   textArea: { height: 96, textAlignVertical: 'top' },
 
   // File

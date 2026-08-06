@@ -5,7 +5,7 @@
  * 1) Direct: { orderId, type: 'confirm' | 'ready' | 'review' }
  * 2) Supabase Database Webhook (INSERT/UPDATE on orders)
  *
- * Secrets: RESEND_API_KEY (server-only)
+ * Secrets: RESEND_API_KEY, REVIEW_TOKEN_SECRET, PUBLIC_APP_ORIGIN
  * Idempotency: order-confirm/{id}, order-ready/{id}, review-request/{id}
  */
 import { Resend } from 'npm:resend';
@@ -23,6 +23,38 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+/** HMAC review token — inlined so Dashboard deploys don't need ../_shared */
+const reviewTokenEnc = new TextEncoder();
+
+function toBase64Url(bytes: ArrayBuffer | Uint8Array): string {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = '';
+  for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function signReviewToken(
+  payload: { orderId: string; restaurantId: string; expiresInSeconds?: number },
+  secret: string,
+): Promise<string> {
+  const expiresIn = payload.expiresInSeconds ?? 30 * 24 * 60 * 60;
+  const body = {
+    orderId: payload.orderId,
+    restaurantId: payload.restaurantId,
+    exp: Math.floor(Date.now() / 1000) + expiresIn,
+  };
+  const bodyB64 = toBase64Url(reviewTokenEnc.encode(JSON.stringify(body)));
+  const key = await crypto.subtle.importKey(
+    'raw',
+    reviewTokenEnc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, reviewTokenEnc.encode(bodyB64));
+  return `${bodyB64}.${toBase64Url(sig)}`;
 }
 
 function escapeHtml(s: string) {
@@ -115,7 +147,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: restaurant, error: restErr } = await supabase
       .from('restaurants')
-      .select('id, name, resend_from_email, email_domain_status, review_url, auto_review_emails, address, phone')
+      .select('id, name, slug, resend_from_email, email_domain_status, auto_review_emails, address, phone')
       .eq('id', order.restaurant_id)
       .single();
 
@@ -141,13 +173,10 @@ Deno.serve(async (req: Request) => {
     if (emailType === 'review' && restaurant.auto_review_emails === false) {
       return json({ skipped: true, reason: 'Auto review emails disabled' });
     }
-    if (emailType === 'review' && !restaurant.review_url) {
-      return json({ skipped: true, reason: 'No review_url configured' });
-    }
 
     const resend = new Resend(apiKey);
     const restaurantName = restaurant.name || 'Restaurant';
-    const orderNumber = order.order_number || order.id.slice(0, 8);
+    const orderNumber = order.order_number || String(order.id);
     const customerName = escapeHtml(order.customer_name || 'there');
 
     let subject = '';
@@ -189,11 +218,30 @@ Deno.serve(async (req: Request) => {
          ${restaurant.phone ? `<p>Questions? Call ${escapeHtml(restaurant.phone)}</p>` : ''}`,
       );
     } else {
+      const reviewSecret = Deno.env.get('REVIEW_TOKEN_SECRET');
+      const appOrigin = (Deno.env.get('PUBLIC_APP_ORIGIN') || '').replace(/\/+$/, '');
+      if (!reviewSecret || !appOrigin) {
+        return json({
+          skipped: true,
+          reason: 'REVIEW_TOKEN_SECRET or PUBLIC_APP_ORIGIN is not configured',
+        });
+      }
+      if (!restaurant.slug) {
+        return json({ skipped: true, reason: 'Restaurant slug is missing' });
+      }
+
+      const token = await signReviewToken(
+        { orderId: String(order.id), restaurantId: restaurant.id },
+        reviewSecret,
+      );
+      const reviewUrl = escapeHtml(
+        `${appOrigin}/review?token=${encodeURIComponent(token)}&restaurant=${encodeURIComponent(restaurant.slug)}`,
+      );
+
       subject = `How was your visit? — ${restaurantName}`;
       idempotencyKey = `review-request/${order.id}`;
       sentColumn = 'review_email_sent_at';
       scheduledAt = 'in 2 hours';
-      const reviewUrl = escapeHtml(restaurant.review_url);
       html = wrapEmail(
         restaurantName,
         'We\'d love your feedback',

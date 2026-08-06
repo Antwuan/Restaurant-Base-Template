@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,11 +7,11 @@ import {
   TouchableOpacity,
   Text,
 } from 'react-native';
-import { confirmAsync } from '../../utils/confirm';
 import { Ionicons } from '@expo/vector-icons';
 import AdminSidebar, { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from './AdminSidebar';
 import { useTheme } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { confirmAsync } from '../../utils/confirm';
 
 import OrdersScreen from '../../screens/admin/OrdersScreen';
 import MenuEditorScreen from '../../screens/admin/MenuEditorScreen';
@@ -39,6 +39,8 @@ const SCREENS = {
 const COLLAPSE_BREAKPOINT = 768;
 // Sidebar hides entirely (mobile overlay) below this
 const MOBILE_BREAKPOINT = 540;
+/** Block Sign Out re-entry after cancel (click-through under dismissing modal). */
+const SIGN_OUT_CANCEL_GUARD_MS = 450;
 
 export default function AdminLayout() {
   const { width } = useWindowDimensions();
@@ -47,6 +49,8 @@ export default function AdminLayout() {
 
   const [activeSection, setActiveSection] = useState('Orders');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const signOutGuardUntilRef = useRef(0);
+  const signOutInFlightRef = useRef(false);
 
   const isMobile   = width < MOBILE_BREAKPOINT;
   const isCollapsed = !isMobile && width < COLLAPSE_BREAKPOINT;
@@ -58,17 +62,28 @@ export default function AdminLayout() {
 
   const handleNavigate = useCallback(async (key) => {
     if (key === 'SignOut') {
-      const confirmed = await confirmAsync({
-        title: 'Sign Out',
-        message: 'Are you sure you want to sign out?',
-        confirmText: 'Sign Out',
-      });
-      if (confirmed) {
+      if (signOutInFlightRef.current || Date.now() < signOutGuardUntilRef.current) {
+        return;
+      }
+      signOutInFlightRef.current = true;
+      try {
+        const confirmed = await confirmAsync({
+          title: 'Sign Out',
+          message: 'Are you sure you want to sign out?',
+          confirmText: 'Sign Out',
+          destructive: true,
+        });
+        if (!confirmed) {
+          signOutGuardUntilRef.current = Date.now() + SIGN_OUT_CANCEL_GUARD_MS;
+          return;
+        }
         try {
           await signOut();
         } catch {
           // auth state change will handle UI; nothing to do on error
         }
+      } finally {
+        signOutInFlightRef.current = false;
       }
       return;
     }
