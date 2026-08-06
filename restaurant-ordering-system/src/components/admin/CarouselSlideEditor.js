@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../theme';
+import ImageFrameEditor from './ImageFrameEditor';
 
 const DEFAULT_FORM = {
   media_type: 'image',
@@ -32,6 +33,7 @@ export default function CarouselSlideEditor({
   const c = theme.colors;
   const [form, setForm] = useState(DEFAULT_FORM);
   const [localMediaUri, setLocalMediaUri] = useState(null);
+  const [frameUri, setFrameUri] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -66,13 +68,16 @@ export default function CarouselSlideEditor({
       mediaTypes: isVideo
         ? ImagePicker.MediaTypeOptions.Videos
         : ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: !isVideo,
-      aspect: isVideo ? undefined : [16, 9],
-      quality: 0.85,
+      allowsEditing: false,
+      quality: isVideo ? 0.85 : 1,
     });
 
     if (!result.canceled && result.assets?.[0]) {
-      setLocalMediaUri(result.assets[0].uri);
+      if (isVideo) {
+        setLocalMediaUri(result.assets[0].uri);
+      } else {
+        setFrameUri(result.assets[0].uri);
+      }
     }
   };
 
@@ -100,6 +105,7 @@ export default function CarouselSlideEditor({
   const previewUri = localMediaUri || form.media_url || null;
 
   return (
+    <>
     <ScrollView
       style={[styles.container, { backgroundColor: c.backgroundCard }]}
       contentContainerStyle={styles.content}
@@ -284,6 +290,19 @@ export default function CarouselSlideEditor({
         </TouchableOpacity>
       </View>
     </ScrollView>
+
+    <ImageFrameEditor
+      visible={!!frameUri}
+      uri={frameUri}
+      aspectRatio={16 / 9}
+      title="Frame promo image"
+      onCancel={() => setFrameUri(null)}
+      onConfirm={(framed) => {
+        setLocalMediaUri(framed);
+        setFrameUri(null);
+      }}
+    />
+    </>
   );
 }
 

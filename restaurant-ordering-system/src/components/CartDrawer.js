@@ -18,15 +18,24 @@ const DRAWER_MAX_WIDTH = 420;
 export default function CartDrawer({ visible, onClose, onCheckout }) {
   const { width } = useWindowDimensions();
   const panelWidth = Math.min(DRAWER_MAX_WIDTH, width * 0.92);
-  const translateX = useRef(new Animated.Value(panelWidth)).current;
+
+  const slideAnim = useRef(new Animated.Value(panelWidth)).current;
+  const overlayAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.timing(translateX, {
-      toValue: visible ? 0 : panelWidth,
-      duration: 260,
-      useNativeDriver: true,
-    }).start();
-  }, [visible, panelWidth, translateX]);
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: visible ? 0 : panelWidth,
+        duration: 280,
+        useNativeDriver: true,
+      }),
+      Animated.timing(overlayAnim, {
+        toValue: visible ? 1 : 0,
+        duration: 240,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [visible, panelWidth, slideAnim, overlayAnim]);
 
   return (
     <Modal
@@ -35,39 +44,39 @@ export default function CartDrawer({ visible, onClose, onCheckout }) {
       animationType="none"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
+      {/* Backdrop fades in/out in sync with panel slide */}
+      <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
         <Pressable style={styles.backdrop} onPress={onClose} />
-        <Animated.View
-          style={[
-            styles.panel,
-            {
-              width: panelWidth,
-              transform: [{ translateX }],
-            },
-          ]}
-        >
-          <View style={styles.drawerHeader}>
-            <Text style={styles.drawerTitle}>Cart</Text>
-            <TouchableOpacity
-              onPress={onClose}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityLabel="Close cart"
-            >
-              <Ionicons name="close" size={26} color="#333" />
-            </TouchableOpacity>
-          </View>
-          <CartPanel onClose={onClose} onCheckout={onCheckout} />
-        </Animated.View>
-      </View>
+      </Animated.View>
+
+      <Animated.View
+        style={[
+          styles.panel,
+          {
+            width: panelWidth,
+            transform: [{ translateX: slideAnim }],
+          },
+        ]}
+      >
+        <View style={styles.drawerHeader}>
+          <Text style={styles.drawerTitle}>Cart</Text>
+          <TouchableOpacity
+            onPress={onClose}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="Close cart"
+          >
+            <Ionicons name="close" size={26} color="#333" />
+          </TouchableOpacity>
+        </View>
+        <CartPanel onClose={onClose} onCheckout={onCheckout} />
+      </Animated.View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+    ...StyleSheet.absoluteFillObject,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,

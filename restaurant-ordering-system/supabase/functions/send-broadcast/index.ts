@@ -87,7 +87,32 @@ Deno.serve(async (req: Request) => {
       return json({ error: error.message || 'Failed to send broadcast' }, 502);
     }
 
-    return json({ ok: true, broadcastId: data?.id });
+    const resendBroadcastId = data?.id ? String(data.id) : null;
+
+    const { data: row, error: persistErr } = await supabase
+      .from('email_broadcasts')
+      .insert({
+        restaurant_id: restaurantId,
+        resend_broadcast_id: resendBroadcastId,
+        subject: subject.trim(),
+        preview_text: previewText?.trim() || null,
+        name: broadcastName,
+        sent_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (persistErr) {
+      console.error('email_broadcasts persist error:', persistErr);
+      // Broadcast already sent via Resend — surface id but flag persistence failure
+      return json({
+        ok: true,
+        broadcastId: resendBroadcastId,
+        warning: 'Broadcast sent but failed to persist metrics row',
+      });
+    }
+
+    return json({ ok: true, broadcastId: resendBroadcastId, id: row?.id });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return json({ error: message }, 500);

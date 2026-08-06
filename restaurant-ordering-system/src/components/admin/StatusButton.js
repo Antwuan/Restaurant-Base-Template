@@ -7,8 +7,8 @@ import {
   Text,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
+import { confirmAsync } from '../../utils/confirm';
 
 export default function StatusButton({
   label,
@@ -45,18 +45,16 @@ export default function StatusButton({
     }
   };
 
-  const handlePress = () => {
+  const handlePress = async () => {
     if (isDisabled) return;
 
     if (requireConfirmation) {
-      Alert.alert(
-        confirmTitle,
-        confirmMessage || `${label}?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Confirm', style: 'destructive', onPress: executeAction },
-        ],
-      );
+      const confirmed = await confirmAsync({
+        title: confirmTitle,
+        message: confirmMessage || `${label}?`,
+        confirmText: 'Confirm',
+      });
+      if (confirmed) executeAction();
     } else {
       executeAction();
     }

@@ -15,11 +15,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useMenu } from '../../hooks/useMenu';
-import { useCarousel } from '../../hooks/useCarousel';
 import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
 import CategorySection from '../../components/CategorySection';
-import MenuCarousel from '../../components/MenuCarousel';
 import MenuItemModal from '../../components/MenuItemModal';
 
 const SIDEBAR_WIDTH = 188;
@@ -36,7 +34,6 @@ export default function MenuScreen() {
     refetch,
   } = useMenu(restaurant?.id, 'regular');
 
-  const { slides, refetch: refetchCarousel } = useCarousel(restaurant?.id);
   const { addItem } = useCartContext();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
@@ -55,9 +52,9 @@ export default function MenuScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refetch(), refetchCarousel()]);
+    await refetch();
     setRefreshing(false);
-  }, [refetch, refetchCarousel]);
+  }, [refetch]);
 
   const handleItemPress = useCallback((item) => {
     setSelectedItem(item);
@@ -180,9 +177,6 @@ export default function MenuScreen() {
         )}
         showsVerticalScrollIndicator={false}
       >
-        {/* Carousel */}
-        <MenuCarousel slides={slides} />
-
         {/* ── Slim info bar (replaces RestaurantHeader) ── */}
         <View style={styles.infoBar}>
           <View style={styles.infoBarInner}>

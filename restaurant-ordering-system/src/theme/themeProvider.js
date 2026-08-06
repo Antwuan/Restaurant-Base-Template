@@ -27,6 +27,19 @@ function persistDarkMode(enabled) {
   }
 }
 
+// Dark theme only applies to the admin dashboard. Customer-facing pages
+// always render in light theme regardless of the admin's dark mode setting.
+function isAdminArea() {
+  try {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      return window.location.pathname.startsWith('/admin');
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 export const ThemeProvider = ({ restaurant, children }) => {
   const [isDarkMode, setIsDarkMode] = useState(readStoredDarkMode);
 
@@ -43,12 +56,13 @@ export const ThemeProvider = ({ restaurant, children }) => {
   }, []);
 
   const theme = useMemo(() => {
+    const darkAllowed = isAdminArea();
     return generateTheme({
       primaryColor: restaurant?.primary_color || '#007AFF',
       secondaryColor: restaurant?.secondary_color || '#5856D6',
       restaurantName: restaurant?.name || 'Restaurant',
       logoUrl: restaurant?.logo_url || null,
-      mode: isDarkMode ? 'dark' : 'light',
+      mode: isDarkMode && darkAllowed ? 'dark' : 'light',
     });
   }, [
     restaurant?.primary_color,
