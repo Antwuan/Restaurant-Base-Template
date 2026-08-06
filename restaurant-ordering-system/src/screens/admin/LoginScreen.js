@@ -19,7 +19,7 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const { signIn, signOut, isStaffUser } = useAuth();
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -29,8 +29,19 @@ export default function LoginScreen({ navigation }) {
 
     setLoading(true);
     try {
-      await signIn(email, password);
-      // AuthContext will handle redirect to dashboard
+      const data = await signIn(email, password);
+      const userId = data?.user?.id;
+      if (userId) {
+        const staff = await isStaffUser(userId);
+        if (!staff) {
+          await signOut();
+          Alert.alert(
+            'Not an admin account',
+            'This account is not an admin account. Please sign in with a staff account, or use the customer Sign in on the restaurant site.',
+          );
+          return;
+        }
+      }
     } catch (error) {
       Alert.alert(
         'Login Failed',

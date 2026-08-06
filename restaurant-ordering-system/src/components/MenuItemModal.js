@@ -65,7 +65,7 @@ export default function MenuItemModal({
   menuType = 'regular',
 }) {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { isCustomerAuthenticated } = useAuth();
   const [quantity, setQuantity] = useState(1);
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState(new Set());
@@ -401,7 +401,7 @@ export default function MenuItemModal({
               <View style={styles.divider} />
               <View style={[styles.section, styles.pointsSection]}>
                 <Text style={styles.sectionTitle}>Pay with points</Text>
-                {user ? (
+                {isCustomerAuthenticated ? (
                   <Text style={styles.pointsBody}>
                     You can redeem your loyalty points at checkout.
                   </Text>

@@ -96,9 +96,9 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
           style={[styles.signOutRow, collapsed && styles.signOutRowCollapsed]}
           onPress={() => onNavigate('SignOut')}
         >
-          <Ionicons name="log-out-outline" size={18} color={theme.colors.textSecondary} style={styles.navIcon} />
+          <Ionicons name="log-out-outline" size={18} color="#FF3B30" style={styles.navIcon} />
           {!collapsed && (
-            <Text style={[styles.signOutText, { color: theme.colors.textSecondary }]}>Sign out</Text>
+            <Text style={[styles.signOutText, { color: '#FF3B30' }]}>Sign out</Text>
           )}
         </TouchableOpacity>
       </View>

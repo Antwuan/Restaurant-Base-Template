@@ -192,6 +192,7 @@ export default function SettingsScreen() {
       title: 'Sign Out',
       message: 'Are you sure you want to sign out?',
       confirmText: 'Sign Out',
+      destructive: true,
     });
     if (!confirmed) return;
 

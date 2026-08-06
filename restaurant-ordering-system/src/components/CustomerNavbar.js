@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Platform,
   useWindowDimensions,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
@@ -14,40 +15,141 @@ import { useCartContext } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme';
 import CustomerSignInModal from './CustomerSignInModal';
+import { AnimatedBadge } from './motion';
 
 const NAV_LINKS = [
   { label: 'Menu', route: 'Menu' },
   { label: 'Catering', route: 'Catering' },
   { label: 'Rewards', route: 'Rewards' },
+  { label: 'Careers', route: 'Hiring' },
   { label: 'Order Tracker', route: 'OrderTracker' },
 ];
 
 const MOBILE_BREAKPOINT = 768;
 
+/** Desktop nav link with soft pill highlight on hover/active. */
+function NavLink({ label, isActive, onPress }) {
+  const pillOpacity = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+  const textOpacity = useRef(new Animated.Value(isActive ? 1 : 0.82)).current;
+
+  const animateTo = (pillTo, opacityTo) => {
+    Animated.parallel([
+      Animated.timing(pillOpacity, {
+        toValue: pillTo,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(textOpacity, {
+        toValue: opacityTo,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  useEffect(() => {
+    animateTo(isActive ? 1 : 0, isActive ? 1 : 0.82);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
+
+  const webHover =
+    Platform.OS === 'web'
+      ? {
+          onMouseEnter: () => !isActive && animateTo(0.65, 1),
+          onMouseLeave: () => !isActive && animateTo(0, 0.82),
+        }
+      : {};
+
+  return (
+    <TouchableOpacity
+      style={styles.navLinkBtn}
+      onPress={onPress}
+      activeOpacity={0.7}
+      {...webHover}
+    >
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.navLinkPill,
+          {
+            opacity: pillOpacity,
+            backgroundColor: isActive
+              ? 'rgba(255,255,255,0.22)'
+              : 'rgba(255,255,255,0.14)',
+          },
+        ]}
+      />
+      <Animated.Text style={[styles.navLinkText, { opacity: textOpacity }]}>
+        {label}
+      </Animated.Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function CustomerNavbar({ navigation, currentRoute, onOpenCart }) {
   const { restaurant } = useRestaurantContext();
   const { itemCount } = useCartContext();
-  const { user, customerProfile } = useAuth();
+  const { user, customerProfile, linkCustomer, isCustomerAuthenticated } = useAuth();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const [signInVisible, setSignInVisible] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // After email confirm / session restore: ensure restaurant_customers row exists
+  useEffect(() => {
+    if (!isCustomerAuthenticated || !user?.id || !restaurant?.id || customerProfile) return;
+    linkCustomer(restaurant.id, user.email, user).catch(() => {});
+  }, [isCustomerAuthenticated, user?.id, user?.email, restaurant?.id, customerProfile, linkCustomer]);
+
+  // Mobile menu slide + fade animation
+  const menuAnim = useRef(new Animated.Value(0)).current;
+
+  const toggleMobileMenu = () => {
+    const next = !mobileMenuOpen;
+    setMobileMenuOpen(next);
+    Animated.spring(menuAnim, {
+      toValue: next ? 1 : 0,
+      useNativeDriver: true,
+      tension: 220,
+      friction: 22,
+    }).start();
+  };
+
+  const closeMobileMenu = () => {
+    setMobileMenuOpen(false);
+    Animated.spring(menuAnim, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 220,
+      friction: 22,
+    }).start();
+  };
+
   const isMobile = width < MOBILE_BREAKPOINT;
-  const accountLabel = user && customerProfile ? 'Account' : 'Sign in';
+  const isSignedIn = isCustomerAuthenticated;
+  const accountLabel = isSignedIn ? 'Profile' : 'Sign in';
+  const accountIcon = isSignedIn ? 'person-circle' : 'person-outline';
 
   const handleNavPress = (route) => {
-    setMobileMenuOpen(false);
+    closeMobileMenu();
     if (!navigation) return;
     if (route === 'Menu') navigation.navigate('Menu');
     else if (route === 'Home') navigation.navigate('Home');
     else if (route === 'OrderTracker') navigation.navigate('OrderTracker');
-    // Catering, Rewards are placeholder future screens
+    else if (route === 'Catering') navigation.navigate('Catering');
+    else if (route === 'Rewards') navigation.navigate('Rewards');
+    else if (route === 'Hiring') navigation.navigate('Hiring');
   };
 
   const handleLogoPress = () => {
     if (navigation) navigation.navigate('Home');
   };
+
+  const menuOpacity = menuAnim;
+  const menuTranslateY = menuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-8, 0],
+  });
 
   return (
     <>
@@ -79,22 +181,14 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
         {/* Desktop nav links */}
         {!isMobile && (
           <View style={styles.navLinks}>
-            {NAV_LINKS.map((link) => {
-              const isActive = currentRoute === link.route;
-              return (
-                <TouchableOpacity
-                  key={link.route}
-                  style={styles.navLinkBtn}
-                  onPress={() => handleNavPress(link.route)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.navLinkText, isActive && styles.navLinkActive]}>
-                    {link.label}
-                  </Text>
-                  {isActive && <View style={styles.navLinkUnderline} />}
-                </TouchableOpacity>
-              );
-            })}
+            {NAV_LINKS.map((link) => (
+              <NavLink
+                key={link.route}
+                label={link.label}
+                isActive={currentRoute === link.route}
+                onPress={() => handleNavPress(link.route)}
+              />
+            ))}
           </View>
         )}
 
@@ -102,11 +196,12 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
         <View style={styles.rightActions}>
           {!isMobile && (
             <TouchableOpacity
-              style={styles.signInBtn}
+              style={[styles.signInBtn, isSignedIn && styles.profileBtn]}
               onPress={() => setSignInVisible(true)}
               activeOpacity={0.7}
+              accessibilityLabel={isSignedIn ? 'Open profile' : 'Sign in'}
             >
-              <Ionicons name="person-outline" size={16} color="#fff" style={{ marginRight: 4 }} />
+              <Ionicons name={accountIcon} size={isSignedIn ? 18 : 16} color="#fff" style={{ marginRight: 4 }} />
               <Text style={styles.signInText}>{accountLabel}</Text>
             </TouchableOpacity>
           )}
@@ -119,20 +214,14 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
               activeOpacity={0.7}
             >
               <Ionicons name="cart-outline" size={24} color="#fff" />
-              {itemCount > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
-                    {itemCount > 99 ? '99+' : itemCount}
-                  </Text>
-                </View>
-              )}
+              <AnimatedBadge value={itemCount > 0 ? itemCount : 0} />
             </TouchableOpacity>
           )}
 
           {isMobile && (
             <TouchableOpacity
               style={styles.hamburger}
-              onPress={() => setMobileMenuOpen((v) => !v)}
+              onPress={toggleMobileMenu}
               accessibilityLabel="Toggle navigation menu"
               activeOpacity={0.7}
             >
@@ -146,15 +235,26 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
         </View>
       </View>
 
-      {/* Mobile dropdown */}
-      {isMobile && mobileMenuOpen && (
-        <View style={[styles.mobileMenu, { backgroundColor: theme.colors.brand }]}>
+      {/* Mobile dropdown — animated slide + fade */}
+      {isMobile && (
+        <Animated.View
+          pointerEvents={mobileMenuOpen ? 'auto' : 'none'}
+          style={[
+            styles.mobileMenu,
+            { backgroundColor: theme.colors.brand },
+            {
+              opacity: menuOpacity,
+              transform: [{ translateY: menuTranslateY }],
+            },
+          ]}
+        >
           <TouchableOpacity
             style={styles.mobileNavItem}
-            onPress={() => setSignInVisible(true)}
+            onPress={() => { setSignInVisible(true); closeMobileMenu(); }}
             activeOpacity={0.7}
+            accessibilityLabel={isSignedIn ? 'Open profile' : 'Sign in'}
           >
-            <Ionicons name="person-outline" size={18} color="#fff" style={{ marginRight: 10 }} />
+            <Ionicons name={accountIcon} size={18} color="#fff" style={{ marginRight: 10 }} />
             <Text style={styles.mobileNavText}>{accountLabel}</Text>
           </TouchableOpacity>
           {NAV_LINKS.map((link) => (
@@ -167,7 +267,7 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
               <Text style={styles.mobileNavText}>{link.label}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </Animated.View>
       )}
 
       <CustomerSignInModal
@@ -236,24 +336,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     alignItems: 'center',
+    justifyContent: 'center',
     position: 'relative',
+    overflow: 'visible',
+  },
+  navLinkPill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
   },
   navLinkText: {
-    color: 'rgba(255,255,255,0.82)',
+    color: '#fff',
     fontSize: 14,
     fontWeight: '600',
-  },
-  navLinkActive: {
-    color: '#fff',
-  },
-  navLinkUnderline: {
-    position: 'absolute',
-    bottom: 2,
-    left: 14,
-    right: 14,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: '#fff',
+    zIndex: 1,
   },
   rightActions: {
     flexDirection: 'row',
@@ -270,6 +365,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.5)',
     marginRight: 4,
   },
+  profileBtn: {
+    borderColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
   signInText: {
     color: '#fff',
     fontSize: 13,
@@ -278,23 +377,6 @@ const styles = StyleSheet.create({
   cartBtn: {
     padding: 8,
     position: 'relative',
-  },
-  badge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#FF3B30',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
   },
   hamburger: {
     padding: 6,

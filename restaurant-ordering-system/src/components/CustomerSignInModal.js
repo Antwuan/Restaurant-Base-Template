@@ -16,9 +16,13 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
 import { useAuth } from '../context/AuthContext';
-import { confirmAsync } from '../utils/confirm';
 import { syncMarketingContact } from '../services/emailApi';
 import * as customerService from '../services/customerService';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 6;
+const STAFF_WARNING =
+  'This email is registered for admin access. Please sign in at /admin instead.';
 
 export default function CustomerSignInModal({ visible, onClose }) {
   const { restaurant } = useRestaurantContext();
@@ -29,15 +33,21 @@ export default function CustomerSignInModal({ visible, onClose }) {
     signUp,
     signOut,
     linkCustomer,
-    getRestaurantForUser,
+    isStaffUser,
     refreshCustomerProfile,
+    isCustomerAuthenticated,
   } = useAuth();
 
   const [mode, setMode] = useState('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [staffWarning, setStaffWarning] = useState(false);
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
 
   useEffect(() => {
     if (visible && restaurant?.id) {
@@ -45,36 +55,144 @@ export default function CustomerSignInModal({ visible, onClose }) {
     }
   }, [visible, restaurant?.id, refreshCustomerProfile]);
 
-  const handleStaffBlock = async () => {
-    try {
-      await getRestaurantForUser(user.id);
-      return true;
-    } catch {
-      return false;
+  useEffect(() => {
+    if (!visible) {
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setMarketingOptIn(false);
+      setErrors({});
+      setTouched({});
+      setMode('signin');
+      setLoading(false);
+      setStaffWarning(false);
+      setConfirmingSignOut(false);
+    }
+  }, [visible]);
+
+  const clearFieldError = (field) => {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validate = (forMode = mode) => {
+    const errs = {};
+    const trimmedEmail = email.trim();
+
+    if (!trimmedEmail) {
+      errs.email = 'Email is required';
+    } else if (!EMAIL_RE.test(trimmedEmail)) {
+      errs.email = 'Enter a valid email address';
+    }
+
+    if (!password) {
+      errs.password = 'Password is required';
+    } else if (forMode === 'signup' && password.length < MIN_PASSWORD_LENGTH) {
+      errs.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
+    }
+
+    if (forMode === 'signup') {
+      if (!confirmPassword) {
+        errs.confirmPassword = 'Confirm your password';
+      } else if (confirmPassword !== password) {
+        errs.confirmPassword = 'Passwords do not match';
+      }
+    }
+
+    return errs;
+  };
+
+  const handleEmailChange = (value) => {
+    setEmail(value);
+    setStaffWarning(false);
+    if (touched.email) clearFieldError('email');
+  };
+
+  const handlePasswordChange = (value) => {
+    setPassword(value);
+    setStaffWarning(false);
+    if (touched.password) clearFieldError('password');
+    if (touched.confirmPassword && confirmPassword && value === confirmPassword) {
+      clearFieldError('confirmPassword');
     }
   };
 
+  const handleConfirmPasswordChange = (value) => {
+    setConfirmPassword(value);
+    if (touched.confirmPassword) clearFieldError('confirmPassword');
+  };
+
+  const handleBlur = (field) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    const fieldErrors = validate();
+    setErrors((prev) => {
+      const next = { ...prev };
+      if (fieldErrors[field]) next[field] = fieldErrors[field];
+      else delete next[field];
+      return next;
+    });
+  };
+
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setErrors({});
+    setTouched({});
+    setConfirmPassword('');
+    setStaffWarning(false);
+  };
+
+  const showStaffWarning = () => {
+    setStaffWarning(true);
+    Alert.alert('Staff account', STAFF_WARNING);
+  };
+
   const handleSignIn = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter your email and password.');
+    if (!restaurant?.id) {
+      Alert.alert('Error', 'Restaurant is still loading. Please try again in a moment.');
       return;
     }
 
+    const validationErrors = validate('signin');
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setTouched({ email: true, password: true });
+      return;
+    }
+    setErrors({});
+    setStaffWarning(false);
+
     setLoading(true);
     try {
-      const { user: signedInUser } = await signIn(email, password);
+      const result = await signIn(email.trim(), password);
+      const signedInUser = result?.user;
 
-      const isStaff = await getRestaurantForUser(signedInUser.id).then(() => true).catch(() => false);
+      if (!signedInUser) {
+        Alert.alert('Sign in failed', 'Could not sign in. Please try again.');
+        return;
+      }
+
+      const isStaff = await isStaffUser(signedInUser.id);
       if (isStaff) {
         await signOut();
+        showStaffWarning();
+        return;
+      }
+
+      let profile;
+      try {
+        profile = await linkCustomer(restaurant.id, email.trim(), signedInUser);
+      } catch (linkError) {
         Alert.alert(
-          'Staff account',
-          'This email is registered for admin access. Please sign in at /admin instead.',
+          'Sign in failed',
+          linkError.message || 'Could not load your customer profile.',
         );
         return;
       }
 
-      const profile = await linkCustomer(restaurant.id, email);
       if (!profile) {
         await signOut();
         Alert.alert(
@@ -93,19 +211,23 @@ export default function CustomerSignInModal({ visible, onClose }) {
   };
 
   const handleSignUp = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter your email and password.');
+    if (!restaurant?.id) {
+      Alert.alert('Error', 'Restaurant is still loading. Please try again in a moment.');
       return;
     }
 
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters.');
+    const validationErrors = validate('signup');
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setTouched({ email: true, password: true, confirmPassword: true });
       return;
     }
+    setErrors({});
+    setStaffWarning(false);
 
     setLoading(true);
     try {
-      const result = await signUp(email, password);
+      const result = await signUp(email.trim(), password, { restaurantId: restaurant.id });
       const signedInUser = result?.user;
 
       if (!signedInUser) {
@@ -116,17 +238,68 @@ export default function CustomerSignInModal({ visible, onClose }) {
         return;
       }
 
-      const isStaff = await getRestaurantForUser(signedInUser.id).then(() => true).catch(() => false);
-      if (isStaff) {
-        await signOut();
+      // Fake / duplicate signup response (confirm-email enabled, user already exists)
+      if (!result.session && Array.isArray(signedInUser.identities) && signedInUser.identities.length === 0) {
         Alert.alert(
-          'Staff account',
-          'This email is already used for admin access. Use /admin to sign in.',
+          'Account exists',
+          'This email is already registered. Confirm your email if needed, then sign in.',
         );
+        switchMode('signin');
         return;
       }
 
-      const profile = await linkCustomer(restaurant.id, email);
+      // Only check staff when a session was created (user is actually signed in)
+      if (result.session) {
+        const isStaff = await isStaffUser(signedInUser.id);
+        if (isStaff) {
+          await signOut();
+          showStaffWarning();
+          return;
+        }
+      }
+
+      // With email confirmation there is often no JWT, so RLS insert cannot run.
+      // Always create the customer row via service-role edge function.
+      let profile = null;
+      try {
+        profile = await customerService.ensureCustomerProfile({
+          restaurantId: restaurant.id,
+          userId: signedInUser.id,
+          email: email.trim(),
+        });
+      } catch {
+        // Fallback when a session exists (RLS insert)
+        if (result.session) {
+          try {
+            profile = await linkCustomer(restaurant.id, email.trim(), signedInUser);
+          } catch {
+            // handled below
+          }
+        }
+      }
+
+      if (!result.session) {
+        Alert.alert(
+          'Confirm your email',
+          profile
+            ? 'We created your account. Confirm the link we emailed you, then sign in.'
+            : 'We created your login. Confirm the email link, then sign in to finish setting up your customer profile.',
+        );
+        switchMode('signin');
+        return;
+      }
+
+      if (!profile) {
+        profile = await refreshCustomerProfile(restaurant.id);
+      }
+
+      if (!profile) {
+        Alert.alert(
+          'Account setup failed',
+          'Could not create your customer profile. Please try signing in after a moment.',
+        );
+        return;
+      }
 
       if (marketingOptIn && profile?.id) {
         try {
@@ -136,7 +309,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
           });
           await syncMarketingContact({
             restaurantId: restaurant.id,
-            email,
+            email: email.trim(),
             marketingOptIn: true,
           });
         } catch {
@@ -146,22 +319,25 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
       onClose();
     } catch (error) {
-      Alert.alert('Sign up failed', error.message || 'Could not create account.');
+      const msg = String(error?.message || '');
+      if (/rate limit/i.test(msg)) {
+        Alert.alert(
+          'Sign up temporarily blocked',
+          'Too many confirmation emails were sent. Wait a few minutes, then try again.',
+        );
+      } else {
+        Alert.alert('Sign up failed', msg || 'Could not create account.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSignOut = async () => {
-    const confirmed = await confirmAsync({
-      title: 'Sign Out',
-      message: 'Are you sure you want to sign out?',
-      confirmText: 'Sign Out',
-    });
-    if (!confirmed) return;
+  const handleConfirmSignOut = async () => {
     setLoading(true);
     try {
       await signOut();
+      setConfirmingSignOut(false);
       onClose();
     } catch (error) {
       Alert.alert('Error', error.message || 'Could not sign out.');
@@ -170,9 +346,9 @@ export default function CustomerSignInModal({ visible, onClose }) {
     }
   };
 
-  const signedInAsCustomer = user && customerProfile;
-
+  const signedInAsCustomer = isCustomerAuthenticated;
   const brandColor = restaurant?.brand_color || '#007AFF';
+  const displayEmail = customerProfile?.email || user?.email || '';
 
   return (
     <Modal
@@ -201,35 +377,68 @@ export default function CustomerSignInModal({ visible, onClose }) {
               {signedInAsCustomer ? 'Your account' : 'Customer account'}
             </Text>
             <Text style={styles.subtitle}>
-              {restaurant?.name
-                ? `Sign in to order from ${restaurant.name}`
-                : 'Sign in or create an account'}
+              {signedInAsCustomer
+                ? confirmingSignOut
+                  ? 'Are you sure you want to sign out?'
+                  : 'Manage your account or sign out below.'
+                : restaurant?.name
+                  ? `Sign in to order from ${restaurant.name}`
+                  : 'Sign in or create an account'}
             </Text>
 
             {signedInAsCustomer ? (
               <View style={{ gap: 14 }}>
                 <View style={styles.signedInRow}>
                   <Ionicons name="person-circle-outline" size={20} color="#777" />
-                  <Text style={styles.signedInEmail}>{customerProfile.email}</Text>
+                  <Text style={styles.signedInEmail}>{displayEmail}</Text>
                 </View>
-                <TouchableOpacity
-                  style={[styles.button, { backgroundColor: '#111' }, loading && styles.buttonDisabled]}
-                  onPress={handleSignOut}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
+                {confirmingSignOut ? (
+                  <View style={styles.signOutActions}>
+                    <TouchableOpacity
+                      style={[
+                        styles.button,
+                        styles.cancelButton,
+                        styles.signOutActionBtn,
+                        loading && styles.buttonDisabled,
+                      ]}
+                      onPress={() => setConfirmingSignOut(false)}
+                      disabled={loading}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.button,
+                        styles.signOutButton,
+                        styles.signOutActionBtn,
+                        loading && styles.buttonDisabled,
+                      ]}
+                      onPress={handleConfirmSignOut}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.buttonText}>Sign out</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.button, styles.signOutButton, loading && styles.buttonDisabled]}
+                    onPress={() => setConfirmingSignOut(true)}
+                    disabled={loading}
+                  >
                     <Text style={styles.buttonText}>Sign out</Text>
-                  )}
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               <>
                 <View style={styles.tabs}>
                   <TouchableOpacity
                     style={[styles.tab, mode === 'signin' && styles.tabActive]}
-                    onPress={() => setMode('signin')}
+                    onPress={() => switchMode('signin')}
                   >
                     <Text
                       style={[
@@ -242,7 +451,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.tab, mode === 'signup' && styles.tabActive]}
-                    onPress={() => setMode('signup')}
+                    onPress={() => switchMode('signup')}
                   >
                     <Text
                       style={[
@@ -255,40 +464,72 @@ export default function CustomerSignInModal({ visible, onClose }) {
                   </TouchableOpacity>
                 </View>
 
+                {staffWarning ? (
+                  <View style={styles.warningBanner}>
+                    <Ionicons name="warning-outline" size={18} color="#9a3412" />
+                    <Text style={styles.warningText}>{STAFF_WARNING}</Text>
+                  </View>
+                ) : null}
+
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, errors.email && styles.inputError]}
                   placeholder="Email"
                   placeholderTextColor="#999"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={handleEmailChange}
+                  onBlur={() => handleBlur('email')}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  autoComplete="email"
+                  textContentType="emailAddress"
                 />
+                {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
 
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, errors.password && styles.inputError]}
                   placeholder="Password"
                   placeholderTextColor="#999"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={handlePasswordChange}
+                  onBlur={() => handleBlur('password')}
                   secureTextEntry
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  textContentType={mode === 'signup' ? 'newPassword' : 'password'}
                 />
+                {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
 
                 {mode === 'signup' ? (
-                  <TouchableOpacity
-                    style={styles.optInRow}
-                    onPress={() => setMarketingOptIn((v) => !v)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[
-                      styles.checkbox,
-                      marketingOptIn && { backgroundColor: brandColor, borderColor: brandColor },
-                    ]}>
-                      {marketingOptIn ? <Text style={styles.checkmark}>✓</Text> : null}
-                    </View>
-                    <Text style={styles.optInText}>Email me deals &amp; updates</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TextInput
+                      style={[styles.input, errors.confirmPassword && styles.inputError]}
+                      placeholder="Confirm password"
+                      placeholderTextColor="#999"
+                      value={confirmPassword}
+                      onChangeText={handleConfirmPasswordChange}
+                      onBlur={() => handleBlur('confirmPassword')}
+                      secureTextEntry
+                      autoComplete="new-password"
+                      textContentType="newPassword"
+                    />
+                    {errors.confirmPassword ? (
+                      <Text style={styles.errorText}>{errors.confirmPassword}</Text>
+                    ) : null}
+
+                    <TouchableOpacity
+                      style={styles.optInRow}
+                      onPress={() => setMarketingOptIn((v) => !v)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[
+                        styles.checkbox,
+                        marketingOptIn && { backgroundColor: brandColor, borderColor: brandColor },
+                      ]}>
+                        {marketingOptIn ? <Text style={styles.checkmark}>✓</Text> : null}
+                      </View>
+                      <Text style={styles.optInText}>Email me deals &amp; updates</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : null}
 
                 <TouchableOpacity
@@ -376,6 +617,42 @@ const styles = StyleSheet.create({
     color: '#333',
     flex: 1,
   },
+  signOutActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  signOutActionBtn: {
+    flex: 1,
+  },
+  signOutButton: {
+    backgroundColor: '#FF3B30',
+  },
+  cancelButton: {
+    backgroundColor: '#f0f0f0',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fdba74',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#9a3412',
+    lineHeight: 18,
+    fontWeight: '600',
+  },
   tabs: {
     flexDirection: 'row',
     marginBottom: 18,
@@ -411,9 +688,19 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 14,
     fontSize: 15,
-    marginBottom: 12,
+    marginBottom: 4,
     color: '#111',
     backgroundColor: '#fafafa',
+  },
+  inputError: {
+    borderColor: '#c0392b',
+    backgroundColor: '#fff8f7',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#c0392b',
+    marginBottom: 10,
+    marginTop: 2,
   },
   button: {
     borderRadius: 12,
@@ -434,7 +721,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     marginBottom: 8,
-    marginTop: 2,
+    marginTop: 6,
   },
   checkbox: {
     width: 20,

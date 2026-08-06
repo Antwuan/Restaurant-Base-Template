@@ -9,25 +9,31 @@ import CustomerSignInModal from './CustomerSignInModal';
 export default function MenuHeaderActions({ onOpenCart }) {
   const { restaurant } = useRestaurantContext();
   const { itemCount } = useCartContext();
-  const { user, customerProfile, refreshCustomerProfile } = useAuth();
+  const { refreshCustomerProfile, isCustomerAuthenticated } = useAuth();
   const [signInVisible, setSignInVisible] = useState(false);
 
   useEffect(() => {
-    if (restaurant?.id) {
+    if (isCustomerAuthenticated && restaurant?.id) {
       refreshCustomerProfile(restaurant.id);
     }
-  }, [user?.id, restaurant?.id, refreshCustomerProfile]);
+  }, [isCustomerAuthenticated, restaurant?.id, refreshCustomerProfile]);
 
-  const accountLabel = user && customerProfile
-    ? 'Account'
-    : 'Sign in';
+  const isSignedIn = isCustomerAuthenticated;
+  const accountLabel = isSignedIn ? 'Profile' : 'Sign in';
 
   return (
     <View style={styles.row}>
       <TouchableOpacity
         style={styles.signInBtn}
         onPress={() => setSignInVisible(true)}
+        accessibilityLabel={isSignedIn ? 'Open profile' : 'Sign in'}
       >
+        <Ionicons
+          name={isSignedIn ? 'person-circle' : 'person-outline'}
+          size={16}
+          color="#fff"
+          style={{ marginRight: 4 }}
+        />
         <Text style={styles.signInText}>{accountLabel}</Text>
       </TouchableOpacity>
 
@@ -62,6 +68,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   signInBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },

@@ -309,7 +309,7 @@ function CateringCheckoutForm({
   const stripe = useStripe();
   const elements = useElements();
   const { cateringItems: items, cateringSubtotal: subtotal, cateringTax: tax, cateringTotal: total, clearCart } = useCartContext();
-  const { user } = useAuth();
+  const { user, isCustomerAuthenticated } = useAuth();
 
   const { name, phone, email, marketingOptIn } = contact;
   const [notes, setNotes] = useState('');
@@ -355,7 +355,7 @@ function CateringCheckoutForm({
         paymentIntentId: paymentIntent?.id,
       });
 
-      if (user?.id && restaurant?.id) {
+      if (isCustomerAuthenticated && user?.id && restaurant?.id) {
         awardPoints({
           restaurantId: restaurant.id,
           authUserId: user.id,
