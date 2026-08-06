@@ -197,7 +197,10 @@ export const AuthProvider = ({ children }) => {
         roleLoading,
         customerProfile,
         isStaff,
-        isCustomerAuthenticated: !!user && !isStaff && !roleLoading,
+        // Do not gate on roleLoading: isStaff stays false until the staff lookup
+        // finishes, so a restored customer session can show Profile immediately.
+        // AdminNavigator already waits on roleLoading before choosing Login vs Layout.
+        isCustomerAuthenticated: !!user && !isStaff,
         isAdminAuthenticated: !!user && isStaff,
         signIn,
         signUp,
