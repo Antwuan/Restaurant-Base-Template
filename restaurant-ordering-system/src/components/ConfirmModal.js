@@ -25,12 +25,26 @@ const FADE_OUT_MS = 320;
 let _showFn = null;
 let _mounted = false;
 let _ignoreUntil = 0;
+/** Confirms that arrived while _showFn was null during a remount gap. */
+let _pendingShow = [];
+/** Max wait for remount before giving up (Strict Mode gap is typically <1 frame). */
+const REMOUNT_WAIT_MS = 2000;
+
+function _flushPending(showFn) {
+  if (!_pendingShow.length) return;
+  const queued = _pendingShow.splice(0);
+  for (const entry of queued) {
+    if (entry.timer != null) clearTimeout(entry.timer);
+    showFn(entry.options).then(entry.resolve, entry.reject);
+  }
+}
 
 function _register(showFn) {
   _showFn = showFn;
   // Sticky: once GlobalConfirmModal has mounted, never use window.confirm
   // (covers Strict Mode unmount→remount gaps where _showFn is briefly null).
   _mounted = true;
+  _flushPending(showFn);
 }
 function _unregister(showFn) {
   // Avoid clearing a newer registration (React Strict Mode remount race).
@@ -41,6 +55,22 @@ function _unregister(showFn) {
 
 function _armDismissIgnore() {
   _ignoreUntil = Date.now() + DISMISS_IGNORE_MS;
+}
+
+function _queueUntilRemount(options) {
+  return new Promise((resolve, reject) => {
+    const entry = { options, resolve, reject, timer: null };
+    entry.timer = setTimeout(() => {
+      const idx = _pendingShow.indexOf(entry);
+      if (idx < 0) return;
+      _pendingShow.splice(idx, 1);
+      // Remount never came back — do not silently approve; decline.
+      resolve(false);
+    }, REMOUNT_WAIT_MS);
+    _pendingShow.push(entry);
+    // If register won the race after we decided to queue, flush immediately.
+    if (_showFn) _flushPending(_showFn);
+  });
 }
 
 /**
@@ -58,9 +88,10 @@ export function showConfirmModal({
   if (Date.now() < _ignoreUntil) {
     return Promise.resolve(false);
   }
-  if (_showFn) return _showFn({ title, message, confirmText, destructive });
-  // Modal is mounted (or remounting) — never use native confirm while it owns the UX.
-  if (_mounted) return Promise.resolve(false);
+  const options = { title, message, confirmText, destructive };
+  if (_showFn) return _showFn(options);
+  // Modal owns UX but handler is briefly null (Strict Mode remount) — wait & retry.
+  if (_mounted) return _queueUntilRemount(options);
   // Fallback only when GlobalConfirmModal has never registered / is unmounted
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     const text = message ? `${title}\n\n${message}` : title;
@@ -84,6 +115,11 @@ export function GlobalConfirmModal() {
           clearTimeout(clearTimerRef.current);
           clearTimerRef.current = null;
         }
+        // A second open replaces the dialog — settle the prior promise so
+        // callers awaiting confirmAsync() cannot hang indefinitely.
+        const previous = pendingRef.current;
+        if (previous?.resolve) previous.resolve(false);
+
         const next = { title, message, confirmText, destructive, resolve };
         pendingRef.current = next;
         setPending(next);

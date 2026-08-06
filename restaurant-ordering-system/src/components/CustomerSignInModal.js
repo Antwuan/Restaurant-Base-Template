@@ -294,6 +294,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       }
 
       if (!profile) {
+        await signOut();
         Alert.alert(
           'Account setup failed',
           'Could not create your customer profile. Please try signing in after a moment.',

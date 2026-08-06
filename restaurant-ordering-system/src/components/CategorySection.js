@@ -4,6 +4,8 @@ import MenuItem from './MenuItem';
 import { FadeInView } from './motion';
 
 const DESKTOP_BREAKPOINT = 768;
+const GUTTER = 12;
+const HALF_GUTTER = GUTTER / 2;
 
 const CategorySection = ({ category, items, onAddToCart, onItemPress, sectionRef }) => {
   const { width } = useWindowDimensions();
@@ -50,18 +52,21 @@ const styles = StyleSheet.create({
   },
   grid: {
     flexDirection: 'column',
-    gap: 12,
+    rowGap: GUTTER,
   },
   gridDesktop: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    // Cancel cell horizontal padding so outer edges stay flush
+    marginHorizontal: -HALF_GUTTER,
   },
   cell: {
     width: '100%',
   },
   cellDesktop: {
-    // Two columns with a 12px gutter
-    width: 'calc(50% - 6px)',
+    // Two columns with a 12px gutter (RN StyleSheet has no calc())
+    width: '50%',
+    paddingHorizontal: HALF_GUTTER,
   },
 });
 

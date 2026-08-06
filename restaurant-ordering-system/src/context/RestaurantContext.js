@@ -24,6 +24,11 @@ const RESERVED_PATH_SEGMENTS = new Set([
   'cart',
   'checkout',
   'confirmation',
+  'catering',
+  'rewards',
+  'hiring',
+  'tracker',
+  'review',
   'admin',
 ]);
 

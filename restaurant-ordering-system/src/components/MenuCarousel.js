@@ -141,10 +141,18 @@ function ArrowButton({ side, onPress }) {
 export default function MenuCarousel({ slides = [] }) {
   const { width: windowWidth } = useWindowDimensions();
   const [activeIndex, setActiveIndex] = useState(0);
+  // Bumped on any user interaction so autoplay restarts from a full interval
+  // instead of racing scrollToIndex while the user is browsing.
+  const [autoplayEpoch, setAutoplayEpoch] = useState(0);
   const listRef = useRef(null);
+  const isUserScrollingRef = useRef(false);
 
   const slideWidth = windowWidth || 0;
   const slideHeight = Math.min(slideWidth / ASPECT_RATIO, MAX_HEIGHT);
+
+  const resetAutoplay = useCallback(() => {
+    setAutoplayEpoch((n) => n + 1);
+  }, []);
 
   const onViewableItemsChanged = useCallback(({ viewableItems }) => {
     if (viewableItems?.[0]?.index != null) {
@@ -160,14 +168,16 @@ export default function MenuCarousel({ slides = [] }) {
       const next = (index + slides.length) % slides.length;
       setActiveIndex(next);
       listRef.current?.scrollToIndex({ index: next, animated: true });
+      resetAutoplay();
     },
-    [slides.length],
+    [slides.length, resetAutoplay],
   );
 
-  // Autoplay
+  // Autoplay — restarted whenever the user swipes or taps arrows/dots
   useEffect(() => {
     if (slides.length <= 1) return undefined;
     const id = setInterval(() => {
+      if (isUserScrollingRef.current) return;
       setActiveIndex((prev) => {
         const next = (prev + 1) % slides.length;
         listRef.current?.scrollToIndex({ index: next, animated: true });
@@ -175,7 +185,7 @@ export default function MenuCarousel({ slides = [] }) {
       });
     }, AUTOPLAY_INTERVAL);
     return () => clearInterval(id);
-  }, [slides.length]);
+  }, [slides.length, autoplayEpoch]);
 
   if (!slides.length || !slideWidth) {
     return null;
@@ -194,6 +204,21 @@ export default function MenuCarousel({ slides = [] }) {
         showsHorizontalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
+        onScrollBeginDrag={() => {
+          isUserScrollingRef.current = true;
+        }}
+        onMomentumScrollEnd={() => {
+          isUserScrollingRef.current = false;
+          resetAutoplay();
+        }}
+        onScrollEndDrag={(e) => {
+          // When there's little/no fling velocity, momentum-end may not fire (web).
+          const vx = e.nativeEvent?.velocity?.x;
+          if (vx == null || Math.abs(vx) < 0.05) {
+            isUserScrollingRef.current = false;
+            resetAutoplay();
+          }
+        }}
         renderItem={({ item, index }) => (
           <CarouselSlide
             slide={item}
