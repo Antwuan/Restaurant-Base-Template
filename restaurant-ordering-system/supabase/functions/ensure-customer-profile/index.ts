@@ -2,7 +2,7 @@
  * Create restaurant_customers row after signup even when email confirmation
  * leaves the client with no JWT (RLS insert impossible).
  *
- * Body: { restaurantId, userId, email }
+ * Body: { restaurantId, userId, email, firstName?, lastName?, phone?, marketingOptIn? }
  * Verifies auth.users via Admin API: email match + signup metadata.restaurant_id.
  * Tenant is always taken from the auth user's signup metadata — never from an
  * unbound caller-supplied restaurantId.
@@ -22,13 +22,25 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { restaurantId, userId, email } = await req.json();
+    const body = await req.json();
+    const { restaurantId, userId, email } = body;
+    const firstName = normalizeOptionalString(body?.firstName);
+    const lastName = normalizeOptionalString(body?.lastName);
+    const phone = normalizeOptionalString(body?.phone);
+    const marketingOptIn =
+      typeof body?.marketingOptIn === 'boolean' ? body.marketingOptIn : null;
     const trimmedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
     const rid = typeof restaurantId === 'string' ? restaurantId.trim() : '';
     const uid = typeof userId === 'string' ? userId.trim() : '';
@@ -87,25 +99,62 @@ Deno.serve(async (req: Request) => {
       return json({ skipped: true, reason: 'staff_account' });
     }
 
+    const profileSelect =
+      'id, restaurant_id, email, auth_user_id, points_balance, first_name, last_name, phone, marketing_opt_in, marketing_opt_in_at';
+
     const { data: existing } = await supabase
       .from('restaurant_customers')
-      .select('id, restaurant_id, email, auth_user_id, created_at')
+      .select(profileSelect)
       .eq('restaurant_id', metaRestaurantId)
       .eq('auth_user_id', uid)
       .maybeSingle();
 
     if (existing) {
+      const patch: Record<string, string | boolean> = {};
+      if (firstName && !existing.first_name) patch.first_name = firstName;
+      if (lastName && !existing.last_name) patch.last_name = lastName;
+      if (phone && !existing.phone) patch.phone = phone;
+      if (marketingOptIn === true && !existing.marketing_opt_in) {
+        patch.marketing_opt_in = true;
+        patch.marketing_opt_in_at = new Date().toISOString();
+      } else if (marketingOptIn === false && existing.marketing_opt_in == null) {
+        patch.marketing_opt_in = false;
+      }
+      if (Object.keys(patch).length > 0) {
+        const { data: patched, error: patchErr } = await supabase
+          .from('restaurant_customers')
+          .update(patch)
+          .eq('id', existing.id)
+          .select(profileSelect)
+          .single();
+        if (patchErr) {
+          console.error('ensure-customer-profile patch error:', patchErr);
+          return json({ ok: true, profile: existing, created: false });
+        }
+        return json({ ok: true, profile: patched, created: false });
+      }
       return json({ ok: true, profile: existing, created: false });
+    }
+
+    const insertRow: Record<string, unknown> = {
+      restaurant_id: metaRestaurantId,
+      auth_user_id: uid,
+      email: trimmedEmail,
+    };
+    if (firstName) insertRow.first_name = firstName;
+    if (lastName) insertRow.last_name = lastName;
+    if (phone) insertRow.phone = phone;
+    if (marketingOptIn === true) {
+      insertRow.marketing_opt_in = true;
+      insertRow.marketing_opt_in_at = new Date().toISOString();
+    } else if (marketingOptIn === false) {
+      insertRow.marketing_opt_in = false;
     }
 
     const { data: created, error: insertErr } = await supabase
       .from('restaurant_customers')
-      .insert({
-        restaurant_id: metaRestaurantId,
-        auth_user_id: uid,
-        email: trimmedEmail,
-      })
-      .select('id, restaurant_id, email, auth_user_id, created_at')
+      .insert(insertRow)
+      .select(profileSelect)
       .single();
 
     if (insertErr) {

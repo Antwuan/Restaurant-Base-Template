@@ -20,9 +20,10 @@ function triggerOrderEmail(orderId, type) {
 }
 
 export async function createOrder(orderData) {
-  const { data, error } = await supabase
-    .from('orders')
-    .insert({
+  // SECURITY DEFINER RPC — guests cannot SELECT orders under RLS, so
+  // insert().select() fails even when INSERT is allowed.
+  const { data, error } = await supabase.rpc('place_customer_order', {
+    p: {
       restaurant_id: orderData.restaurantId,
       customer_name: orderData.customerName,
       customer_phone: orderData.customerPhone,
@@ -37,9 +38,11 @@ export async function createOrder(orderData) {
       scheduled_time: orderData.scheduledTime || null,
       stripe_payment_intent_id: orderData.paymentIntentId || null,
       notes: orderData.notes || null,
-    })
-    .select()
-    .single();
+      promo_code_id: orderData.promoCodeId || null,
+      promo_code: orderData.promoCode || null,
+      discount_amount: orderData.discountAmount != null ? orderData.discountAmount : 0,
+    },
+  });
 
   if (error) throw error;
 

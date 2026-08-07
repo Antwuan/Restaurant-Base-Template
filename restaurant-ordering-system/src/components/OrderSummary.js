@@ -4,15 +4,27 @@ import { useTheme } from '../theme';
 
 /**
  * Props:
- *   items         {Array}   cart line items — { id, name, price, quantity, specialInstructions }
- *   subtotal      {number}
- *   tax           {number}
- *   total         {number}
- *   orderType     {'pickup' | 'delivery'}
- *   scheduledTime {string | null}
+ *   items          {Array}   cart line items — { id, name, price, quantity, specialInstructions }
+ *   subtotal       {number}
+ *   tax            {number}
+ *   total          {number}
+ *   discountAmount {number}  optional promo discount on subtotal
+ *   promoCode      {string}  optional applied code label
+ *   orderType      {'pickup' | 'delivery'}
+ *   scheduledTime  {string | null}
  */
-const OrderSummary = ({ items = [], subtotal, tax, total, orderType, scheduledTime }) => {
+const OrderSummary = ({
+  items = [],
+  subtotal,
+  tax,
+  total,
+  discountAmount = 0,
+  promoCode = null,
+  orderType,
+  scheduledTime,
+}) => {
   const { theme } = useTheme();
+  const hasDiscount = Number(discountAmount) > 0;
 
   return (
     <View style={styles.container}>
@@ -55,17 +67,27 @@ const OrderSummary = ({ items = [], subtotal, tax, total, orderType, scheduledTi
       <View style={styles.totals}>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Subtotal</Text>
-          <Text style={styles.totalValue}>${subtotal.toFixed(2)}</Text>
+          <Text style={styles.totalValue}>${Number(subtotal).toFixed(2)}</Text>
         </View>
+        {hasDiscount ? (
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>
+              Discount{promoCode ? ` (${promoCode})` : ''}
+            </Text>
+            <Text style={[styles.totalValue, styles.discountValue]}>
+              −${Number(discountAmount).toFixed(2)}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Tax (8%)</Text>
-          <Text style={styles.totalValue}>${tax.toFixed(2)}</Text>
+          <Text style={styles.totalValue}>${Number(tax).toFixed(2)}</Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.totalRow}>
           <Text style={styles.grandLabel}>Total</Text>
           <Text style={[styles.grandValue, { color: theme.colors.brand }]}>
-            ${total.toFixed(2)}
+            ${Number(total).toFixed(2)}
           </Text>
         </View>
       </View>
@@ -186,6 +208,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#0a2540',
     fontWeight: '500',
+  },
+  discountValue: {
+    color: '#0d7a3f',
   },
   divider: {
     height: 1,

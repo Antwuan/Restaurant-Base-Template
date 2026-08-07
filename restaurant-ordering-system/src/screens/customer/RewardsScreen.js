@@ -1,7 +1,7 @@
 /**
  * Customer Rewards Screen
- * - Signed out: shows all active offers, prompts to sign in to earn/redeem
- * - Signed in: shows points balance, active offers, redeem buttons
+ * - Signed out: shows all active offers (grayed), sign-in CTA in hero
+ * - Signed in: shows points balance, active offers, redeem → 1-use checkout code
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -14,32 +14,58 @@ import {
   Alert,
   useWindowDimensions,
   Animated,
+  Platform,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../theme';
 import CustomerNavbar from '../../components/CustomerNavbar';
 import CustomerSignInModal from '../../components/CustomerSignInModal';
+import RewardCodesList from '../../components/RewardCodesList';
 import { FadeInView } from '../../components/motion';
 import * as rewardsService from '../../services/rewardsService';
+import * as promoService from '../../services/promoService';
 
-/** Animated count-up for the points balance number. */
+/** Animated count-up for the points balance number. Only restarts when balance changes. */
 function AnimatedPoints({ value, color }) {
-  const animValue = useRef(new Animated.Value(0)).current;
-  const [displayed, setDisplayed] = useState(0);
+  const initial = Math.round(Number(value) || 0);
+  const animValue = useRef(new Animated.Value(initial)).current;
+  const [displayed, setDisplayed] = useState(initial);
+  const prevValueRef = useRef(initial);
+  const animRef = useRef(null);
 
   useEffect(() => {
-    animValue.setValue(0);
-    Animated.timing(animValue, {
-      toValue: value,
-      duration: 1200,
+    const next = Math.round(Number(value) || 0);
+    if (prevValueRef.current === next) return undefined;
+
+    const from = prevValueRef.current;
+    prevValueRef.current = next;
+
+    // First paint / remount already shows the real balance — don't count up from 0.
+    if (from === next) {
+      setDisplayed(next);
+      animValue.setValue(next);
+      return undefined;
+    }
+
+    if (animRef.current) animRef.current.stop();
+    animValue.setValue(from);
+    const animation = Animated.timing(animValue, {
+      toValue: next,
+      duration: 800,
       useNativeDriver: false,
-    }).start();
+    });
+    animRef.current = animation;
+    animation.start();
     const listener = animValue.addListener(({ value: v }) => {
       setDisplayed(Math.round(v));
     });
-    return () => animValue.removeListener(listener);
+    return () => {
+      animValue.removeListener(listener);
+      animation.stop();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
@@ -50,9 +76,29 @@ function AnimatedPoints({ value, color }) {
 
 const DESKTOP_BP = 768;
 
+function confirmRedeem(title, message) {
+  return new Promise((resolve) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      resolve(window.confirm(`${title}\n\n${message}`));
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+      { text: 'Redeem', onPress: () => resolve(true) },
+    ]);
+  });
+}
+
 export default function RewardsScreen({ navigation }) {
   const { restaurant } = useRestaurantContext();
-  const { customerProfile, refreshCustomerProfile, isCustomerAuthenticated } = useAuth();
+  const {
+    user,
+    customerProfile,
+    refreshCustomerProfile,
+    patchCustomerProfile,
+    linkCustomer,
+    isCustomerAuthenticated,
+  } = useAuth();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BP;
@@ -63,8 +109,16 @@ export default function RewardsScreen({ navigation }) {
   const [loadingOffers, setLoadingOffers] = useState(true);
   const [signInVisible, setSignInVisible] = useState(false);
   const [redeeming, setRedeeming] = useState(null); // offer id being redeemed
+  const [myCodes, setMyCodes] = useState([]);
+  const [loadingCodes, setLoadingCodes] = useState(false);
 
   const points = customerProfile?.points_balance ?? 0;
+  const userId = user?.id;
+  const userEmail = user?.email;
+  const hasProfileForRestaurant =
+    !!customerProfile && customerProfile.restaurant_id === restaurant?.id;
+  const profileReadyRef = useRef(hasProfileForRestaurant);
+  profileReadyRef.current = hasProfileForRestaurant;
 
   const loadOffers = useCallback(async () => {
     if (!restaurant?.id) return;
@@ -77,14 +131,57 @@ export default function RewardsScreen({ navigation }) {
     }
   }, [restaurant?.id]);
 
+  const loadMyCodes = useCallback(async () => {
+    if (!restaurant?.id || !isCustomerAuthenticated) {
+      setMyCodes([]);
+      return;
+    }
+    setLoadingCodes(true);
+    try {
+      const data = await rewardsService.getMyRewardCodes(restaurant.id);
+      setMyCodes(data);
+    } catch {
+      setMyCodes([]);
+    } finally {
+      setLoadingCodes(false);
+    }
+  }, [restaurant?.id, isCustomerAuthenticated]);
+
   useEffect(() => { loadOffers(); }, [loadOffers]);
 
-  // Refresh customer profile when customer session or restaurant changes
-  useEffect(() => {
-    if (isCustomerAuthenticated && restaurant?.id) {
-      refreshCustomerProfile(restaurant.id);
-    }
-  }, [isCustomerAuthenticated, restaurant?.id, refreshCustomerProfile]);
+  // Keep points_balance fresh when returning to Rewards (e.g. after checkout).
+  useFocusEffect(
+    useCallback(() => {
+      if (!isCustomerAuthenticated || !restaurant?.id || !userId) return undefined;
+
+      let cancelled = false;
+      (async () => {
+        // Link only when missing; avoid focus→refresh races that briefly clear balance.
+        if (!profileReadyRef.current) {
+          await linkCustomer(restaurant.id, userEmail, {
+            id: userId,
+            email: userEmail,
+          });
+          if (cancelled) return;
+        }
+        await refreshCustomerProfile(restaurant.id);
+        if (cancelled) return;
+        await loadMyCodes();
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      isCustomerAuthenticated,
+      restaurant?.id,
+      refreshCustomerProfile,
+      linkCustomer,
+      loadMyCodes,
+      userId,
+      userEmail,
+    ]),
+  );
 
   const handleSignIn = () => setSignInVisible(true);
 
@@ -93,7 +190,34 @@ export default function RewardsScreen({ navigation }) {
     setSignInVisible(false);
     if (isCustomerAuthenticated && restaurant?.id) {
       await refreshCustomerProfile(restaurant.id);
+      await loadMyCodes();
     }
+  };
+
+  const showRedeemedCode = async (code, offerTitle) => {
+    const message = `Your code for "${offerTitle}":\n\n${code}\n\nEnter it at checkout.`;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        await promoService.copyTextToClipboard(code);
+        Alert.alert('Redeemed!', `${message}\n\n(Code copied to clipboard)`);
+        return;
+      } catch {
+        // fall through
+      }
+    }
+    Alert.alert('Redeemed!', message, [
+      {
+        text: 'Copy code',
+        onPress: async () => {
+          try {
+            await promoService.copyTextToClipboard(code);
+          } catch {
+            // ignore
+          }
+        },
+      },
+      { text: 'OK' },
+    ]);
   };
 
   const handleRedeem = async (offer) => {
@@ -110,33 +234,53 @@ export default function RewardsScreen({ navigation }) {
       return;
     }
 
-    Alert.alert(
+    const ok = await confirmRedeem(
       'Redeem Offer',
-      `Redeem "${offer.title}" for ${offer.points_cost} points?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Redeem',
-          onPress: async () => {
-            setRedeeming(offer.id);
-            try {
-              await rewardsService.redeemOffer({
-                restaurantId: restaurant.id,
-                customerId: customerProfile.id,
-                offerId: offer.id,
-                pointsCost: offer.points_cost,
-              });
-              await refreshCustomerProfile(restaurant.id);
-              Alert.alert('Redeemed!', `Show this screen at pickup to claim your "${offer.title}".`);
-            } catch (e) {
-              Alert.alert('Error', e.message || 'Could not redeem offer.');
-            } finally {
-              setRedeeming(null);
-            }
-          },
-        },
-      ],
+      `Redeem "${offer.title}" for ${offer.points_cost} points? You'll get a one-time checkout code.`,
     );
+    if (!ok) return;
+
+    setRedeeming(offer.id);
+    try {
+      const result = await rewardsService.redeemOffer({
+        restaurantId: restaurant.id,
+        offerId: offer.id,
+      });
+
+      // Apply balance immediately so AnimatedPoints counts down in place.
+      if (typeof result?.newBalance === 'number') {
+        patchCustomerProfile({ points_balance: result.newBalance });
+      }
+      // Refresh in background (may race); local patch already has the truth.
+      refreshCustomerProfile(restaurant.id);
+
+      const code = result?.code || result?.promo?.code;
+      if (code) {
+        const upper = String(code).toUpperCase();
+        const listItem = {
+          id: result?.promo?.id || `local-${upper}-${Date.now()}`,
+          code: upper,
+          title: result?.promo?.title || offer.title,
+          description: result?.promo?.description || offer.description || null,
+          benefit_type: result?.promo?.benefit_type,
+          discount_value: result?.promo?.discount_value,
+          redemption_count: 0,
+          max_redemptions: 1,
+          created_at: new Date().toISOString(),
+          source_offer_id: offer.id,
+          used: false,
+        };
+        setMyCodes((prev) => [listItem, ...prev.filter((c) => c.code !== upper)]);
+        await showRedeemedCode(upper, offer.title);
+      } else {
+        Alert.alert('Redeemed!', 'Your one-time checkout code was created. Check Your codes below or contact the restaurant if you need it.');
+        loadMyCodes();
+      }
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not redeem offer.');
+    } finally {
+      setRedeeming(null);
+    }
   };
 
   // Customer pages always render in light theme (dark theme is admin-only)
@@ -166,7 +310,10 @@ export default function RewardsScreen({ navigation }) {
 
           {isCustomerAuthenticated ? (
             <View style={s.balanceBadge}>
-              <AnimatedPoints value={points} color={brandColor} />
+              <AnimatedPoints
+                value={points}
+                color={brandColor}
+              />
               <Text style={[s.balanceLabel, { color: brandColor }]}>points available</Text>
             </View>
           ) : (
@@ -187,7 +334,7 @@ export default function RewardsScreen({ navigation }) {
             {[
               { icon: 'cart-outline', text: 'Place an order online' },
               { icon: 'star-outline', text: `Earn ${restaurant?.points_per_dollar ?? 1} pt per $1 spent` },
-              { icon: 'pricetag-outline', text: 'Redeem points for offers below' },
+              { icon: 'pricetag-outline', text: 'Redeem points for a checkout code' },
             ].map((step, i) => (
               <FadeInView key={i} delay={i * 100} duration={380} fromY={12} style={s.step}>
                 <View style={[s.stepIcon, { backgroundColor: brandColor + '22' }]}>
@@ -198,6 +345,18 @@ export default function RewardsScreen({ navigation }) {
             ))}
           </View>
         </View>
+
+        {/* ── Your codes (signed-in) ───────────────────── */}
+        {isCustomerAuthenticated ? (
+          <View style={[s.section, isDesktop && s.sectionDesktop]}>
+            <Text style={[s.sectionTitle, { color: c.textPrimary }]}>Your codes</Text>
+            <RewardCodesList
+              codes={myCodes}
+              loading={loadingCodes}
+              brandColor={brandColor}
+            />
+          </View>
+        ) : null}
 
         {/* ── Offers ───────────────────────────────────── */}
         <View style={[s.section, isDesktop && s.sectionDesktop]}>
@@ -215,12 +374,25 @@ export default function RewardsScreen({ navigation }) {
           ) : (
             <View style={[s.offersGrid, isDesktop && s.offersGridDesktop]}>
               {offers.map((offer, idx) => {
-                const canRedeem = isCustomerAuthenticated && points >= offer.points_cost;
+                const balance = isCustomerAuthenticated ? points : 0;
+                const needsSignIn = !isCustomerAuthenticated;
+                const canAfford = balance >= offer.points_cost;
+                const canRedeem = needsSignIn || canAfford;
+                const pointsLeft = Math.max(0, offer.points_cost - balance);
                 const isRedeeming = redeeming === offer.id;
+                const accentActive = needsSignIn || canAfford;
                 return (
                   <FadeInView key={offer.id} delay={idx * 70} duration={380} fromY={14} style={isDesktop ? { flex: 1, minWidth: 260 } : undefined}>
-                  <View style={[s.offerCard, { borderColor: c.border, flex: undefined, minWidth: undefined }]}>
-                    <View style={[s.offerPtsBubble, { backgroundColor: brandColor }]}>
+                  <View style={[
+                    s.offerCard,
+                    {
+                      borderColor: c.border,
+                      flex: undefined,
+                      minWidth: undefined,
+                      opacity: accentActive ? 1 : 0.55,
+                    },
+                  ]}>
+                    <View style={[s.offerPtsBubble, { backgroundColor: accentActive ? brandColor : '#9ca3af' }]}>
                       <Text style={s.offerPtsNum}>{offer.points_cost}</Text>
                       <Text style={s.offerPtsLabel}>pts</Text>
                     </View>
@@ -238,14 +410,18 @@ export default function RewardsScreen({ navigation }) {
                           : { backgroundColor: '#e3e8ee' },
                       ]}
                       onPress={() => handleRedeem(offer)}
-                      disabled={isRedeeming}
+                      disabled={isRedeeming || (!needsSignIn && !canAfford)}
                       activeOpacity={0.8}
                     >
                       {isRedeeming ? (
                         <ActivityIndicator color={canRedeem ? '#fff' : '#aaa'} size="small" />
                       ) : (
                         <Text style={[s.redeemBtnText, { color: canRedeem ? '#fff' : '#888' }]}>
-                          {!isCustomerAuthenticated ? 'Sign in' : canRedeem ? 'Redeem' : `Need ${offer.points_cost - points} more`}
+                          {needsSignIn
+                            ? 'Sign in to redeem'
+                            : canAfford
+                              ? 'Redeem'
+                              : `${pointsLeft} points left`}
                         </Text>
                       )}
                     </TouchableOpacity>
@@ -256,21 +432,6 @@ export default function RewardsScreen({ navigation }) {
             </View>
           )}
         </View>
-
-        {/* ── Sign-in nudge (signed out) ───────────────── */}
-        {!isCustomerAuthenticated && (
-          <View style={[s.nudge, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
-            <Text style={[s.nudgeText, { color: c.textPrimary }]}>
-              Sign in or create a free account to start earning points on every order.
-            </Text>
-            <TouchableOpacity
-              style={[s.nudgeBtn, { backgroundColor: brandColor }]}
-              onPress={handleSignIn}
-            >
-              <Text style={s.nudgeBtnText}>Sign In / Join</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
       </ScrollView>
 
@@ -364,19 +525,6 @@ const s = StyleSheet.create({
     minWidth: 80,
   },
   redeemBtnText: { fontSize: 13, fontWeight: '700', textAlign: 'center' },
-
-  // Nudge
-  nudge: {
-    margin: 20,
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    alignItems: 'center',
-    gap: 14,
-  },
-  nudgeText: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  nudgeBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 },
-  nudgeBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   // Empty
   empty: { alignItems: 'center', paddingVertical: 40, gap: 12 },

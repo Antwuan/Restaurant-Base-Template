@@ -9,7 +9,7 @@
  * 15-minute slots within the restaurant's hours of operation.
  * Always renders in light theme (dark theme is admin-only).
  */
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -36,10 +36,12 @@ import MenuItemModal from '../../components/MenuItemModal';
 import LocationModal from '../../components/LocationModal';
 import MenuItem from '../../components/MenuItem';
 import OrderSummary from '../../components/OrderSummary';
+import PromoCodeInput from '../../components/PromoCodeInput';
 import { createPaymentIntent } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
+import { applyPromoToTotals } from '../../services/promoService';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import {
@@ -305,18 +307,26 @@ function CateringCheckoutForm({
   onBack,
   contact,
   onEditContact,
+  appliedPromo,
+  onPromoApplied,
+  onPromoCleared,
+  pricing,
+  notes,
+  setNotes,
+  paymentReady = true,
 }) {
   const stripe = useStripe();
   const elements = useElements();
-  const { cateringItems: items, cateringSubtotal: subtotal, cateringTax: tax, cateringTotal: total, clearCart } = useCartContext();
-  const { user, isCustomerAuthenticated } = useAuth();
+  const { cateringItems: items, clearCart } = useCartContext();
+  const { user, isCustomerAuthenticated, refreshCustomerProfile } = useAuth();
+  const { cartSubtotal, tax, total, discountAmount } = pricing;
 
   const { name, phone, email, marketingOptIn } = contact;
-  const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
     if (!stripe || !elements) return;
+    if (!paymentReady) return;
     setLoading(true);
 
     try {
@@ -345,7 +355,7 @@ function CateringCheckoutForm({
           special_instructions: specialInstructions || '',
           selected_modifiers: selectedModifiers || [],
         })),
-        subtotal,
+        subtotal: cartSubtotal,
         tax,
         total,
         orderType: 'pickup',
@@ -353,15 +363,21 @@ function CateringCheckoutForm({
         scheduledTime: scheduledSlot ? scheduledSlot.toISOString() : null,
         notes: notes || null,
         paymentIntentId: paymentIntent?.id,
+        promoCodeId: appliedPromo?.id || null,
+        promoCode: appliedPromo?.code || null,
+        discountAmount: discountAmount || 0,
       });
 
+      let pointsEarned = 0;
       if (isCustomerAuthenticated && user?.id && restaurant?.id) {
-        awardPoints({
+        const awarded = await awardPoints({
           restaurantId: restaurant.id,
           authUserId: user.id,
           orderTotal: total,
           pointsPerDollar: restaurant.points_per_dollar ?? 1,
         });
+        pointsEarned = awarded?.pointsEarned || 0;
+        await refreshCustomerProfile(restaurant.id);
       }
 
       if (marketingOptIn && email) {
@@ -375,7 +391,7 @@ function CateringCheckoutForm({
       }
 
       clearCart('catering');
-      navigation.replace('Confirmation', { order });
+      navigation.replace('Confirmation', { order, pointsEarned });
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -394,9 +410,11 @@ function CateringCheckoutForm({
         <View style={[cf.summaryPanel, isDesktop && cf.summaryPanelDesktop]}>
           <OrderSummary
             items={items}
-            subtotal={subtotal}
+            subtotal={cartSubtotal}
             tax={tax}
             total={total}
+            discountAmount={discountAmount}
+            promoCode={appliedPromo?.code}
             orderType="pickup"
             scheduledTime={scheduledSlot ? scheduledSlot.toISOString() : null}
           />
@@ -426,6 +444,20 @@ function CateringCheckoutForm({
           <View style={cf.divider} />
 
           <View style={cf.section}>
+            <Text style={cf.sectionLabel}>Promo Code</Text>
+            <PromoCodeInput
+              restaurantId={restaurant?.id}
+              items={items}
+              appliedPromo={appliedPromo}
+              onApplied={onPromoApplied}
+              onCleared={onPromoCleared}
+              brandColor={brandColor}
+            />
+          </View>
+
+          <View style={cf.divider} />
+
+          <View style={cf.section}>
             <Text style={cf.sectionLabel}>Special Instructions</Text>
             <TextInput
               style={[cf.input, cf.textArea]}
@@ -441,19 +473,28 @@ function CateringCheckoutForm({
 
           <View style={cf.section}>
             <Text style={cf.sectionLabel}>Payment</Text>
-            <View style={cf.payWrap}>
-              <PaymentElement options={{ layout: 'tabs', paymentMethodOrder: ['apple_pay', 'google_pay', 'card'] }} />
-            </View>
+            {!paymentReady ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center', gap: 10 }}>
+                <ActivityIndicator color={brandColor} />
+                <Text style={{ fontSize: 13, color: '#697386' }}>Updating payment for new total…</Text>
+              </View>
+            ) : (
+              <View style={cf.payWrap}>
+                <PaymentElement options={{ layout: 'tabs', paymentMethodOrder: ['apple_pay', 'google_pay', 'card'] }} />
+              </View>
+            )}
             <Text style={cf.secured}>🔒  Secured by Stripe</Text>
           </View>
 
           <View style={cf.submitWrap}>
             <TouchableOpacity
-              style={[cf.submitBtn, { backgroundColor: brandColor }, (loading || !stripe) && { opacity: 0.6 }]}
+              style={[cf.submitBtn, { backgroundColor: brandColor }, (loading || !stripe || !paymentReady) && { opacity: 0.6 }]}
               onPress={handleSubmit}
-              disabled={loading || !stripe}
+              disabled={loading || !stripe || !paymentReady}
             >
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={cf.submitText}>Pay ${total.toFixed(2)} · Place Catering Order</Text>}
+              {loading || !paymentReady
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={cf.submitText}>Pay ${total.toFixed(2)} · Place Catering Order</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -473,10 +514,13 @@ function CateringContactStep({
   error,
   scheduledSlot,
   items,
-  subtotal,
-  tax,
-  total,
+  pricing,
+  restaurantId,
+  appliedPromo,
+  onPromoApplied,
+  onPromoCleared,
 }) {
+  const { cartSubtotal, tax, total, discountAmount } = pricing;
   const [errors, setErrors] = useState({});
 
   const handleContinue = () => {
@@ -501,9 +545,11 @@ function CateringContactStep({
         <View style={[cf.summaryPanel, isDesktop && cf.summaryPanelDesktop]}>
           <OrderSummary
             items={items}
-            subtotal={subtotal}
+            subtotal={cartSubtotal}
             tax={tax}
             total={total}
+            discountAmount={discountAmount}
+            promoCode={appliedPromo?.code}
             orderType="pickup"
             scheduledTime={scheduledSlot ? scheduledSlot.toISOString() : null}
           />
@@ -565,6 +611,20 @@ function CateringContactStep({
               </View>
               <Text style={{ fontSize: 14, color: '#0a2540', flex: 1 }}>Email me deals &amp; updates</Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={cf.divider} />
+
+          <View style={cf.section}>
+            <Text style={cf.sectionLabel}>Promo Code</Text>
+            <PromoCodeInput
+              restaurantId={restaurantId}
+              items={items}
+              appliedPromo={appliedPromo}
+              onApplied={onPromoApplied}
+              onCleared={onPromoCleared}
+              brandColor={brandColor}
+            />
 
             {error ? <Text style={[cf.errorText, { marginTop: 12 }]}>{error}</Text> : null}
 
@@ -573,7 +633,9 @@ function CateringContactStep({
               onPress={handleContinue}
               disabled={loading}
             >
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={cf.submitText}>Continue to payment</Text>}
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={cf.submitText}>Continue to payment · ${total.toFixed(2)}</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -658,9 +720,9 @@ export default function CateringScreen({ navigation }) {
   const { categoriesWithItems, menuByCategory, loading } = useMenu(restaurant?.id, 'catering');
   const {
     cateringItems: cartItems,
-    cateringSubtotal: subtotal,
-    cateringTax: tax,
-    cateringTotal: total,
+    cateringSubtotal: cartSubtotal,
+    cateringTax: cartTax,
+    cateringTotal: cartTotal,
     addItem,
     removeItem,
     updateQuantity,
@@ -680,12 +742,60 @@ export default function CateringScreen({ navigation }) {
   const [clientSecret, setClientSecret] = useState(null);
   const [piError, setPiError] = useState(null);
   const [piLoading, setPiLoading] = useState(false);
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const [checkoutNotes, setCheckoutNotes] = useState('');
   const [contact, setContact] = useState({
     name: '',
     phone: '',
     email: '',
     marketingOptIn: false,
   });
+  // Tracks the amount used for the current PaymentIntent so promo total
+  // changes can recreate the PI without bouncing back to the contact step.
+  const piAmountRef = useRef(null);
+
+  const pricing = useMemo(() => {
+    try {
+      const result = applyPromoToTotals(cartSubtotal, cartItems, appliedPromo);
+      return {
+        cartSubtotal,
+        subtotal: result.discountedSubtotal,
+        tax: result.tax,
+        total: result.total,
+        discountAmount: result.discountAmount,
+      };
+    } catch {
+      return {
+        cartSubtotal,
+        subtotal: cartSubtotal,
+        tax: cartTax,
+        total: cartTotal,
+        discountAmount: 0,
+      };
+    }
+  }, [cartSubtotal, cartItems, appliedPromo, cartTax, cartTotal]);
+
+  const { tax, total } = pricing;
+  // Menu panel uses pre-promo cart totals
+  const subtotal = cartSubtotal;
+
+  useEffect(() => {
+    if (!appliedPromo?.menu_item_id) return;
+    const itemTypes = ['free_item', 'bogo', 'buy_x_percent_off', 'buy_x_amount_off'];
+    if (!itemTypes.includes(appliedPromo.benefit_type)) return;
+    const line = cartItems.find((i) => String(i.id) === String(appliedPromo.menu_item_id));
+    if (!line) {
+      setAppliedPromo(null);
+      return;
+    }
+    const need = Number(appliedPromo.buy_quantity) || 0;
+    if (
+      (appliedPromo.benefit_type === 'buy_x_percent_off' || appliedPromo.benefit_type === 'buy_x_amount_off')
+      && (Number(line.quantity) || 0) < need
+    ) {
+      setAppliedPromo(null);
+    }
+  }, [cartItems, appliedPromo]);
 
   const hasConnectAccount = Boolean(restaurant?.stripe_account_id);
   const closedLabel = getClosedUntilLabel(restaurant?.hours_of_operation);
@@ -738,14 +848,15 @@ export default function CateringScreen({ navigation }) {
   };
 
   const handleContinueToPayment = async () => {
-    if (!restaurant?.id || !hasConnectAccount || !total) return;
+    if (!restaurant?.id || !hasConnectAccount || !pricing.total) return;
     setPiLoading(true);
     setPiError(null);
     try {
-      const secret = await createPaymentIntent(total, restaurant.id, {
+      const secret = await createPaymentIntent(pricing.total, restaurant.id, {
         email: contact.email.trim(),
       });
       setClientSecret(secret);
+      piAmountRef.current = pricing.total;
     } catch (e) {
       setPiError(e.message);
     } finally {
@@ -753,16 +864,64 @@ export default function CateringScreen({ navigation }) {
     }
   };
 
+  // Recreate PaymentIntent when promo changes the total after payment step starts
+  // (mirrors CheckoutScreen's total-dependent PI effect).
+  useEffect(() => {
+    if (phase !== 'checkout' || !clientSecret) return;
+    if (!restaurant?.id || !hasConnectAccount || !pricing.total) return;
+    if (piAmountRef.current === pricing.total) return;
+
+    let cancelled = false;
+    (async () => {
+      setPiLoading(true);
+      setPiError(null);
+      try {
+        const secret = await createPaymentIntent(pricing.total, restaurant.id, {
+          email: contact.email.trim() || undefined,
+        });
+        if (!cancelled) {
+          setClientSecret(secret);
+          piAmountRef.current = pricing.total;
+        }
+      } catch (e) {
+        if (!cancelled) setPiError(e.message);
+      } finally {
+        if (!cancelled) setPiLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    phase,
+    clientSecret,
+    pricing.total,
+    restaurant?.id,
+    hasConnectAccount,
+    contact.email,
+  ]);
+
+  const paymentReady = Boolean(
+    clientSecret
+    && !piLoading
+    && piAmountRef.current === pricing.total,
+  );
+
   const handleBack = () => {
     setPhase('menu');
     setClientSecret(null);
     setPiError(null);
     setPiLoading(false);
+    setAppliedPromo(null);
+    setCheckoutNotes('');
+    piAmountRef.current = null;
   };
 
   const handleEditContact = () => {
     setClientSecret(null);
     setPiError(null);
+    piAmountRef.current = null;
   };
 
   const appearance = {
@@ -793,14 +952,20 @@ export default function CateringScreen({ navigation }) {
           error={piError}
           scheduledSlot={selectedSlot}
           items={cartItems}
-          subtotal={subtotal}
-          tax={tax}
-          total={total}
+          pricing={pricing}
+          restaurantId={restaurant?.id}
+          appliedPromo={appliedPromo}
+          onPromoApplied={setAppliedPromo}
+          onPromoCleared={() => setAppliedPromo(null)}
         />
       );
     }
     return (
-      <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
+      <Elements
+        key={clientSecret}
+        stripe={stripePromise}
+        options={{ clientSecret, appearance }}
+      >
         <CateringCheckoutForm
           navigation={navigation}
           isDesktop={isDesktop}
@@ -815,6 +980,13 @@ export default function CateringScreen({ navigation }) {
             email: contact.email.trim(),
           }}
           onEditContact={handleEditContact}
+          appliedPromo={appliedPromo}
+          onPromoApplied={setAppliedPromo}
+          onPromoCleared={() => setAppliedPromo(null)}
+          pricing={pricing}
+          notes={checkoutNotes}
+          setNotes={setCheckoutNotes}
+          paymentReady={paymentReady}
         />
       </Elements>
     );

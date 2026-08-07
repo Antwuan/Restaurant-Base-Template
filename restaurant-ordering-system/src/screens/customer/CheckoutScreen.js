@@ -3,7 +3,7 @@
  * Two-column layout on desktop (≥768 px), single column on mobile.
  * Each restaurant's stripe_account_id scopes the Stripe instance for Connect.
  */
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,10 +23,12 @@ import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useAuth } from '../../context/AuthContext';
 import OrderSummary from '../../components/OrderSummary';
 import LocationCard from '../../components/LocationCard';
+import PromoCodeInput from '../../components/PromoCodeInput';
 import { createPaymentIntent } from '../../services/stripeApi';
 import { createOrder } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
+import { applyPromoToTotals } from '../../services/promoService';
 
 const ORDER_TYPES = ['pickup', 'delivery'];
 const TIME_OPTIONS = ['ASAP', '15 min', '30 min', '45 min', '1 hour'];
@@ -42,17 +44,27 @@ function CheckoutForm({
   contact,
   setContact,
   isSignedIn,
+  appliedPromo,
+  onPromoApplied,
+  onPromoCleared,
+  pricing,
+  orderType,
+  setOrderType,
+  scheduledTime,
+  setScheduledTime,
+  notes,
+  setNotes,
+  summaryOpen,
+  setSummaryOpen,
+  paymentReady = true,
 }) {
   const stripe = useStripe();
   const elements = useElements();
-  const { items, subtotal, tax, total, clearCart } = useCartContext();
-  const { user, isCustomerAuthenticated } = useAuth();
+  const { items, clearCart } = useCartContext();
+  const { user, isCustomerAuthenticated, refreshCustomerProfile } = useAuth();
+  const { cartSubtotal, tax, total, discountAmount } = pricing;
 
-  const [orderType, setOrderType] = useState('pickup');
-  const [scheduledTime, setScheduledTime] = useState('ASAP');
-  const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
-  const [summaryOpen, setSummaryOpen] = useState(false);
   const [errors, setErrors] = useState({});
 
   const validateContact = () => {
@@ -68,6 +80,7 @@ function CheckoutForm({
 
   const handleSubmit = async () => {
     if (!stripe || !elements) return;
+    if (!paymentReady) return;
     if (!validateContact()) return;
 
     const name = contact.name.trim();
@@ -115,22 +128,28 @@ function CheckoutForm({
           special_instructions: specialInstructions || '',
           selected_modifiers: selectedModifiers || [],
         })),
-        subtotal,
+        subtotal: cartSubtotal,
         tax,
         total,
         orderType,
         scheduledTime: scheduledTime === 'ASAP' ? null : scheduledTime,
         notes: notes || null,
         paymentIntentId: paymentIntent?.id,
+        promoCodeId: appliedPromo?.id || null,
+        promoCode: appliedPromo?.code || null,
+        discountAmount: discountAmount || 0,
       });
 
+      let pointsEarned = 0;
       if (isCustomerAuthenticated && user?.id && restaurant?.id) {
-        awardPoints({
+        const awarded = await awardPoints({
           restaurantId: restaurant.id,
           authUserId: user.id,
           orderTotal: total,
           pointsPerDollar: restaurant.points_per_dollar ?? 1,
         });
+        pointsEarned = awarded?.pointsEarned || 0;
+        await refreshCustomerProfile(restaurant.id);
       }
 
       if (marketingOptIn && email) {
@@ -144,7 +163,7 @@ function CheckoutForm({
       }
 
       clearCart();
-      navigation.replace('Confirmation', { order });
+      navigation.replace('Confirmation', { order, pointsEarned });
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -158,9 +177,11 @@ function CheckoutForm({
     <View style={[s.summaryPanel, isDesktop && s.summaryPanelDesktop]}>
       <OrderSummary
         items={items}
-        subtotal={subtotal}
+        subtotal={pricing.cartSubtotal}
         tax={tax}
         total={total}
+        discountAmount={discountAmount}
+        promoCode={appliedPromo?.code}
         orderType={orderType}
         scheduledTime={scheduledTime}
       />
@@ -312,6 +333,21 @@ function CheckoutForm({
 
       <View style={s.sectionDivider} />
 
+      {/* ── Promo Code ───────────────────────────── */}
+      <View style={s.section}>
+        <Text style={s.sectionLabel}>Promo Code</Text>
+        <PromoCodeInput
+          restaurantId={restaurant?.id}
+          items={items}
+          appliedPromo={appliedPromo}
+          onApplied={onPromoApplied}
+          onCleared={onPromoCleared}
+          brandColor={theme.colors.brand}
+        />
+      </View>
+
+      <View style={s.sectionDivider} />
+
       {/* ── Special Instructions ─────────────────── */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>Special Instructions</Text>
@@ -330,14 +366,21 @@ function CheckoutForm({
       {/* ── Payment ──────────────────────────────── */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>Payment</Text>
-        <View style={s.paymentElementWrap}>
-          <PaymentElement
-            options={{
-              layout: 'tabs',
-              paymentMethodOrder: ['apple_pay', 'google_pay', 'card'],
-            }}
-          />
-        </View>
+        {!paymentReady ? (
+          <View style={{ paddingVertical: 20, alignItems: 'center', gap: 10 }}>
+            <ActivityIndicator color={theme.colors.brand} />
+            <Text style={{ fontSize: 13, color: '#697386' }}>Updating payment for new total…</Text>
+          </View>
+        ) : (
+          <View style={s.paymentElementWrap}>
+            <PaymentElement
+              options={{
+                layout: 'tabs',
+                paymentMethodOrder: ['apple_pay', 'google_pay', 'card'],
+              }}
+            />
+          </View>
+        )}
         <View style={s.securedRow}>
           <Text style={s.securedText}>🔒  Secured by Stripe</Text>
         </View>
@@ -349,12 +392,12 @@ function CheckoutForm({
           style={[
             s.submitBtn,
             { backgroundColor: theme.colors.brand },
-            (loading || !stripe) && { opacity: 0.6 },
+            (loading || !stripe || !paymentReady) && { opacity: 0.6 },
           ]}
           onPress={handleSubmit}
-          disabled={loading || !stripe}
+          disabled={loading || !stripe || !paymentReady}
         >
-          {loading ? (
+          {loading || !paymentReady ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <Text style={s.submitText}>Pay ${total.toFixed(2)} · Place Order</Text>
@@ -394,7 +437,7 @@ function CheckoutForm({
 // ─── Outer component — creates PaymentIntent on load ──────────────────────────
 export default function CheckoutScreen({ navigation }) {
   const { restaurant } = useRestaurantContext();
-  const { total } = useCartContext();
+  const { items, subtotal: cartSubtotal } = useCartContext();
   const { theme } = useTheme();
   const { user, customerProfile, isCustomerAuthenticated } = useAuth();
   const { width } = useWindowDimensions();
@@ -408,9 +451,58 @@ export default function CheckoutScreen({ navigation }) {
     email: '',
     marketingOptIn: false,
   });
+  // Lifted so promo-driven PaymentIntent refresh does not wipe form edits
+  const [orderType, setOrderType] = useState('pickup');
+  const [scheduledTime, setScheduledTime] = useState('ASAP');
+  const [notes, setNotes] = useState('');
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [clientSecret, setClientSecret] = useState(null);
   const [piError, setPiError] = useState(null);
   const [piLoading, setPiLoading] = useState(true);
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const piAmountRef = useRef(null);
+
+  const pricing = useMemo(() => {
+    try {
+      const result = applyPromoToTotals(cartSubtotal, items, appliedPromo);
+      return {
+        cartSubtotal,
+        subtotal: result.discountedSubtotal,
+        tax: result.tax,
+        total: result.total,
+        discountAmount: result.discountAmount,
+      };
+    } catch {
+      return {
+        cartSubtotal,
+        subtotal: cartSubtotal,
+        tax: Math.round(cartSubtotal * 0.08 * 100) / 100,
+        total: Math.round((cartSubtotal + cartSubtotal * 0.08) * 100) / 100,
+        discountAmount: 0,
+      };
+    }
+  }, [cartSubtotal, items, appliedPromo]);
+
+  const { total } = pricing;
+
+  // Drop item-based promos if the required item leaves the cart (or qty drops)
+  useEffect(() => {
+    if (!appliedPromo?.menu_item_id) return;
+    const itemTypes = ['free_item', 'bogo', 'buy_x_percent_off', 'buy_x_amount_off'];
+    if (!itemTypes.includes(appliedPromo.benefit_type)) return;
+    const line = items.find((i) => String(i.id) === String(appliedPromo.menu_item_id));
+    if (!line) {
+      setAppliedPromo(null);
+      return;
+    }
+    const need = Number(appliedPromo.buy_quantity) || 0;
+    if (
+      (appliedPromo.benefit_type === 'buy_x_percent_off' || appliedPromo.benefit_type === 'buy_x_amount_off')
+      && (Number(line.quantity) || 0) < need
+    ) {
+      setAppliedPromo(null);
+    }
+  }, [items, appliedPromo]);
 
   const hasConnectAccount = Boolean(restaurant?.stripe_account_id);
 
@@ -419,7 +511,9 @@ export default function CheckoutScreen({ navigation }) {
     if (!isCustomerAuthenticated || !user) return;
     setContact((c) => ({
       ...c,
-      name: c.name || customerProfile?.full_name || '',
+      name: c.name
+        || [customerProfile?.first_name, customerProfile?.last_name].filter(Boolean).join(' ')
+        || '',
       phone: c.phone || customerProfile?.phone || '',
       email: c.email || customerProfile?.email || user.email || '',
     }));
@@ -431,11 +525,15 @@ export default function CheckoutScreen({ navigation }) {
     return loadStripe(pk);
   }, []);
 
-  // Create PaymentIntent as soon as checkout loads (email optional for receipt)
+  // Create / refresh PaymentIntent when checkout total changes (promo, cart)
   useEffect(() => {
     let cancelled = false;
     async function initPi() {
       if (!restaurant?.id || !hasConnectAccount || !total) {
+        setPiLoading(false);
+        return;
+      }
+      if (piAmountRef.current === total && clientSecret) {
         setPiLoading(false);
         return;
       }
@@ -448,7 +546,10 @@ export default function CheckoutScreen({ navigation }) {
           contact.email.trim() ||
           undefined;
         const secret = await createPaymentIntent(total, restaurant.id, { email });
-        if (!cancelled) setClientSecret(secret);
+        if (!cancelled) {
+          setClientSecret(secret);
+          piAmountRef.current = total;
+        }
       } catch (e) {
         if (!cancelled) setPiError(e.message);
       } finally {
@@ -460,6 +561,10 @@ export default function CheckoutScreen({ navigation }) {
     // Intentionally once per restaurant/total — don't recreate PI on every keystroke
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurant?.id, hasConnectAccount, total]);
+
+  const paymentReady = Boolean(
+    clientSecret && !piLoading && piAmountRef.current === total,
+  );
 
   const appearance = {
     theme: 'stripe',
@@ -504,17 +609,21 @@ export default function CheckoutScreen({ navigation }) {
         <Text style={s.pageTitle}>Checkout</Text>
       </View>
 
-      {piLoading ? (
+      {piLoading && !clientSecret ? (
         <View style={s.loadingWrap}>
           <ActivityIndicator size="large" color={theme.colors.brand} />
           <Text style={s.loadingText}>Preparing checkout…</Text>
         </View>
-      ) : piError ? (
+      ) : piError && !clientSecret ? (
         <View style={s.errorPage}>
           <Text style={s.errorMsg}>{piError}</Text>
         </View>
       ) : clientSecret ? (
-        <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
+        <Elements
+          key={clientSecret}
+          stripe={stripePromise}
+          options={{ clientSecret, appearance }}
+        >
           <CheckoutForm
             navigation={navigation}
             isDesktop={isDesktop}
@@ -523,6 +632,19 @@ export default function CheckoutScreen({ navigation }) {
             contact={contact}
             setContact={setContact}
             isSignedIn={isSignedIn}
+            appliedPromo={appliedPromo}
+            onPromoApplied={setAppliedPromo}
+            onPromoCleared={() => setAppliedPromo(null)}
+            pricing={pricing}
+            orderType={orderType}
+            setOrderType={setOrderType}
+            scheduledTime={scheduledTime}
+            setScheduledTime={setScheduledTime}
+            notes={notes}
+            setNotes={setNotes}
+            summaryOpen={summaryOpen}
+            setSummaryOpen={setSummaryOpen}
+            paymentReady={paymentReady}
           />
         </Elements>
       ) : null}

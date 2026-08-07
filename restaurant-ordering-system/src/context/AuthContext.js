@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../config/supabase';
 import * as customerService from '../services/customerService';
 
@@ -12,12 +12,25 @@ export const AuthProvider = ({ children }) => {
   const [isStaff, setIsStaff] = useState(false);
   // True while isStaffUser is in flight for a present user; false when resolved or no user.
   const [roleLoading, setRoleLoading] = useState(false);
+  // Track auth user id so same-user events (e.g. TOKEN_REFRESHED) do not
+  // flip roleLoading — AdminNavigator would otherwise stick on the spinner.
+  const userIdRef = useRef(null);
 
   const applyUser = useCallback((nextUser) => {
+    const nextId = nextUser?.id ?? null;
+    const prevId = userIdRef.current;
+    userIdRef.current = nextId;
+
     setUser(nextUser);
+
+    // Only reset role/profile state when the auth identity actually changes.
+    if (nextId === prevId) return;
+
     if (nextUser) {
       // Mark role unresolved immediately so navigators don't flash LoginScreen
       // before the staff-lookup effect runs.
+      setCustomerProfile(null);
+      setIsStaff(false);
       setRoleLoading(true);
     } else {
       setCustomerProfile(null);
@@ -27,6 +40,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const refreshCustomerProfile = useCallback(async (restaurantId) => {
+    // Only clear when there is no user/restaurant — keep last good profile on fetch errors.
     if (!restaurantId || !user?.id) {
       setCustomerProfile(null);
       return null;
@@ -37,13 +51,26 @@ export const AuthProvider = ({ children }) => {
         restaurantId,
         user.id,
       );
-      setCustomerProfile(profile);
+      // Never overwrite a good balance with null (race / brief miss shows 0 pts).
+      if (profile) {
+        setCustomerProfile(profile);
+      } else {
+        setCustomerProfile((prev) => {
+          if (prev && prev.restaurant_id === restaurantId) return prev;
+          return null;
+        });
+      }
       return profile;
     } catch {
-      setCustomerProfile(null);
       return null;
     }
   }, [user?.id]);
+
+  /** Merge fields into the in-memory customer profile (e.g. points after redeem). */
+  const patchCustomerProfile = useCallback((patch) => {
+    if (!patch || typeof patch !== 'object') return;
+    setCustomerProfile((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -156,9 +183,14 @@ export const AuthProvider = ({ children }) => {
     return customerService.getCustomerProfile(restaurantId, user.id);
   };
 
-  const linkCustomer = async (restaurantId, email, authUser) => {
+  const linkCustomer = useCallback(async (restaurantId, email, authUser, extras = {}) => {
     const userId = authUser?.id ?? user?.id;
     if (!userId) return null;
+    const firstName = extras.firstName ?? null;
+    const lastName = extras.lastName ?? null;
+    const phone = extras.phone ?? null;
+    const marketingOptIn =
+      typeof extras.marketingOptIn === 'boolean' ? extras.marketingOptIn : null;
 
     const existing = await customerService.getCustomerProfile(
       restaurantId,
@@ -174,6 +206,10 @@ export const AuthProvider = ({ children }) => {
         restaurantId,
         authUserId: userId,
         email: email || authUser?.email || user?.email,
+        firstName,
+        lastName,
+        phone,
+        marketingOptIn,
       });
       setCustomerProfile(created);
       return created;
@@ -183,11 +219,15 @@ export const AuthProvider = ({ children }) => {
         restaurantId,
         userId,
         email: email || authUser?.email || user?.email,
+        firstName,
+        lastName,
+        phone,
+        marketingOptIn,
       });
       if (ensured) setCustomerProfile(ensured);
       return ensured;
     }
-  };
+  }, [user?.id, user?.email]);
 
   return (
     <AuthContext.Provider
@@ -210,6 +250,7 @@ export const AuthProvider = ({ children }) => {
         getCustomerProfile,
         linkCustomer,
         refreshCustomerProfile,
+        patchCustomerProfile,
         isAuthenticated: !!user,
       }}
     >
