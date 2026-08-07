@@ -19,6 +19,7 @@ import { useRestaurantContext } from '../../context/RestaurantContext';
 import { sendBroadcast, listEmailBroadcasts } from '../../services/emailApi';
 import { getReviewOutreachCounts } from '../../services/reviewService';
 import * as restaurantService from '../../services/restaurantService';
+import * as promoService from '../../services/promoService';
 import { confirmAsync } from '../../utils/confirm';
 
 const UNSUBSCRIBE_TOKEN = '{{{RESEND_UNSUBSCRIBE_URL}}}';
@@ -61,9 +62,16 @@ export default function MarketingScreen() {
 
   const [broadcasts, setBroadcasts] = useState([]);
   const [loadingBroadcasts, setLoadingBroadcasts] = useState(true);
+  const [promos, setPromos] = useState([]);
+  const [loadingPromos, setLoadingPromos] = useState(true);
+  const [selectedPromoId, setSelectedPromoId] = useState(null);
 
   const domainOk = restaurant?.email_domain_status === 'verified' && restaurant?.resend_from_email;
   const segmentOk = Boolean(restaurant?.resend_segment_id && restaurant?.resend_marketing_topic_id);
+  const selectedPromo = useMemo(
+    () => promos.find((p) => p.id === selectedPromoId) || null,
+    [promos, selectedPromoId],
+  );
 
   useEffect(() => {
     setAutoReview(restaurant?.auto_review_emails ?? true);
@@ -96,10 +104,61 @@ export default function MarketingScreen() {
     }
   }, [restaurant?.id]);
 
+  const loadPromos = useCallback(async () => {
+    if (!restaurant?.id) return;
+    setLoadingPromos(true);
+    try {
+      const data = await promoService.getActivePromos(restaurant.id);
+      setPromos(data);
+      setSelectedPromoId((prev) => {
+        if (prev && data.some((p) => p.id === prev)) return prev;
+        return data[0]?.id ?? null;
+      });
+    } catch {
+      setPromos([]);
+      setSelectedPromoId(null);
+    } finally {
+      setLoadingPromos(false);
+    }
+  }, [restaurant?.id]);
+
   useEffect(() => {
     loadCounts();
     loadBroadcasts();
-  }, [loadCounts, loadBroadcasts]);
+    loadPromos();
+  }, [loadCounts, loadBroadcasts, loadPromos]);
+
+  const insertPromoIntoHtml = () => {
+    if (!selectedPromo) {
+      Alert.alert('No promo', 'Create an active marketing promo on the Rewards screen first.');
+      return;
+    }
+    const snippet = promoService.formatPromoEmailHtml(selectedPromo);
+    setHtml((prev) => {
+      const unsubIdx = prev.indexOf(UNSUBSCRIBE_TOKEN);
+      if (unsubIdx === -1) return `${prev.trimEnd()}\n${snippet}`;
+      const before = prev.slice(0, unsubIdx);
+      const pStart = before.lastIndexOf('<p');
+      if (pStart >= 0) {
+        return `${prev.slice(0, pStart)}${snippet}${prev.slice(pStart)}`;
+      }
+      return `${prev.slice(0, unsubIdx)}${snippet}${prev.slice(unsubIdx)}`;
+    });
+  };
+
+  const copyPromoBlurb = async () => {
+    if (!selectedPromo) {
+      Alert.alert('No promo', 'Create an active marketing promo on the Rewards screen first.');
+      return;
+    }
+    const blurb = promoService.formatPromoEmailBlurb(selectedPromo);
+    try {
+      await promoService.copyTextToClipboard(blurb);
+      Alert.alert('Copied', 'Promo blurb copied to clipboard.');
+    } catch {
+      Alert.alert('Promo blurb', blurb);
+    }
+  };
 
   const previewHtml = useMemo(() => {
     return html
@@ -289,6 +348,64 @@ export default function MarketingScreen() {
         <Text style={[styles.hint, { color: c.textSecondary }]}>
           Must include {UNSUBSCRIBE_TOKEN}. You can use {'{{{FIRST_NAME|there}}}'}.
         </Text>
+
+        <View style={[styles.promoHelper, { borderColor: c.border, backgroundColor: c.backgroundSunken }]}>
+          <Text style={[styles.promoHelperTitle, { color: c.textPrimary }]}>Insert promo code</Text>
+          <Text style={[styles.hint, { color: c.textSecondary, marginBottom: 8 }]}>
+            Active codes from Rewards → Marketing promos.
+          </Text>
+          {loadingPromos ? (
+            <ActivityIndicator color={c.brand} />
+          ) : promos.length === 0 ? (
+            <Text style={[styles.hint, { color: c.textSecondary, marginBottom: 0 }]}>
+              No active promos yet. Create one on the Rewards screen.
+            </Text>
+          ) : (
+            <>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                <View style={styles.promoChipRow}>
+                  {promos.map((p) => {
+                    const selected = p.id === selectedPromoId;
+                    return (
+                      <TouchableOpacity
+                        key={p.id}
+                        style={[
+                          styles.promoChip,
+                          {
+                            borderColor: selected ? c.brand : c.border,
+                            backgroundColor: selected ? c.brand : c.backgroundCard,
+                          },
+                        ]}
+                        onPress={() => setSelectedPromoId(p.id)}
+                      >
+                        <Text style={{ color: selected ? '#fff' : c.textPrimary, fontWeight: '700', fontSize: 13 }}>
+                          {p.code}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+              <View style={styles.promoActions}>
+                <TouchableOpacity
+                  style={[styles.promoActionBtn, { borderColor: c.border }]}
+                  onPress={insertPromoIntoHtml}
+                >
+                  <Ionicons name="add-circle-outline" size={16} color={c.brand} />
+                  <Text style={[styles.promoActionText, { color: c.brand }]}>Insert into HTML</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.promoActionBtn, { borderColor: c.border }]}
+                  onPress={copyPromoBlurb}
+                >
+                  <Ionicons name="copy-outline" size={16} color={c.textSecondary} />
+                  <Text style={[styles.promoActionText, { color: c.textSecondary }]}>Copy blurb</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+
         <TextInput
           style={[
             styles.input,
@@ -417,6 +534,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   htmlInput: { minHeight: 160, fontFamily: 'monospace' },
+  promoHelper: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+  },
+  promoHelperTitle: { fontSize: 13, fontWeight: '700', marginBottom: 4 },
+  promoChipRow: { flexDirection: 'row', gap: 8, paddingRight: 8 },
+  promoChip: {
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  promoActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  promoActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  promoActionText: { fontSize: 13, fontWeight: '600' },
   sendBtn: {
     marginTop: 18,
     borderRadius: 8,

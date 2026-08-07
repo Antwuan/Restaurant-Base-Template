@@ -7,6 +7,7 @@ import CheckoutScreen from '../screens/customer/CheckoutScreen';
 import ConfirmationScreen from '../screens/customer/ConfirmationScreen';
 import TrackerScreen from '../screens/customer/TrackerScreen';
 import RewardsScreen from '../screens/customer/RewardsScreen';
+import ProfileScreen from '../screens/customer/ProfileScreen';
 import HiringScreen from '../screens/customer/HiringScreen';
 import CateringScreen from '../screens/customer/CateringScreen';
 import ReviewScreen from '../screens/customer/ReviewScreen';
@@ -72,6 +73,10 @@ function RewardsScreenWithNav({ navigation }) {
   return <RewardsScreen navigation={navigation} />;
 }
 
+function ProfileScreenWithNav({ navigation }) {
+  return <ProfileScreen navigation={navigation} />;
+}
+
 function HiringScreenWithNav({ navigation }) {
   return (
     <>
@@ -105,6 +110,7 @@ export default function CustomerNavigator() {
       <Stack.Screen name="Menu" component={MenuScreenWithCart} />
       <Stack.Screen name="Catering" component={CateringScreenWithNav} />
       <Stack.Screen name="Rewards" component={RewardsScreenWithNav} />
+      <Stack.Screen name="Profile" component={ProfileScreenWithNav} />
       <Stack.Screen name="Hiring" component={HiringScreenWithNav} />
       <Stack.Screen name="Checkout" component={CheckoutScreenWithNav} />
       <Stack.Screen

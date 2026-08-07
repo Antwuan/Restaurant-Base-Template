@@ -39,10 +39,13 @@ export default function CustomerSignInModal({ visible, onClose }) {
   } = useAuth();
 
   const [mode, setMode] = useState('signin');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const [marketingOptIn, setMarketingOptIn] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
@@ -57,10 +60,13 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
   useEffect(() => {
     if (!visible) {
+      setFirstName('');
+      setLastName('');
+      setPhone('');
       setEmail('');
       setPassword('');
       setConfirmPassword('');
-      setMarketingOptIn(false);
+      setMarketingOptIn(true);
       setErrors({});
       setTouched({});
       setMode('signin');
@@ -83,6 +89,18 @@ export default function CustomerSignInModal({ visible, onClose }) {
     const errs = {};
     const trimmedEmail = email.trim();
 
+    if (forMode === 'signup') {
+      if (!firstName.trim()) {
+        errs.firstName = 'First name is required';
+      }
+      if (!lastName.trim()) {
+        errs.lastName = 'Last name is required';
+      }
+      if (!phone.trim()) {
+        errs.phone = 'Phone is required';
+      }
+    }
+
     if (!trimmedEmail) {
       errs.email = 'Email is required';
     } else if (!EMAIL_RE.test(trimmedEmail)) {
@@ -104,6 +122,21 @@ export default function CustomerSignInModal({ visible, onClose }) {
     }
 
     return errs;
+  };
+
+  const handleFirstNameChange = (value) => {
+    setFirstName(value);
+    if (touched.firstName) clearFieldError('firstName');
+  };
+
+  const handleLastNameChange = (value) => {
+    setLastName(value);
+    if (touched.lastName) clearFieldError('lastName');
+  };
+
+  const handlePhoneChange = (value) => {
+    setPhone(value);
+    if (touched.phone) clearFieldError('phone');
   };
 
   const handleEmailChange = (value) => {
@@ -143,6 +176,11 @@ export default function CustomerSignInModal({ visible, onClose }) {
     setTouched({});
     setConfirmPassword('');
     setStaffWarning(false);
+    if (nextMode === 'signin') {
+      setFirstName('');
+      setLastName('');
+      setPhone('');
+    }
   };
 
   const showStaffWarning = () => {
@@ -219,11 +257,23 @@ export default function CustomerSignInModal({ visible, onClose }) {
     const validationErrors = validate('signup');
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
-      setTouched({ email: true, password: true, confirmPassword: true });
+      setTouched({
+        firstName: true,
+        lastName: true,
+        phone: true,
+        email: true,
+        password: true,
+        confirmPassword: true,
+      });
       return;
     }
     setErrors({});
     setStaffWarning(false);
+
+    const trimmedFirst = firstName.trim();
+    const trimmedLast = lastName.trim();
+    const trimmedName = [trimmedFirst, trimmedLast].filter(Boolean).join(' ');
+    const trimmedPhone = phone.trim();
 
     setLoading(true);
     try {
@@ -266,12 +316,21 @@ export default function CustomerSignInModal({ visible, onClose }) {
           restaurantId: restaurant.id,
           userId: signedInUser.id,
           email: email.trim(),
+          firstName: trimmedFirst,
+          lastName: trimmedLast,
+          phone: trimmedPhone,
+          marketingOptIn,
         });
       } catch {
         // Fallback when a session exists (RLS insert)
         if (result.session) {
           try {
-            profile = await linkCustomer(restaurant.id, email.trim(), signedInUser);
+            profile = await linkCustomer(restaurant.id, email.trim(), signedInUser, {
+              firstName: trimmedFirst,
+              lastName: trimmedLast,
+              phone: trimmedPhone,
+              marketingOptIn,
+            });
           } catch {
             // handled below
           }
@@ -304,13 +363,11 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
       if (marketingOptIn && profile?.id) {
         try {
-          await customerService.updateCustomerProfile(profile.id, {
-            marketing_opt_in: true,
-            marketing_opt_in_at: new Date().toISOString(),
-          });
           await syncMarketingContact({
             restaurantId: restaurant.id,
             email: email.trim(),
+            fullName: trimmedName,
+            phone: trimmedPhone,
             marketingOptIn: true,
           });
         } catch {
@@ -472,6 +529,54 @@ export default function CustomerSignInModal({ visible, onClose }) {
                   </View>
                 ) : null}
 
+                {mode === 'signup' ? (
+                  <>
+                    <View style={styles.nameRow}>
+                      <View style={styles.nameField}>
+                        <TextInput
+                          style={[styles.input, errors.firstName && styles.inputError]}
+                          placeholder="First name"
+                          placeholderTextColor="#999"
+                          value={firstName}
+                          onChangeText={handleFirstNameChange}
+                          onBlur={() => handleBlur('firstName')}
+                          autoCapitalize="words"
+                          autoComplete="given-name"
+                          textContentType="givenName"
+                        />
+                        {errors.firstName ? <Text style={styles.errorText}>{errors.firstName}</Text> : null}
+                      </View>
+                      <View style={styles.nameField}>
+                        <TextInput
+                          style={[styles.input, errors.lastName && styles.inputError]}
+                          placeholder="Last name"
+                          placeholderTextColor="#999"
+                          value={lastName}
+                          onChangeText={handleLastNameChange}
+                          onBlur={() => handleBlur('lastName')}
+                          autoCapitalize="words"
+                          autoComplete="family-name"
+                          textContentType="familyName"
+                        />
+                        {errors.lastName ? <Text style={styles.errorText}>{errors.lastName}</Text> : null}
+                      </View>
+                    </View>
+
+                    <TextInput
+                      style={[styles.input, errors.phone && styles.inputError]}
+                      placeholder="Phone"
+                      placeholderTextColor="#999"
+                      value={phone}
+                      onChangeText={handlePhoneChange}
+                      onBlur={() => handleBlur('phone')}
+                      keyboardType="phone-pad"
+                      autoComplete="tel"
+                      textContentType="telephoneNumber"
+                    />
+                    {errors.phone ? <Text style={styles.errorText}>{errors.phone}</Text> : null}
+                  </>
+                ) : null}
+
                 <TextInput
                   style={[styles.input, errors.email && styles.inputError]}
                   placeholder="Email"
@@ -517,19 +622,30 @@ export default function CustomerSignInModal({ visible, onClose }) {
                       <Text style={styles.errorText}>{errors.confirmPassword}</Text>
                     ) : null}
 
-                    <TouchableOpacity
-                      style={styles.optInRow}
-                      onPress={() => setMarketingOptIn((v) => !v)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[
-                        styles.checkbox,
-                        marketingOptIn && { backgroundColor: brandColor, borderColor: brandColor },
-                      ]}>
-                        {marketingOptIn ? <Text style={styles.checkmark}>✓</Text> : null}
-                      </View>
-                      <Text style={styles.optInText}>Email me deals &amp; updates</Text>
-                    </TouchableOpacity>
+                    <Text style={styles.optInLabel}>Email me deals &amp; updates</Text>
+                    <View style={styles.yesNoRow}>
+                      {[
+                        { label: 'Yes', val: true },
+                        { label: 'No', val: false },
+                      ].map(({ label, val }) => {
+                        const active = marketingOptIn === val;
+                        return (
+                          <TouchableOpacity
+                            key={label}
+                            style={[
+                              styles.yesNoBtn,
+                              active && { backgroundColor: brandColor, borderColor: brandColor },
+                            ]}
+                            onPress={() => setMarketingOptIn(val)}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={[styles.yesNoText, active && styles.yesNoTextActive]}>
+                              {label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                   </>
                 ) : null}
 
@@ -717,22 +833,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  optInRow: {
+  nameRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 10,
+  },
+  nameField: {
+    flex: 1,
+  },
+  optInLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#444',
+    marginTop: 8,
     marginBottom: 8,
-    marginTop: 6,
   },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: '#ccc',
+  yesNoRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  yesNoBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 10,
+    paddingVertical: 12,
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#fafafa',
   },
-  checkmark: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  optInText: { fontSize: 14, color: '#333', flex: 1 },
+  yesNoText: { fontSize: 14, fontWeight: '700', color: '#555' },
+  yesNoTextActive: { color: '#fff' },
 });

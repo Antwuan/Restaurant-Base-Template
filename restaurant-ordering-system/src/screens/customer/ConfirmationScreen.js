@@ -21,12 +21,14 @@ import {
 } from 'react-native';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useAuth } from '../../context/AuthContext';
 import { FadeInView } from '../../components/motion';
 
 export default function ConfirmationScreen({ route, navigation }) {
-  const { order } = route.params || {};
+  const { order, pointsEarned = 0 } = route.params || {};
   const { theme } = useTheme();
   const { restaurant } = useRestaurantContext();
+  const { isCustomerAuthenticated } = useAuth();
 
   const checkScale = useRef(new Animated.Value(0)).current;
   const contentOpacity = useRef(new Animated.Value(0)).current;
@@ -79,6 +81,22 @@ export default function ConfirmationScreen({ route, navigation }) {
             We&apos;ve received your order and will start preparing it shortly.
           </Text>
         </FadeInView>
+
+        {isCustomerAuthenticated && pointsEarned > 0 ? (
+          <FadeInView delay={120} duration={360} fromY={8}>
+            <View style={[styles.pointsNote, { borderColor: theme.colors.brand }]}>
+              <Text style={[styles.pointsNoteText, { color: theme.colors.brand }]}>
+                You earned {pointsEarned} point{pointsEarned === 1 ? '' : 's'} on this order
+              </Text>
+            </View>
+          </FadeInView>
+        ) : !isCustomerAuthenticated ? (
+          <FadeInView delay={120} duration={360} fromY={8}>
+            <Text style={styles.guestPointsNote}>
+              Sign in next time to earn points on your orders.
+            </Text>
+          </FadeInView>
+        ) : null}
 
         {/* Order Number */}
         <FadeInView delay={160} duration={380} fromY={14} style={{ width: '100%' }}>
@@ -250,8 +268,28 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#666',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
     lineHeight: 22,
+  },
+  pointsNote: {
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    marginBottom: 20,
+    backgroundColor: '#fafafa',
+  },
+  pointsNoteText: {
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  guestPointsNote: {
+    fontSize: 13,
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 18,
   },
   orderNumberCard: {
     borderWidth: 2,
