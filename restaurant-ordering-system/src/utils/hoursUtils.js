@@ -120,16 +120,67 @@ export function getClosedUntilLabel(hours_of_operation) {
   return 'Closed temporarily';
 }
 
+/** Minutes before close when ASAP / last pickup slot is cut off */
+export const ORDER_CLOSE_BUFFER_MINS = 30;
+
 /**
- * Returns array of ISO datetime strings for available 15-min pickup slots
- * for a given date, constrained to the restaurant's hours.
+ * Minutes until today's close, or null if currently outside open hours.
+ */
+export function minutesUntilClose(hours_of_operation, now = new Date()) {
+  const hours = resolveHours(hours_of_operation);
+  const dayKey = DAY_KEYS[now.getDay()];
+  const dayHours = hours[dayKey];
+  if (!dayHours || dayHours.closed) return null;
+
+  const [openH, openM] = dayHours.open.split(':').map(Number);
+  const [closeH, closeM] = dayHours.close.split(':').map(Number);
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const openMins = openH * 60 + openM;
+  const closeMins = closeH * 60 + closeM;
+  if (nowMins < openMins || nowMins >= closeMins) return null;
+  return closeMins - nowMins;
+}
+
+/**
+ * True when the restaurant is open and there are at least `bufferMins`
+ * remaining until close (default 30).
+ */
+export function canOrderAsap(hours_of_operation, bufferMins = ORDER_CLOSE_BUFFER_MINS, now = new Date()) {
+  if (!isOpenNow(hours_of_operation)) return false;
+  const mins = minutesUntilClose(hours_of_operation, now);
+  return mins != null && mins >= bufferMins;
+}
+
+/**
+ * Same-day relative ready options that land at or before close − buffer.
+ * Returns `{ key, label, minutesFromNow }[]`. ASAP included when allowed.
+ */
+export function getAsapReadyOptions(hours_of_operation, bufferMins = ORDER_CLOSE_BUFFER_MINS, now = new Date()) {
+  if (!canOrderAsap(hours_of_operation, bufferMins, now)) return [];
+  const minsLeft = minutesUntilClose(hours_of_operation, now);
+  const latestFromNow = minsLeft - bufferMins;
+  const candidates = [
+    { key: 'ASAP', label: 'ASAP', minutesFromNow: 0 },
+    { key: '15', label: '15 min', minutesFromNow: 15 },
+    { key: '30', label: '30 min', minutesFromNow: 30 },
+    { key: '45', label: '45 min', minutesFromNow: 45 },
+    { key: '60', label: '1 hour', minutesFromNow: 60 },
+  ];
+  return candidates.filter((o) => o.minutesFromNow <= latestFromNow);
+}
+
+/**
+ * Returns available pickup slots for a given date within open hours.
+ * Slots are excluded once they pass `close − bufferMins`.
+ * Past slots for "today" are filtered out.
  *
- * @param {string|Date} date  - The target date (Date or ISO string)
+ * @param {string|Date} date
  * @param {object}      hours_of_operation
  * @param {number}      intervalMins - slot interval (default 15)
+ * @param {number}      bufferMins - minutes before close to stop offering (default 0)
  * @returns {Date[]}
  */
-export function getSlotTimesForDate(date, hours_of_operation, intervalMins = 15) {
+export function getSlotTimesForDate(date, hours_of_operation, intervalMins = 15, bufferMins = 0) {
   const hours = resolveHours(hours_of_operation);
   const d = new Date(date);
   const dayKey = DAY_KEYS[d.getDay()];
@@ -140,11 +191,19 @@ export function getSlotTimesForDate(date, hours_of_operation, intervalMins = 15)
   const [closeH, closeM] = dayHours.close.split(':').map(Number);
   const openMins = openH * 60 + openM;
   const closeMins = closeH * 60 + closeM;
+  const latestPickupMins = closeMins - (bufferMins || 0);
+
+  const now = new Date();
+  const isToday =
+    d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
 
   const slots = [];
-  for (let m = openMins; m < closeMins; m += intervalMins) {
+  for (let m = openMins; m < closeMins && m <= latestPickupMins; m += intervalMins) {
     const slotDate = new Date(d);
     slotDate.setHours(Math.floor(m / 60), m % 60, 0, 0);
+    if (isToday && slotDate.getTime() <= now.getTime()) continue;
     slots.push(slotDate);
   }
   return slots;

@@ -33,9 +33,8 @@ const RATING_FILTERS = [
 ];
 
 const TYPE_FILTERS = [
-  { key: null, label: 'All' },
+  { key: null, label: 'All types' },
   { key: 'pickup', label: 'Pickup' },
-  { key: 'delivery', label: 'Delivery' },
 ];
 
 function formatDateTime(iso) {
@@ -81,30 +80,23 @@ function Stars({ rating, color }) {
   );
 }
 
-function ChipRow({ options, value, onChange, colors }) {
+function FilterChip({ label, active, onPress, colors, trailing }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-      {options.map((opt) => {
-        const active = value === opt.key;
-        return (
-          <TouchableOpacity
-            key={String(opt.key)}
-            style={[
-              styles.chip,
-              {
-                backgroundColor: active ? colors.brand : colors.backgroundSunken,
-                borderColor: active ? colors.brand : colors.border,
-              },
-            ]}
-            onPress={() => onChange(opt.key)}
-          >
-            <Text style={[styles.chipText, { color: active ? '#fff' : colors.textSecondary }]}>
-              {opt.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
+    <TouchableOpacity
+      style={[
+        styles.chip,
+        {
+          backgroundColor: active ? colors.brand : colors.backgroundSunken,
+          borderColor: active ? colors.brand : colors.border,
+        },
+      ]}
+      onPress={onPress}
+    >
+      <Text style={[styles.chipText, { color: active ? '#fff' : colors.textSecondary }]}>
+        {label}
+      </Text>
+      {trailing}
+    </TouchableOpacity>
   );
 }
 
@@ -164,43 +156,42 @@ export default function ReviewsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
-      <View style={[styles.filters, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
-        <Text style={[styles.filterLabel, { color: c.textSecondary }]}>Sort</Text>
-        <View style={styles.sortRow}>
-          {SORT_OPTIONS.map((opt) => {
-            const active = sortBy === opt.key;
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                style={[
-                  styles.sortBtn,
-                  {
-                    backgroundColor: active ? c.brand : c.backgroundSunken,
-                    borderColor: active ? c.brand : c.border,
-                  },
-                ]}
-                onPress={() => toggleSort(opt.key)}
-              >
-                <Text style={[styles.sortBtnText, { color: active ? '#fff' : c.textSecondary }]}>
-                  {opt.label}
-                </Text>
-                {active ? (
-                  <Ionicons
-                    name={sortAsc ? 'arrow-up' : 'arrow-down'}
-                    size={12}
-                    color="#fff"
-                  />
-                ) : null}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <Text style={[styles.filterLabel, { color: c.textSecondary, marginTop: 10 }]}>Rating</Text>
-        <ChipRow options={RATING_FILTERS} value={ratingFilter} onChange={setRatingFilter} colors={c} />
-
-        <Text style={[styles.filterLabel, { color: c.textSecondary, marginTop: 10 }]}>Order type</Text>
-        <ChipRow options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} colors={c} />
+      <View style={[styles.filterBar, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
+        {SORT_OPTIONS.map((opt) => {
+          const active = sortBy === opt.key;
+          return (
+            <FilterChip
+              key={opt.key}
+              label={`Sort: ${opt.label}`}
+              active={active}
+              onPress={() => toggleSort(opt.key)}
+              colors={c}
+              trailing={
+                active ? (
+                  <Ionicons name={sortAsc ? 'arrow-up' : 'arrow-down'} size={12} color="#fff" />
+                ) : null
+              }
+            />
+          );
+        })}
+        {RATING_FILTERS.map((opt) => (
+          <FilterChip
+            key={`rating-${String(opt.key)}`}
+            label={opt.key == null ? 'All ratings' : opt.label}
+            active={ratingFilter === opt.key}
+            onPress={() => setRatingFilter(opt.key)}
+            colors={c}
+          />
+        ))}
+        {TYPE_FILTERS.map((opt) => (
+          <FilterChip
+            key={`type-${String(opt.key)}`}
+            label={opt.label}
+            active={typeFilter === opt.key}
+            onPress={() => setTypeFilter(opt.key)}
+            colors={c}
+          />
+        ))}
       </View>
 
       {loading ? (
@@ -294,33 +285,20 @@ export default function ReviewsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  filters: {
+  filterBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    gap: 4,
   },
-  filterLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 6,
-  },
-  sortRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  sortBtn: {
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  sortBtnText: { fontSize: 13, fontWeight: '600' },
-  chipRow: { flexDirection: 'row', gap: 8, paddingRight: 8 },
-  chip: {
     borderWidth: 1,
     borderRadius: 16,
     paddingHorizontal: 12,

@@ -3,7 +3,7 @@
  * Two-column layout on desktop (≥768 px), single column on mobile.
  * Each restaurant's stripe_account_id scopes the Stripe instance for Connect.
  */
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,9 @@ import {
   Alert,
   StyleSheet,
   useWindowDimensions,
+  Modal,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useCartContext } from '../../context/CartContext';
@@ -22,18 +24,222 @@ import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useAuth } from '../../context/AuthContext';
 import OrderSummary from '../../components/OrderSummary';
-import LocationCard from '../../components/LocationCard';
 import PromoCodeInput from '../../components/PromoCodeInput';
+import PickupLocationPicker, {
+  isPickupLocationReady,
+  resolvePickupLocation,
+} from '../../components/PickupLocationPicker';
 import { createPaymentIntent } from '../../services/stripeApi';
 import { createOrder } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
 import { applyPromoToTotals } from '../../services/promoService';
+import { toPersistablePickupLocationId } from '../../services/locationsService';
+import { usePickupLocation } from '../../context/PickupLocationContext';
+import {
+  canOrderAsap,
+  getAsapReadyOptions,
+  getSlotTimesForDate,
+  formatDateLabel,
+  formatDateTo12,
+  DAY_KEYS,
+  resolveHours,
+  ORDER_CLOSE_BUFFER_MINS,
+} from '../../utils/hoursUtils';
 
-const ORDER_TYPES = ['pickup', 'delivery'];
-const TIME_OPTIONS = ['ASAP', '15 min', '30 min', '45 min', '1 hour'];
 const BREAKPOINT = 768;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SLOT_INTERVAL = 15;
+const CALENDAR_SPAN_DAYS = 14;
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function buildPickupCalendarCells(hours_of_operation) {
+  const hours = resolveHours(hours_of_operation);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const rangeEnd = new Date(today);
+  rangeEnd.setDate(rangeEnd.getDate() + CALENDAR_SPAN_DAYS - 1);
+  rangeEnd.setHours(23, 59, 59, 999);
+
+  const gridStart = new Date(today);
+  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+  const gridEnd = new Date(rangeEnd);
+  gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+
+  const cells = [];
+  const cursor = new Date(gridStart);
+  while (cursor <= gridEnd) {
+    const day = new Date(cursor);
+    day.setHours(0, 0, 0, 0);
+    const key = DAY_KEYS[day.getDay()];
+    const beforeToday = day < today;
+    const afterRange = day > rangeEnd;
+    const closed = !hours[key] || hours[key].closed;
+    const slots = (!beforeToday && !afterRange && !closed)
+      ? getSlotTimesForDate(day, hours_of_operation, SLOT_INTERVAL, ORDER_CLOSE_BUFFER_MINS)
+      : [];
+    cells.push({
+      date: day,
+      selectable: !beforeToday && !afterRange && !closed && slots.length > 0,
+      outside: beforeToday || afterRange,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return { cells };
+}
+
+function PickupScheduleModal({ visible, onClose, restaurant, brandColor, selectedSlot, onSelect }) {
+  const { cells } = useMemo(
+    () => buildPickupCalendarCells(restaurant?.hours_of_operation),
+    [restaurant?.hours_of_operation],
+  );
+  const [step, setStep] = useState('date');
+  const [date, setDate] = useState(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (selectedSlot) {
+      const d = new Date(selectedSlot);
+      d.setHours(0, 0, 0, 0);
+      setDate(d);
+      setStep('time');
+    } else {
+      setDate(null);
+      setStep('date');
+    }
+  }, [visible, selectedSlot]);
+
+  const slots = useMemo(
+    () => (date
+      ? getSlotTimesForDate(date, restaurant?.hours_of_operation, SLOT_INTERVAL, ORDER_CLOSE_BUFFER_MINS)
+      : []),
+    [date, restaurant?.hours_of_operation],
+  );
+
+  const monthLabel = useMemo(() => {
+    const ref = date || cells.find((c) => c.selectable)?.date || new Date();
+    return ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }, [date, cells]);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={psm.backdrop}>
+        <View style={psm.sheet}>
+          <View style={psm.headerRow}>
+            <Text style={psm.title}>Schedule pickup</Text>
+            <TouchableOpacity onPress={onClose} style={psm.closeBtn}>
+              <Ionicons name="close" size={22} color="#333" />
+            </TouchableOpacity>
+          </View>
+          <Text style={psm.note}>
+            Choose a pickup time during open hours (last slot 30 minutes before close).
+          </Text>
+
+          {step === 'date' ? (
+            <>
+              <Text style={psm.label}>Select a date</Text>
+              <Text style={psm.monthLabel}>{monthLabel}</Text>
+              <View style={psm.weekdayRow}>
+                {WEEKDAY_LABELS.map((w) => (
+                  <Text key={w} style={psm.weekday}>{w}</Text>
+                ))}
+              </View>
+              <View style={psm.calGrid}>
+                {cells.map((cell, i) => {
+                  const selected = date?.toDateString() === cell.date.toDateString();
+                  return (
+                    <TouchableOpacity
+                      key={i}
+                      style={[
+                        psm.dayCell,
+                        !cell.selectable && psm.dayDisabled,
+                        selected && { backgroundColor: brandColor },
+                      ]}
+                      disabled={!cell.selectable}
+                      onPress={() => { setDate(cell.date); setStep('time'); }}
+                    >
+                      <Text style={[
+                        psm.dayText,
+                        !cell.selectable && psm.dayTextDisabled,
+                        selected && { color: '#fff' },
+                      ]}>
+                        {cell.date.getDate()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity onPress={() => setStep('date')} style={{ marginBottom: 8 }}>
+                <Text style={{ color: brandColor, fontWeight: '600' }}>← {formatDateLabel(date)}</Text>
+              </TouchableOpacity>
+              <Text style={psm.label}>Select a time</Text>
+              <ScrollView style={{ maxHeight: 280 }}>
+                <View style={psm.slotGrid}>
+                  {slots.map((slot) => {
+                    const selected = selectedSlot && new Date(selectedSlot).getTime() === slot.getTime();
+                    return (
+                      <TouchableOpacity
+                        key={slot.toISOString()}
+                        style={[
+                          psm.slotChip,
+                          selected && { backgroundColor: brandColor, borderColor: brandColor },
+                        ]}
+                        onPress={() => { onSelect(slot); onClose(); }}
+                      >
+                        <Text style={[psm.slotText, selected && { color: '#fff' }]}>
+                          {formatDateTo12(slot)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {slots.length === 0 ? (
+                    <Text style={{ color: '#697386', fontSize: 13 }}>No available times this day.</Text>
+                  ) : null}
+                </View>
+              </ScrollView>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const psm = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  sheet: { backgroundColor: '#fff', borderRadius: 14, padding: 20, width: '100%', maxWidth: 460 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  title: { fontSize: 17, fontWeight: '800', color: '#111' },
+  closeBtn: { padding: 4 },
+  note: { fontSize: 13, color: '#697386', marginBottom: 14, lineHeight: 18 },
+  label: { fontSize: 13, fontWeight: '700', color: '#0a2540', marginBottom: 8 },
+  monthLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 8 },
+  weekdayRow: { flexDirection: 'row', marginBottom: 4 },
+  weekday: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '600', color: '#999' },
+  calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayCell: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  dayDisabled: { opacity: 0.35 },
+  dayText: { fontSize: 14, fontWeight: '600', color: '#111' },
+  dayTextDisabled: { color: '#aaa' },
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  slotChip: {
+    borderWidth: 1.5,
+    borderColor: '#e3e8ee',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  slotText: { fontSize: 13, fontWeight: '600', color: '#697386' },
+});
 
 // ─── Inner form — must live inside <Elements> to use Stripe hooks ─────────────
 function CheckoutForm({
@@ -48,10 +254,12 @@ function CheckoutForm({
   onPromoApplied,
   onPromoCleared,
   pricing,
-  orderType,
-  setOrderType,
-  scheduledTime,
-  setScheduledTime,
+  readyOption,
+  setReadyOption,
+  scheduledSlot,
+  setScheduledSlot,
+  locations,
+  selectedLocationId,
   notes,
   setNotes,
   summaryOpen,
@@ -66,6 +274,52 @@ function CheckoutForm({
 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [scheduleVisible, setScheduleVisible] = useState(false);
+  const [locationError, setLocationError] = useState(null);
+
+  const allowAsap = useMemo(
+    () => canOrderAsap(restaurant?.hours_of_operation),
+    [restaurant?.hours_of_operation],
+  );
+  const readyOptions = useMemo(
+    () => getAsapReadyOptions(restaurant?.hours_of_operation),
+    [restaurant?.hours_of_operation],
+  );
+
+  useEffect(() => {
+    if (!allowAsap) {
+      if (readyOption !== 'schedule') setReadyOption('schedule');
+      return;
+    }
+    if (readyOption === 'schedule') return;
+    if (!readyOptions.some((o) => o.key === readyOption)) {
+      setReadyOption(readyOptions[0]?.key || 'ASAP');
+    }
+  }, [allowAsap, readyOptions, readyOption, setReadyOption]);
+
+  const selectedLocation = useMemo(
+    () => resolvePickupLocation(locations, selectedLocationId),
+    [locations, selectedLocationId],
+  );
+
+  const summaryScheduledLabel = useMemo(() => {
+    if (readyOption === 'ASAP' && allowAsap) return 'ASAP';
+    if (scheduledSlot) {
+      return `${formatDateLabel(scheduledSlot)} at ${formatDateTo12(scheduledSlot)}`;
+    }
+    const opt = readyOptions.find((o) => o.key === readyOption);
+    return opt?.label || null;
+  }, [readyOption, allowAsap, scheduledSlot, readyOptions]);
+
+  const resolveScheduledTimeIso = useCallback(() => {
+    if (readyOption === 'ASAP' && allowAsap) return null;
+    if (scheduledSlot) return new Date(scheduledSlot).toISOString();
+    const opt = readyOptions.find((o) => o.key === readyOption);
+    if (opt && opt.minutesFromNow > 0) {
+      return new Date(Date.now() + opt.minutesFromNow * 60 * 1000).toISOString();
+    }
+    return null;
+  }, [readyOption, allowAsap, scheduledSlot, readyOptions]);
 
   const validateContact = () => {
     if (isSignedIn) return true;
@@ -83,10 +337,29 @@ function CheckoutForm({
     if (!paymentReady) return;
     if (!validateContact()) return;
 
+    if (!allowAsap && !scheduledSlot) {
+      Alert.alert('Pickup time required', 'Please choose a pickup date and time.');
+      return;
+    }
+    if (readyOption === 'schedule' && !scheduledSlot) {
+      Alert.alert('Pickup time required', 'Please choose a pickup date and time.');
+      return;
+    }
+    if (!isPickupLocationReady(locations, selectedLocationId)) {
+      setLocationError('Please choose which store location you want to pick up from.');
+      Alert.alert(
+        'Pickup location required',
+        'Please choose which location you would like to pick up from.',
+      );
+      return;
+    }
+    setLocationError(null);
+
     const name = contact.name.trim();
     const phone = contact.phone.trim();
     const email = contact.email.trim();
     const marketingOptIn = contact.marketingOptIn;
+    const scheduledTimeIso = resolveScheduledTimeIso();
 
     setLoading(true);
 
@@ -131,13 +404,14 @@ function CheckoutForm({
         subtotal: cartSubtotal,
         tax,
         total,
-        orderType,
-        scheduledTime: scheduledTime === 'ASAP' ? null : scheduledTime,
+        orderType: 'pickup',
+        scheduledTime: scheduledTimeIso,
         notes: notes || null,
         paymentIntentId: paymentIntent?.id,
         promoCodeId: appliedPromo?.id || null,
         promoCode: appliedPromo?.code || null,
         discountAmount: discountAmount || 0,
+        pickupLocationId: toPersistablePickupLocationId(selectedLocation),
       });
 
       let pointsEarned = 0;
@@ -163,7 +437,20 @@ function CheckoutForm({
       }
 
       clearCart();
-      navigation.replace('Confirmation', { order, pointsEarned });
+      navigation.replace('Confirmation', {
+        order: {
+          ...order,
+          pickup_location: selectedLocation
+            ? {
+                id: toPersistablePickupLocationId(selectedLocation),
+                name: selectedLocation.name,
+                address: selectedLocation.address,
+                is_main: Boolean(selectedLocation.is_main),
+              }
+            : null,
+        },
+        pointsEarned,
+      });
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -182,8 +469,8 @@ function CheckoutForm({
         total={total}
         discountAmount={discountAmount}
         promoCode={appliedPromo?.code}
-        orderType={orderType}
-        scheduledTime={scheduledTime}
+        orderType="pickup"
+        scheduledTime={summaryScheduledLabel}
       />
     </View>
   );
@@ -277,59 +564,115 @@ function CheckoutForm({
       {/* ── Order Details ────────────────────────── */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>Order Details</Text>
-        <View style={s.toggleRow}>
-          {ORDER_TYPES.map((type) => {
-            const selected = orderType === type;
-            return (
+        <View style={[s.toggleBtn, { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand, flex: 0, paddingHorizontal: 16 }]}>
+          <Text style={[s.toggleText, { color: '#fff' }]}>Pickup</Text>
+        </View>
+
+        <Text style={[s.fieldLabel, { marginTop: 16 }]}>
+          {allowAsap ? 'Ready Time' : 'Pickup Time'}
+        </Text>
+        {!allowAsap ? (
+          <Text style={{ fontSize: 13, color: '#697386', marginTop: 4, marginBottom: 4, lineHeight: 18 }}>
+            We&apos;re closed or closing soon. Please schedule a pickup during open hours.
+          </Text>
+        ) : null}
+
+        {allowAsap ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+            <View style={s.timeRow}>
+              {readyOptions.map((opt) => {
+                const selected = readyOption === opt.key && !scheduledSlot;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[
+                      s.timeChip,
+                      selected && { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
+                    ]}
+                    onPress={() => {
+                      setScheduledSlot(null);
+                      setReadyOption(opt.key);
+                    }}
+                  >
+                    <Text style={[s.timeChipText, selected && { color: '#fff' }]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
               <TouchableOpacity
-                key={type}
                 style={[
-                  s.toggleBtn,
-                  selected && { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
+                  s.timeChip,
+                  (readyOption === 'schedule' || scheduledSlot) && {
+                    backgroundColor: theme.colors.brand,
+                    borderColor: theme.colors.brand,
+                  },
                 ]}
-                onPress={() => setOrderType(type)}
+                onPress={() => {
+                  setReadyOption('schedule');
+                  setScheduleVisible(true);
+                }}
               >
-                <Text style={[s.toggleText, selected && { color: '#fff' }]}>
-                  {type.charAt(0).toUpperCase() + type.slice(1)}
+                <Text style={[
+                  s.timeChipText,
+                  (readyOption === 'schedule' || scheduledSlot) && { color: '#fff' },
+                ]}>
+                  {scheduledSlot
+                    ? `${formatDateLabel(scheduledSlot)} ${formatDateTo12(scheduledSlot)}`
+                    : 'Schedule…'}
                 </Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
-        <Text style={[s.fieldLabel, { marginTop: 16 }]}>Ready Time</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-          <View style={s.timeRow}>
-            {TIME_OPTIONS.map((opt) => {
-              const selected = scheduledTime === opt;
-              return (
-                <TouchableOpacity
-                  key={opt}
-                  style={[
-                    s.timeChip,
-                    selected && { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
-                  ]}
-                  onPress={() => setScheduledTime(opt)}
-                >
-                  <Text style={[s.timeChipText, selected && { color: '#fff' }]}>{opt}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </ScrollView>
-
-        {orderType === 'pickup' && (
-          <View style={{ marginTop: 20 }}>
-            <Text style={s.fieldLabel}>Pickup Location</Text>
-            <View style={{ marginTop: 8 }}>
-              <LocationCard
-                restaurant={restaurant}
-                variant="compact"
-                brandColor={theme.colors.brand}
-              />
             </View>
-          </View>
+          </ScrollView>
+        ) : (
+          <TouchableOpacity
+            style={[
+              s.scheduleBtn,
+              scheduledSlot && { borderColor: theme.colors.brand },
+            ]}
+            onPress={() => setScheduleVisible(true)}
+          >
+            <Ionicons name="calendar-outline" size={16} color={theme.colors.brand} />
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#0a2540', marginLeft: 8 }}>
+              {scheduledSlot
+                ? `${formatDateLabel(scheduledSlot)} at ${formatDateTo12(scheduledSlot)}`
+                : 'Choose pickup date & time'}
+            </Text>
+          </TouchableOpacity>
         )}
+
+        <View style={{ marginTop: 20 }}>
+          <PickupLocationPicker
+            locations={locations}
+            selectedLocationId={selectedLocationId}
+            restaurant={restaurant}
+            brandColor={theme.colors.brand}
+            readOnly
+          />
+          {locationError ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={{ fontSize: 12, color: '#c0392b', marginBottom: 6 }}>
+                {locationError}
+              </Text>
+              <TouchableOpacity onPress={() => navigation?.navigate?.('Menu')}>
+                <Text style={{ color: theme.colors.brand, fontWeight: '600', fontSize: 13 }}>
+                  Choose a pickup location on the menu →
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
       </View>
+
+      <PickupScheduleModal
+        visible={scheduleVisible}
+        onClose={() => setScheduleVisible(false)}
+        restaurant={restaurant}
+        brandColor={theme.colors.brand}
+        selectedSlot={scheduledSlot}
+        onSelect={(slot) => {
+          setScheduledSlot(slot);
+          setReadyOption('schedule');
+        }}
+      />
 
       <View style={s.sectionDivider} />
 
@@ -353,7 +696,7 @@ function CheckoutForm({
         <Text style={s.sectionLabel}>Special Instructions</Text>
         <TextInput
           style={[s.input, s.textArea]}
-          placeholder="Allergies, requests, delivery notes…"
+          placeholder="Allergies, requests, special notes…"
           value={notes}
           onChangeText={setNotes}
           multiline
@@ -440,6 +783,12 @@ export default function CheckoutScreen({ navigation }) {
   const { items, subtotal: cartSubtotal } = useCartContext();
   const { theme } = useTheme();
   const { user, customerProfile, isCustomerAuthenticated } = useAuth();
+  const {
+    locations,
+    selectedLocationId,
+    hasSelection,
+    loading: locationsLoading,
+  } = usePickupLocation();
   const { width } = useWindowDimensions();
   const isDesktop = width >= BREAKPOINT;
 
@@ -452,8 +801,10 @@ export default function CheckoutScreen({ navigation }) {
     marketingOptIn: false,
   });
   // Lifted so promo-driven PaymentIntent refresh does not wipe form edits
-  const [orderType, setOrderType] = useState('pickup');
-  const [scheduledTime, setScheduledTime] = useState('ASAP');
+  const [readyOption, setReadyOption] = useState(
+    () => (canOrderAsap(restaurant?.hours_of_operation) ? 'ASAP' : 'schedule'),
+  );
+  const [scheduledSlot, setScheduledSlot] = useState(null);
   const [notes, setNotes] = useState('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [clientSecret, setClientSecret] = useState(null);
@@ -518,6 +869,18 @@ export default function CheckoutScreen({ navigation }) {
       email: c.email || customerProfile?.email || user.email || '',
     }));
   }, [isCustomerAuthenticated, user, customerProfile]);
+
+  // Location is chosen on Menu; if missing for multi-store, send user back.
+  useEffect(() => {
+    if (locationsLoading) return;
+    if (locations.length < 2) return;
+    if (hasSelection) return;
+    Alert.alert(
+      'Pickup location needed',
+      'Please choose which location you are ordering for on the menu.',
+      [{ text: 'OK', onPress: () => navigation?.navigate?.('Menu') }],
+    );
+  }, [locationsLoading, locations.length, hasSelection, navigation]);
 
   const stripePromise = useMemo(() => {
     const pk = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
@@ -636,10 +999,12 @@ export default function CheckoutScreen({ navigation }) {
             onPromoApplied={setAppliedPromo}
             onPromoCleared={() => setAppliedPromo(null)}
             pricing={pricing}
-            orderType={orderType}
-            setOrderType={setOrderType}
-            scheduledTime={scheduledTime}
-            setScheduledTime={setScheduledTime}
+            readyOption={readyOption}
+            setReadyOption={setReadyOption}
+            scheduledSlot={scheduledSlot}
+            setScheduledSlot={setScheduledSlot}
+            locations={locations}
+            selectedLocationId={selectedLocationId}
             notes={notes}
             setNotes={setNotes}
             summaryOpen={summaryOpen}
@@ -867,6 +1232,17 @@ function makeFormStyles(theme) {
       fontSize: 14,
       fontWeight: '500',
       color: '#697386',
+    },
+    scheduleBtn: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1.5,
+      borderColor: '#e3e8ee',
+      borderRadius: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      backgroundColor: '#fff',
     },
 
     paymentElementWrap: {

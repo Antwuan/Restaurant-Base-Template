@@ -14,11 +14,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useAuth } from '../../context/AuthContext';
+import { usePickupLocation } from '../../context/PickupLocationContext';
 import { useMenu } from '../../hooks/useMenu';
 import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
 import CategorySection from '../../components/CategorySection';
 import MenuItemModal from '../../components/MenuItemModal';
+import PickupLocationPicker from '../../components/PickupLocationPicker';
 
 const SIDEBAR_WIDTH = 188;
 const DESKTOP_BREAKPOINT = 768;
@@ -26,6 +29,15 @@ const NAVBAR_OFFSET = 60;
 
 export default function MenuScreen() {
   const { restaurant } = useRestaurantContext();
+  const { customerProfile, isCustomerAuthenticated, user } = useAuth();
+  const {
+    locations,
+    selectedLocationId,
+    selectedLocation,
+    setPickupLocation,
+    hasSelection,
+    loading: locationsLoading,
+  } = usePickupLocation();
   const {
     categoriesWithItems,
     menuByCategory,
@@ -39,6 +51,11 @@ export default function MenuScreen() {
   const { width } = useWindowDimensions();
 
   const isDesktop = width >= DESKTOP_BREAKPOINT;
+  const greetName =
+    customerProfile?.first_name
+    || user?.user_metadata?.first_name
+    || null;
+  const multiLocation = locations.length >= 2;
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState(null);
@@ -228,6 +245,38 @@ export default function MenuScreen() {
             </Text>
           </View>
         )}
+
+        {/* ── Pickup location (compact summary → popup with map) ── */}
+        {!locationsLoading && (multiLocation || selectedLocation) ? (
+          <View style={styles.pickupSection}>
+            <View style={styles.pickupSectionInner}>
+              {multiLocation && !hasSelection ? (
+                <Text style={styles.pickupGreeting}>
+                  {greetName
+                    ? `Welcome, ${greetName}!`
+                    : isCustomerAuthenticated
+                      ? 'Welcome!'
+                      : 'Welcome — where are you picking up?'}
+                </Text>
+              ) : null}
+              <PickupLocationPicker
+                locations={locations}
+                selectedLocationId={selectedLocationId}
+                onSelect={(id) => setPickupLocation(id)}
+                restaurant={restaurant}
+                brandColor={theme.colors.brand}
+                label=""
+                compact
+                autoOpenWhenUnset={multiLocation && !hasSelection}
+              />
+              {multiLocation && !hasSelection ? (
+                <Text style={styles.pickupHint}>
+                  Choose a location to continue ordering.
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
 
         {/* ── Two-column layout: sidebar + menu items ── */}
         {isEmpty ? (
@@ -488,6 +537,31 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  // ── Pickup location
+  pickupSection: {
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e8e8e8',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  pickupSectionInner: {
+    width: '100%',
+    maxWidth: 1080,
+    alignSelf: 'center',
+  },
+  pickupGreeting: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0a2540',
+    marginBottom: 10,
+  },
+  pickupHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#c0392b',
   },
 
   // ── Menu layout (no flex:1 — lets outer ScrollView grow with content)

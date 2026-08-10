@@ -20,9 +20,14 @@ import { useTheme } from '../theme';
  * - Hover: card lifts (web shadow + translateY). Image subtly zooms.
  * - Press "+": spring pop + brief success pulse on the button.
  */
-const MenuItem = ({ item, onAddToCart, onItemPress, index = 0 }) => {
+const CARD_HEIGHT_DEFAULT = 150;
+const CARD_HEIGHT_CATERING = 180;
+const MEDIA_WIDTH = '42%';
+
+const MenuItem = ({ item, onAddToCart, onItemPress, index = 0, variant = 'default' }) => {
   const { theme } = useTheme();
   const isUnavailable = !item.is_available;
+  const cardHeight = variant === 'catering' ? CARD_HEIGHT_CATERING : CARD_HEIGHT_DEFAULT;
 
   // Card hover / lift animation (web only)
   const cardShadowY = useRef(new Animated.Value(0)).current;
@@ -110,7 +115,7 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0 }) => {
       <TouchableOpacity
         activeOpacity={isUnavailable ? 1 : 0.88}
         onPress={handlePress}
-        style={[styles.card, isUnavailable && styles.cardUnavailable]}
+        style={[styles.card, { minHeight: cardHeight }, isUnavailable && styles.cardUnavailable]}
         accessibilityLabel={`${item.name}, $${Number(item.price ?? 0).toFixed(2)}${isUnavailable ? ', unavailable' : ''}`}
         {...webHoverProps}
       >
@@ -125,7 +130,7 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0 }) => {
           {item.description ? (
             <Text
               style={[styles.description, { color: theme.colors.brand }, isUnavailable && styles.textMuted]}
-              numberOfLines={3}
+              numberOfLines={variant === 'catering' ? 4 : 3}
             >
               {item.description}
             </Text>
@@ -139,19 +144,20 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0 }) => {
 
         {/* Right: full-height image with floating add button */}
         <View style={styles.media}>
-          <View style={styles.imageClip}>
+          <View style={[styles.imageClip, { minHeight: cardHeight }]}>
             {item.image_url ? (
               <Animated.Image
                 source={{ uri: item.image_url }}
                 style={[
                   styles.image,
+                  { minHeight: cardHeight },
                   isUnavailable && styles.imageUnavailable,
                   { transform: [{ scale: imageScale }] },
                 ]}
                 resizeMode="cover"
               />
             ) : (
-              <View style={[styles.image, styles.imagePlaceholder]}>
+              <View style={[styles.image, { minHeight: cardHeight }, styles.imagePlaceholder]}>
                 <Ionicons name="restaurant-outline" size={28} color="#cbd5e1" />
               </View>
             )}
@@ -175,9 +181,6 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0 }) => {
   );
 };
 
-const CARD_HEIGHT = 150;
-const MEDIA_WIDTH = '42%';
-
 const styles = StyleSheet.create({
   cardWrap: {
     borderRadius: 16,
@@ -191,7 +194,7 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    minHeight: CARD_HEIGHT,
+    minHeight: CARD_HEIGHT_DEFAULT,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#ececec',
@@ -246,13 +249,13 @@ const styles = StyleSheet.create({
   imageClip: {
     width: '100%',
     height: '100%',
-    minHeight: CARD_HEIGHT,
+    minHeight: CARD_HEIGHT_DEFAULT,
     overflow: 'hidden',
   },
   image: {
     width: '100%',
     height: '100%',
-    minHeight: CARD_HEIGHT,
+    minHeight: CARD_HEIGHT_DEFAULT,
     backgroundColor: '#f3f4f6',
   },
   imageUnavailable: {

@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase';
 import { sendOrderEmail } from './emailApi';
+import { toPersistablePickupLocationId } from './locationsService';
 
 export function validateOrderData(orderData) {
   const errors = [];
@@ -41,6 +42,7 @@ export async function createOrder(orderData) {
       promo_code_id: orderData.promoCodeId || null,
       promo_code: orderData.promoCode || null,
       discount_amount: orderData.discountAmount != null ? orderData.discountAmount : 0,
+      pickup_location_id: toPersistablePickupLocationId(orderData.pickupLocationId),
     },
   });
 
@@ -76,7 +78,7 @@ export async function getBookedCateringSlots(restaurantId, fromISO, toISO) {
 export async function getOrders(restaurantId, filters = {}) {
   let query = supabase
     .from('orders')
-    .select('*')
+    .select('*, pickup_location:restaurant_locations(id, name, address)')
     .eq('restaurant_id', restaurantId)
     .order('created_at', { ascending: false });
 

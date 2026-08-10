@@ -33,15 +33,22 @@ import { useCartContext } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../theme';
 import MenuItemModal from '../../components/MenuItemModal';
-import LocationModal from '../../components/LocationModal';
 import MenuItem from '../../components/MenuItem';
 import OrderSummary from '../../components/OrderSummary';
 import PromoCodeInput from '../../components/PromoCodeInput';
+import PickupLocationPicker, {
+  isPickupLocationReady,
+  resolvePickupLocation,
+} from '../../components/PickupLocationPicker';
 import { createPaymentIntent } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
 import { applyPromoToTotals } from '../../services/promoService';
+import {
+  listPickupOptions,
+  toPersistablePickupLocationId,
+} from '../../services/locationsService';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import {
@@ -304,6 +311,7 @@ function CateringCheckoutForm({
   brandColor,
   restaurant,
   scheduledSlot,
+  pickupLocation,
   onBack,
   contact,
   onEditContact,
@@ -366,6 +374,7 @@ function CateringCheckoutForm({
         promoCodeId: appliedPromo?.id || null,
         promoCode: appliedPromo?.code || null,
         discountAmount: discountAmount || 0,
+        pickupLocationId: toPersistablePickupLocationId(pickupLocation),
       });
 
       let pointsEarned = 0;
@@ -391,7 +400,20 @@ function CateringCheckoutForm({
       }
 
       clearCart('catering');
-      navigation.replace('Confirmation', { order, pointsEarned });
+      navigation.replace('Confirmation', {
+        order: {
+          ...order,
+          pickup_location: pickupLocation
+            ? {
+                id: toPersistablePickupLocationId(pickupLocation),
+                name: pickupLocation.name,
+                address: pickupLocation.address,
+                is_main: Boolean(pickupLocation.is_main),
+              }
+            : null,
+        },
+        pointsEarned,
+      });
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -418,6 +440,21 @@ function CateringCheckoutForm({
             orderType="pickup"
             scheduledTime={scheduledSlot ? scheduledSlot.toISOString() : null}
           />
+          {(pickupLocation?.name || pickupLocation?.address) ? (
+            <View style={[cf.scheduleBox, { borderColor: brandColor, marginBottom: scheduledSlot ? 8 : 0 }]}>
+              <Ionicons name="storefront-outline" size={16} color={brandColor} />
+              <View style={{ flex: 1 }}>
+                <Text style={[cf.scheduleBoxText, { color: '#333', fontWeight: '700' }]}>
+                  Pickup location: {pickupLocation.name || 'Store'}
+                </Text>
+                {pickupLocation.address ? (
+                  <Text style={{ fontSize: 12, color: '#697386', marginTop: 2, lineHeight: 16 }}>
+                    {pickupLocation.address}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
           {scheduledSlot && (
             <View style={[cf.scheduleBox, { borderColor: brandColor }]}>
               <Ionicons name="calendar-outline" size={16} color={brandColor} />
@@ -736,8 +773,10 @@ export default function CateringScreen({ navigation }) {
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [scheduleVisible, setScheduleVisible] = useState(false);
-  const [locationVisible, setLocationVisible] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
+  const [locations, setLocations] = useState([]);
+  const [selectedLocationId, setSelectedLocationId] = useState(null);
+  const [locationError, setLocationError] = useState(null);
   const [phase, setPhase] = useState('menu'); // 'menu' | 'checkout'
   const [clientSecret, setClientSecret] = useState(null);
   const [piError, setPiError] = useState(null);
@@ -797,6 +836,38 @@ export default function CateringScreen({ navigation }) {
     }
   }, [cartItems, appliedPromo]);
 
+  useEffect(() => {
+    if (!restaurant?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const options = await listPickupOptions(restaurant);
+        if (cancelled) return;
+        setLocations(options);
+        setSelectedLocationId((prev) => {
+          if (prev && options.some((r) => r.id === prev)) return prev;
+          // Single store: auto-select. Multiple: require an intentional choice.
+          if (options.length === 1) return options[0].id;
+          return null;
+        });
+      } catch {
+        if (!cancelled) setLocations([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [restaurant?.id, restaurant?.name, restaurant?.address]);
+
+  const selectedLocation = useMemo(
+    () => resolvePickupLocation(locations, selectedLocationId),
+    [locations, selectedLocationId],
+  );
+
+  const displayAddress = selectedLocation?.address || restaurant?.address || '';
+  const displayLocationName = selectedLocation?.name
+    || (locations.length === 1 ? locations[0].name : null)
+    || restaurant?.name
+    || 'Restaurant';
+
   const hasConnectAccount = Boolean(restaurant?.stripe_account_id);
   const closedLabel = getClosedUntilLabel(restaurant?.hours_of_operation);
 
@@ -828,8 +899,8 @@ export default function CateringScreen({ navigation }) {
   }, [categoriesWithItems, menuByCategory]);
 
   const handleDirections = () => {
-    if (!restaurant?.address) return;
-    Linking.openURL(`https://maps.google.com/?q=${encodeURIComponent(restaurant.address)}`);
+    if (!displayAddress) return;
+    Linking.openURL(`https://maps.google.com/?q=${encodeURIComponent(displayAddress)}`);
   };
 
   const handleCall = () => {
@@ -842,6 +913,15 @@ export default function CateringScreen({ navigation }) {
       setScheduleVisible(true);
       return;
     }
+    if (!isPickupLocationReady(locations, selectedLocationId)) {
+      setLocationError('Please choose which store location you want to pick up from.');
+      Alert.alert(
+        'Pickup location required',
+        'Please choose which location you would like to pick up from.',
+      );
+      return;
+    }
+    setLocationError(null);
     setPhase('checkout');
     setClientSecret(null);
     setPiError(null);
@@ -972,6 +1052,7 @@ export default function CateringScreen({ navigation }) {
           brandColor={brandColor}
           restaurant={restaurant}
           scheduledSlot={selectedSlot}
+          pickupLocation={selectedLocation}
           onBack={handleBack}
           contact={{
             ...contact,
@@ -1001,13 +1082,13 @@ export default function CateringScreen({ navigation }) {
         <View style={s.header}>
           <View style={s.metaRow}>
             <View style={s.metaItem}>
-              <Ionicons name="location-outline" size={14} color={brandColor} />
-              <Text style={[s.metaText, { color: brandColor }]}>{restaurant?.name || 'Restaurant'}</Text>
+              <Ionicons name="storefront-outline" size={14} color={brandColor} />
+              <Text style={[s.metaText, { color: brandColor }]}>{displayLocationName}</Text>
             </View>
-            {restaurant?.address ? (
+            {displayAddress ? (
               <TouchableOpacity style={s.metaItem} onPress={handleDirections}>
                 <Ionicons name="navigate-outline" size={14} color={brandColor} />
-                <Text style={[s.metaText, { color: brandColor }]}>{restaurant.address}</Text>
+                <Text style={[s.metaText, { color: brandColor }]}>{displayAddress}</Text>
               </TouchableOpacity>
             ) : null}
             {restaurant?.phone ? (
@@ -1048,40 +1129,23 @@ export default function CateringScreen({ navigation }) {
             ) : (
               categoriesWithItems.map((category) => {
                 const items = (menuByCategory[category.id]?.items || []);
-                // Pair items into rows of 2 on desktop
-                const rows = [];
-                if (isDesktop) {
-                  for (let i = 0; i < items.length; i += 2) rows.push(items.slice(i, i + 2));
-                }
                 return (
                   <View key={category.id} style={s.categoryBlock}>
                     {categoriesWithItems.length > 1 && (
                       <Text style={s.categoryName}>{category.name}</Text>
                     )}
-                    {isDesktop ? (
-                      rows.map((row, ri) => (
-                        <View key={ri} style={s.gridRow}>
-                          {row.map((item) => (
-                            <MenuItem
-                              key={item.id}
-                              item={item}
-                              onItemPress={handleItemPress}
-                              onAddToCart={handleItemPress}
-                            />
-                          ))}
-                          {row.length === 1 && <View style={{ flex: 1 }} />}
+                    <View style={[s.menuGrid, isDesktop && s.menuGridDesktop]}>
+                      {items.map((item) => (
+                        <View key={item.id} style={[s.menuCell, isDesktop && s.menuCellDesktop]}>
+                          <MenuItem
+                            item={item}
+                            variant="catering"
+                            onItemPress={handleItemPress}
+                            onAddToCart={handleItemPress}
+                          />
                         </View>
-                      ))
-                    ) : (
-                      items.map((item) => (
-                        <MenuItem
-                          key={item.id}
-                          item={item}
-                          onItemPress={handleItemPress}
-                          onAddToCart={handleItemPress}
-                        />
-                      ))
-                    )}
+                      ))}
+                    </View>
                   </View>
                 );
               })
@@ -1092,39 +1156,26 @@ export default function CateringScreen({ navigation }) {
           <View style={[s.orderCol, isDesktop && s.orderColDesktop]}>
             <Text style={s.orderHeading}>Your Order</Text>
 
-            {/* Pickup / Delivery toggle */}
-            <View style={s.toggleRow}>
-              <TouchableOpacity style={[s.toggleBtn, { backgroundColor: brandColor, borderColor: brandColor }]} activeOpacity={0.9}>
-                <Ionicons name="walk-outline" size={15} color="#fff" />
-                <Text style={[s.toggleText, { color: '#fff' }]}>Pickup</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={s.toggleBtnOutline}
-                onPress={() => Alert.alert('Pickup Only', 'Catering orders are pickup only.')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="car-outline" size={15} color="#555" />
-                <Text style={[s.toggleText, { color: '#555' }]}>Delivery</Text>
-              </TouchableOpacity>
+            <View style={s.pickupOnlyBadge}>
+              <Ionicons name="walk-outline" size={15} color={brandColor} />
+              <Text style={[s.pickupOnlyText, { color: brandColor }]}>Pickup only</Text>
             </View>
 
             {/* Location + time card */}
             <View style={s.infoCard}>
-              <View style={s.infoRow}>
-                <View style={s.infoRowText}>
-                  <Text style={s.infoLabel}>Pickup location</Text>
-                  <Text style={s.infoValueBold}>{restaurant?.name || 'Restaurant'}</Text>
-                  {restaurant?.address ? (
-                    <Text style={s.infoValue}>{restaurant.address}</Text>
-                  ) : null}
-                  {restaurant?.phone ? (
-                    <Text style={s.infoValueMuted}>{restaurant.phone}</Text>
-                  ) : null}
-                </View>
-                <TouchableOpacity style={s.smallBtn} onPress={() => setLocationVisible(true)}>
-                  <Text style={s.smallBtnText}>View</Text>
-                </TouchableOpacity>
-              </View>
+              <PickupLocationPicker
+                locations={locations}
+                selectedLocationId={selectedLocationId}
+                onSelect={(id) => {
+                  setSelectedLocationId(id);
+                  setLocationError(null);
+                }}
+                restaurant={restaurant}
+                brandColor={brandColor}
+                error={locationError}
+                compact
+                autoOpenWhenUnset={locations.length >= 2 && !selectedLocationId}
+              />
 
               <View style={s.infoDivider} />
 
@@ -1228,12 +1279,6 @@ export default function CateringScreen({ navigation }) {
         suggestedItems={getSuggestedItems(selectedItem)}
         menuType="catering"
       />
-      <LocationModal
-        visible={locationVisible}
-        onClose={() => setLocationVisible(false)}
-        restaurant={restaurant}
-        brandColor={brandColor}
-      />
       <ScheduleModal
         visible={scheduleVisible}
         onClose={() => setScheduleVisible(false)}
@@ -1287,45 +1332,38 @@ const s = StyleSheet.create({
 
   // Body
   body: { paddingHorizontal: 24, paddingTop: 20 },
-  bodyDesktop: { flexDirection: 'row', gap: 36, maxWidth: 1280, width: '100%', alignSelf: 'center' },
+  bodyDesktop: { flexDirection: 'row', gap: 36, maxWidth: 1440, width: '100%', alignSelf: 'center' },
 
   // Menu column
   menuCol: {},
-  menuColDesktop: { flex: 7 },
+  menuColDesktop: { flex: 9 },
   menuHeading: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 4 },
   categoryBlock: { marginBottom: 16 },
   categoryName: { fontSize: 14, fontWeight: '700', color: '#333', marginTop: 16, marginBottom: 4 },
-  gridRow: { flexDirection: 'row', gap: 28 },
+  menuGrid: { flexDirection: 'column', rowGap: 14 },
+  menuGridDesktop: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -7 },
+  menuCell: { width: '100%' },
+  menuCellDesktop: { width: '50%', paddingHorizontal: 7, marginBottom: 14 },
 
   // Order column
   orderCol: { marginTop: 24 },
-  orderColDesktop: { flex: 4, marginTop: 0, borderLeftWidth: 1, borderLeftColor: '#f0f0f0', paddingLeft: 28 },
+  orderColDesktop: { flex: 3, marginTop: 0, borderLeftWidth: 1, borderLeftColor: '#f0f0f0', paddingLeft: 28 },
   orderHeading: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 14 },
 
-  toggleRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  toggleBtn: {
-    flex: 1,
+  pickupOnlyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
+    alignSelf: 'flex-start',
     borderWidth: 1.5,
+    borderColor: '#eee',
     borderRadius: 8,
-    paddingVertical: 11,
-  },
-  toggleBtnOutline: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: 1.5,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 14,
     backgroundColor: '#fafafa',
   },
-  toggleText: { fontSize: 13, fontWeight: '700' },
+  pickupOnlyText: { fontSize: 13, fontWeight: '700' },
 
   // Info card — enlarged pickup location + time
   infoCard: {

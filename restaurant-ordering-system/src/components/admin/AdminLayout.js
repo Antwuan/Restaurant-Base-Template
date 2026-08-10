@@ -8,7 +8,9 @@ import {
   Text,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AdminSidebar, { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from './AdminSidebar';
+import AdminSidebar, { NAV_ITEMS } from './AdminSidebar';
+import FocusModeUnlockModal from './FocusModeUnlockModal';
+import { FocusModeProvider, useFocusMode } from '../../context/FocusModeContext';
 import { useTheme } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { confirmAsync } from '../../utils/confirm';
@@ -42,13 +44,21 @@ const MOBILE_BREAKPOINT = 540;
 /** Block Sign Out re-entry after cancel (click-through under dismissing modal). */
 const SIGN_OUT_CANCEL_GUARD_MS = 450;
 
-export default function AdminLayout() {
+function firstAllowedSection(allowedTabs) {
+  const match = NAV_ITEMS.find((item) => allowedTabs.includes(item.key));
+  return match?.key ?? 'Orders';
+}
+
+function AdminLayoutInner() {
   const { width } = useWindowDimensions();
   const { theme } = useTheme();
   const { signOut } = useAuth();
+  const { enabled, allowedTabs, sessionUnlocked, isTabAllowed } = useFocusMode();
 
   const [activeSection, setActiveSection] = useState('Orders');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [unlockVisible, setUnlockVisible] = useState(false);
+  const pendingSectionRef = useRef(null);
   const signOutGuardUntilRef = useRef(0);
   const signOutInFlightRef = useRef(false);
 
@@ -59,6 +69,28 @@ export default function AdminLayout() {
   useEffect(() => {
     if (!isMobile) setMobileMenuOpen(false);
   }, [isMobile]);
+
+  // If Focus Mode turns on while viewing a locked tab, bounce to an allowed one.
+  useEffect(() => {
+    if (!enabled || sessionUnlocked) return;
+    if (!isTabAllowed(activeSection)) {
+      setActiveSection(firstAllowedSection(allowedTabs));
+    }
+  }, [enabled, sessionUnlocked, allowedTabs, activeSection, isTabAllowed]);
+
+  const openUnlock = useCallback((pendingKey = null) => {
+    pendingSectionRef.current = pendingKey;
+    setUnlockVisible(true);
+  }, []);
+
+  const handleUnlocked = useCallback(() => {
+    const pending = pendingSectionRef.current;
+    pendingSectionRef.current = null;
+    if (pending && pending !== 'UnlockFocus') {
+      setActiveSection(pending);
+    }
+    setMobileMenuOpen(false);
+  }, []);
 
   const handleNavigate = useCallback(async (key) => {
     if (key === 'SignOut') {
@@ -87,9 +119,20 @@ export default function AdminLayout() {
       }
       return;
     }
+
+    if (key === 'UnlockFocus') {
+      openUnlock(null);
+      return;
+    }
+
+    if (enabled && !sessionUnlocked && !isTabAllowed(key)) {
+      openUnlock(key);
+      return;
+    }
+
     setActiveSection(key);
     setMobileMenuOpen(false);
-  }, [signOut]);
+  }, [signOut, enabled, sessionUnlocked, isTabAllowed, openUnlock]);
 
   const ActiveScreen = SCREENS[activeSection] ?? OrdersScreen;
 
@@ -142,6 +185,17 @@ export default function AdminLayout() {
           <Text style={[styles.topBarTitle, { color: theme.colors.textPrimary }]}>
             {sectionTitle}
           </Text>
+          {enabled && !sessionUnlocked && (
+            <TouchableOpacity
+              style={styles.unlockChip}
+              onPress={() => openUnlock(null)}
+            >
+              <Ionicons name="lock-closed" size={14} color={theme.colors.textSecondary} />
+              <Text style={[styles.unlockChipText, { color: theme.colors.textSecondary }]}>
+                Focus
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Screen content */}
@@ -149,7 +203,24 @@ export default function AdminLayout() {
           <ActiveScreen />
         </View>
       </View>
+
+      <FocusModeUnlockModal
+        visible={unlockVisible}
+        onClose={() => {
+          pendingSectionRef.current = null;
+          setUnlockVisible(false);
+        }}
+        onUnlocked={handleUnlocked}
+      />
     </View>
+  );
+}
+
+export default function AdminLayout() {
+  return (
+    <FocusModeProvider>
+      <AdminLayoutInner />
+    </FocusModeProvider>
   );
 }
 
@@ -202,6 +273,20 @@ const styles = StyleSheet.create({
   topBarTitle: {
     fontSize: 18,
     fontWeight: '700',
+    flex: 1,
+  },
+  unlockChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  unlockChipText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   content: {
     flex: 1,
