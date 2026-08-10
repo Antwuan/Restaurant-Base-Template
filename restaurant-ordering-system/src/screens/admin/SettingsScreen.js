@@ -19,10 +19,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useFocusMode } from '../../context/FocusModeContext';
 import { useTheme } from '../../theme';
 import * as restaurantService from '../../services/restaurantService';
+import * as focusModeService from '../../services/focusModeService';
+import * as locationsService from '../../services/locationsService';
 import { manageEmailDomain } from '../../services/emailApi';
 import { confirmAsync } from '../../utils/confirm';
+import { NAV_ITEMS } from '../../components/admin/AdminSidebar';
 import {
   DAY_KEYS,
   DAY_LABELS,
@@ -136,6 +140,12 @@ export default function SettingsScreen() {
   const { signOut } = useAuth();
   const { restaurant, refreshRestaurant } = useRestaurantContext();
   const { theme, isDarkMode, setDarkMode } = useTheme();
+  const {
+    enabled: focusModeEnabled,
+    allowedTabs: focusAllowedTabs,
+    canAccessSettingsFreely,
+    unlockSession,
+  } = useFocusMode();
 
   const [phone, setPhone] = useState(restaurant?.phone ?? '');
   const [email, setEmail] = useState(restaurant?.email ?? '');
@@ -147,6 +157,15 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
+  // Focus Mode setup (only while enabling)
+  const [focusSetupOpen, setFocusSetupOpen] = useState(false);
+  const [focusTabSelection, setFocusTabSelection] = useState(() =>
+    NAV_ITEMS.map((item) => item.key),
+  );
+  const [focusPin, setFocusPin] = useState('');
+  const [focusPinConfirm, setFocusPinConfirm] = useState('');
+  const [focusBusy, setFocusBusy] = useState(false);
+
   // Email domain onboarding
   const [sendDomain, setSendDomain] = useState('');
   const [fromLocal, setFromLocal] = useState('hello');
@@ -155,10 +174,38 @@ export default function SettingsScreen() {
   const [domainStatus, setDomainStatus] = useState(restaurant?.email_domain_status ?? 'pending');
   const [fromEmailDisplay, setFromEmailDisplay] = useState(restaurant?.resend_from_email ?? '');
 
+  // Pickup locations
+  const [locations, setLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [locBusy, setLocBusy] = useState(false);
+  const [newLocName, setNewLocName] = useState('');
+  const [newLocAddress, setNewLocAddress] = useState('');
+  const [editingLocId, setEditingLocId] = useState(null);
+  const [editLocName, setEditLocName] = useState('');
+  const [editLocAddress, setEditLocAddress] = useState('');
+
   useEffect(() => {
     setDomainStatus(restaurant?.email_domain_status ?? 'pending');
     setFromEmailDisplay(restaurant?.resend_from_email ?? '');
   }, [restaurant?.email_domain_status, restaurant?.resend_from_email]);
+
+  const loadLocations = async () => {
+    if (!restaurant?.id) return;
+    setLocationsLoading(true);
+    try {
+      const rows = await locationsService.listLocations(restaurant.id);
+      setLocations(rows);
+    } catch {
+      setLocations([]);
+    } finally {
+      setLocationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLocations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restaurant?.id]);
 
   const updateDayHours = (dayKey, field, value) => {
     setHours((prev) => ({
@@ -178,12 +225,110 @@ export default function SettingsScreen() {
         is_accepting_orders: acceptingOrders,
         hours_of_operation: hours,
       });
+      // Main store is always offered from restaurants.address at checkout —
+      // do not auto-seed it into restaurant_locations (avoids duplicates).
       await refreshRestaurant();
       Alert.alert('Saved', 'Restaurant settings updated successfully.');
     } catch (e) {
       Alert.alert('Error', 'Could not save settings. Please try again.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAddLocation = async () => {
+    if (!restaurant?.id) return;
+    const name = newLocName.trim() || 'Location';
+    const locAddress = newLocAddress.trim();
+    if (!locAddress) {
+      Alert.alert('Address required', 'Enter an address for this additional location.');
+      return;
+    }
+    const mainAddr = address.trim().toLowerCase().replace(/\s+/g, ' ');
+    const newAddr = locAddress.toLowerCase().replace(/\s+/g, ' ');
+    if (mainAddr && newAddr === mainAddr) {
+      Alert.alert(
+        'Same as main store',
+        'That address matches the main store above. Customers already see it as a pickup option — add a different location instead.',
+      );
+      return;
+    }
+    setLocBusy(true);
+    try {
+      await locationsService.createLocation(restaurant.id, {
+        name,
+        address: locAddress,
+        sort_order: locations.length,
+        is_active: true,
+      });
+      setNewLocName('');
+      setNewLocAddress('');
+      await loadLocations();
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not add location.');
+    } finally {
+      setLocBusy(false);
+    }
+  };
+
+  const handleSaveLocationEdit = async (id) => {
+    setLocBusy(true);
+    try {
+      await locationsService.updateLocation(id, {
+        name: editLocName.trim() || 'Location',
+        address: editLocAddress.trim(),
+      });
+      setEditingLocId(null);
+      await loadLocations();
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not update location.');
+    } finally {
+      setLocBusy(false);
+    }
+  };
+
+  const handleToggleLocationActive = async (loc) => {
+    setLocBusy(true);
+    try {
+      await locationsService.updateLocation(loc.id, { is_active: !loc.is_active });
+      await loadLocations();
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not update location.');
+    } finally {
+      setLocBusy(false);
+    }
+  };
+
+  const handleDeleteLocation = async (loc) => {
+    const confirmed = await confirmAsync({
+      title: 'Remove location',
+      message: `Remove “${loc.name}”?`,
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setLocBusy(true);
+    try {
+      await locationsService.deleteLocation(loc.id);
+      await loadLocations();
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not remove location.');
+    } finally {
+      setLocBusy(false);
+    }
+  };
+
+  const handleMoveLocation = async (index, direction) => {
+    const other = index + direction;
+    if (other < 0 || other >= locations.length) return;
+    setLocBusy(true);
+    try {
+      await locationsService.reorderLocations(locations[index], locations[other]);
+      await loadLocations();
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not reorder locations.');
+    } finally {
+      setLocBusy(false);
     }
   };
 
@@ -277,6 +422,88 @@ export default function SettingsScreen() {
     }
   };
 
+  const toggleFocusTab = (key) => {
+    setFocusTabSelection((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
+
+  const handleFocusModeSwitch = (value) => {
+    if (value) {
+      setFocusTabSelection(
+        focusAllowedTabs.length > 0
+          ? [...focusAllowedTabs]
+          : NAV_ITEMS.map((item) => item.key),
+      );
+      setFocusPin('');
+      setFocusPinConfirm('');
+      setFocusSetupOpen(true);
+      return;
+    }
+    // Cancel in-progress setup without touching saved Focus Mode.
+    if (!focusModeEnabled && focusSetupOpen) {
+      setFocusSetupOpen(false);
+      setFocusPin('');
+      setFocusPinConfirm('');
+      return;
+    }
+    // Turning off — only when Settings is freely accessible (allowed or unlocked).
+    if (!canAccessSettingsFreely) {
+      Alert.alert(
+        'Unlock required',
+        'Unlock Focus Mode first, or include Settings in the visible tabs.',
+      );
+      return;
+    }
+    handleDisableFocusMode();
+  };
+
+  const handleEnableFocusMode = async () => {
+    if (!restaurant?.id) return;
+    setFocusBusy(true);
+    try {
+      await focusModeService.enableFocusMode(restaurant.id, {
+        allowedTabs: focusTabSelection,
+        pin: focusPin,
+        confirmPin: focusPinConfirm,
+      });
+      await refreshRestaurant();
+      setFocusSetupOpen(false);
+      setFocusPin('');
+      setFocusPinConfirm('');
+      // Newly enabled session starts locked; keep Settings reachable if selected.
+      Alert.alert('Focus Mode on', 'Locked tabs need a PIN or password until you unlock.');
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not enable Focus Mode.');
+    } finally {
+      setFocusBusy(false);
+    }
+  };
+
+  const handleDisableFocusMode = async () => {
+    if (!restaurant?.id) return;
+    const confirmed = await confirmAsync({
+      title: 'Disable Focus Mode',
+      message: 'All admin tabs will be available again. Your PIN will be cleared.',
+      confirmText: 'Disable',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setFocusBusy(true);
+    try {
+      await focusModeService.disableFocusMode(restaurant.id);
+      await refreshRestaurant();
+      setFocusSetupOpen(false);
+      unlockSession();
+      Alert.alert('Focus Mode off', 'All admin tabs are unlocked.');
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not disable Focus Mode.');
+    } finally {
+      setFocusBusy(false);
+    }
+  };
+
   const c = theme.colors;
   const statusColor =
     domainStatus === 'verified' ? '#155724' :
@@ -343,6 +570,119 @@ export default function SettingsScreen() {
             multiline
             numberOfLines={2}
           />
+        </View>
+      </View>
+
+      {/* ── Pickup Locations ─────────────────────────────── */}
+      <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
+        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Additional Pickup Locations</Text>
+        <Text style={[styles.sectionSub, { color: c.textSecondary }]}>
+          The main store address above is always a pickup option. Add other store locations here; customers choose which to pick up from at checkout and on catering.
+        </Text>
+
+        {locationsLoading ? (
+          <ActivityIndicator color={c.brand} style={{ marginVertical: 12 }} />
+        ) : (
+          locations.map((loc, index) => (
+            <View
+              key={loc.id}
+              style={[styles.locRow, { borderTopColor: c.border }]}
+            >
+              {editingLocId === loc.id ? (
+                <View style={{ flex: 1, gap: 8 }}>
+                  <TextInput
+                    style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+                    value={editLocName}
+                    onChangeText={setEditLocName}
+                    placeholder="Location name"
+                    placeholderTextColor={c.textDisabled}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.inputMultiline, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+                    value={editLocAddress}
+                    onChangeText={setEditLocAddress}
+                    placeholder="Address"
+                    placeholderTextColor={c.textDisabled}
+                    multiline
+                  />
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      style={[styles.saveBtn, { backgroundColor: c.brand }, locBusy && styles.saveBtnDisabled]}
+                      onPress={() => handleSaveLocationEdit(loc.id)}
+                      disabled={locBusy}
+                    >
+                      <Text style={styles.saveBtnText}>Save</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.saveBtn, { backgroundColor: c.backgroundSunken, borderWidth: 1, borderColor: c.border }]}
+                      onPress={() => setEditingLocId(null)}
+                    >
+                      <Text style={[styles.saveBtnText, { color: c.textPrimary }]}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={[styles.rowLabel, { color: loc.is_active ? c.textPrimary : c.textDisabled }]}>
+                      {loc.name}{!loc.is_active ? ' (inactive)' : ''}
+                    </Text>
+                    <Text style={[styles.rowSub, { color: c.textSecondary }]}>{loc.address || 'No address'}</Text>
+                  </View>
+                  <View style={styles.locActions}>
+                    <TouchableOpacity onPress={() => handleMoveLocation(index, -1)} disabled={index === 0 || locBusy} style={styles.locIconBtn}>
+                      <Ionicons name="chevron-up" size={18} color={index === 0 ? c.textDisabled : c.textPrimary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleMoveLocation(index, 1)} disabled={index === locations.length - 1 || locBusy} style={styles.locIconBtn}>
+                      <Ionicons name="chevron-down" size={18} color={index === locations.length - 1 ? c.textDisabled : c.textPrimary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setEditingLocId(loc.id);
+                        setEditLocName(loc.name || '');
+                        setEditLocAddress(loc.address || '');
+                      }}
+                      style={styles.locIconBtn}
+                    >
+                      <Ionicons name="pencil-outline" size={16} color={c.brand} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleToggleLocationActive(loc)} style={styles.locIconBtn}>
+                      <Ionicons name={loc.is_active ? 'eye-outline' : 'eye-off-outline'} size={16} color={c.textSecondary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeleteLocation(loc)} style={styles.locIconBtn}>
+                      <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+          ))
+        )}
+
+        <View style={[styles.field, { marginTop: 12 }]}>
+          <Text style={[styles.label, { color: c.textSecondary }]}>Add location</Text>
+          <TextInput
+            style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border, marginBottom: 8 }]}
+            value={newLocName}
+            onChangeText={setNewLocName}
+            placeholder="Name (e.g. Downtown)"
+            placeholderTextColor={c.textDisabled}
+          />
+          <TextInput
+            style={[styles.input, styles.inputMultiline, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+            value={newLocAddress}
+            onChangeText={setNewLocAddress}
+            placeholder={address.trim() || '123 Main St, City, State'}
+            placeholderTextColor={c.textDisabled}
+            multiline
+          />
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: c.brand, alignSelf: 'flex-start', marginTop: 10 }, locBusy && styles.saveBtnDisabled]}
+            onPress={handleAddLocation}
+            disabled={locBusy}
+          >
+            {locBusy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Add location</Text>}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -561,6 +901,152 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* ── Focus Mode ───────────────────────────────────── */}
+      <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
+        <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Focus Mode</Text>
+        <Text style={[styles.sectionSub, { color: c.textSecondary }]}>
+          Limit the admin sidebar to selected tabs. Unlock locked tabs with a 4-digit PIN or your admin password (clears on sign-out / refresh).
+        </Text>
+
+        <View style={styles.row}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={[styles.rowLabel, { color: c.textPrimary }]}>Focus Mode</Text>
+            <Text style={[styles.rowSub, { color: c.textSecondary }]}>
+              {focusModeEnabled
+                ? 'On — locked tabs need unlock'
+                : focusSetupOpen
+                  ? 'Choose visible tabs and set a PIN'
+                  : 'Off'}
+            </Text>
+          </View>
+          <Switch
+            value={focusModeEnabled || focusSetupOpen}
+            onValueChange={handleFocusModeSwitch}
+            disabled={focusBusy}
+            trackColor={{ true: c.brand, false: '#ccc' }}
+          />
+        </View>
+
+        {focusModeEnabled && !focusSetupOpen ? (
+          <View style={{ marginTop: 12 }}>
+            <Text style={[styles.label, { color: c.textSecondary }]}>Visible without unlock</Text>
+            <View style={styles.focusTabWrap}>
+              {NAV_ITEMS.filter((item) => focusAllowedTabs.includes(item.key)).map((item) => (
+                <View
+                  key={item.key}
+                  style={[styles.focusTabChip, { backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+                >
+                  <Text style={[styles.focusTabChipText, { color: c.textPrimary }]}>{item.label}</Text>
+                </View>
+              ))}
+            </View>
+            {canAccessSettingsFreely ? (
+              <TouchableOpacity
+                style={[styles.saveBtn, { backgroundColor: '#FF3B30', alignSelf: 'flex-start', marginTop: 10 }, focusBusy && styles.saveBtnDisabled]}
+                onPress={handleDisableFocusMode}
+                disabled={focusBusy}
+              >
+                {focusBusy ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.saveBtnText}>Disable Focus Mode</Text>
+                )}
+              </TouchableOpacity>
+            ) : (
+              <Text style={[styles.rowSub, { color: c.textSecondary, marginTop: 8 }]}>
+                Unlock Focus Mode from the sidebar to disable it here.
+              </Text>
+            )}
+          </View>
+        ) : null}
+
+        {focusSetupOpen && !focusModeEnabled ? (
+          <View style={{ marginTop: 14 }}>
+            <Text style={[styles.label, { color: c.textSecondary }]}>Tabs visible without unlock</Text>
+            <View style={styles.focusTabWrap}>
+              {NAV_ITEMS.map((item) => {
+                const selected = focusTabSelection.includes(item.key);
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[
+                      styles.focusTabChip,
+                      {
+                        backgroundColor: selected ? c.brandLight : c.backgroundSunken,
+                        borderColor: selected ? c.brand : c.border,
+                      },
+                    ]}
+                    onPress={() => toggleFocusTab(item.key)}
+                    activeOpacity={0.75}
+                  >
+                    <Ionicons
+                      name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={14}
+                      color={selected ? c.brand : c.textDisabled}
+                    />
+                    <Text style={[styles.focusTabChipText, { color: selected ? c.brand : c.textPrimary }]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.field}>
+              <Text style={[styles.label, { color: c.textSecondary }]}>4-digit PIN</Text>
+              <TextInput
+                style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border, letterSpacing: 6, textAlign: 'center' }]}
+                value={focusPin}
+                onChangeText={(t) => setFocusPin(t.replace(/\D/g, '').slice(0, 4))}
+                placeholder="••••"
+                placeholderTextColor={c.textDisabled}
+                keyboardType="number-pad"
+                maxLength={4}
+                secureTextEntry
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={[styles.label, { color: c.textSecondary }]}>Confirm PIN</Text>
+              <TextInput
+                style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border, letterSpacing: 6, textAlign: 'center' }]}
+                value={focusPinConfirm}
+                onChangeText={(t) => setFocusPinConfirm(t.replace(/\D/g, '').slice(0, 4))}
+                placeholder="••••"
+                placeholderTextColor={c.textDisabled}
+                keyboardType="number-pad"
+                maxLength={4}
+                secureTextEntry
+              />
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                style={[styles.saveBtn, { backgroundColor: c.brand }, focusBusy && styles.saveBtnDisabled]}
+                onPress={handleEnableFocusMode}
+                disabled={focusBusy}
+              >
+                {focusBusy ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.saveBtnText}>Enable Focus Mode</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveBtn, { backgroundColor: c.backgroundSunken, borderWidth: 1, borderColor: c.border }]}
+                onPress={() => {
+                  setFocusSetupOpen(false);
+                  setFocusPin('');
+                  setFocusPinConfirm('');
+                }}
+                disabled={focusBusy}
+              >
+                <Text style={[styles.saveBtnText, { color: c.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+      </View>
+
       {/* ── Account ───────────────────────────────────────── */}
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
         <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Account</Text>
@@ -641,6 +1127,16 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { opacity: 0.55 },
   saveBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
+  locRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    gap: 8,
+  },
+  locActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 2 },
+  locIconBtn: { padding: 6 },
+
   // Hours rows
   hoursRow: {
     flexDirection: 'row',
@@ -696,4 +1192,23 @@ const styles = StyleSheet.create({
   },
   dnsType: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginBottom: 2 },
   dnsLine: { fontSize: 12, lineHeight: 16 },
+  focusTabWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  focusTabChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  focusTabChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
 });

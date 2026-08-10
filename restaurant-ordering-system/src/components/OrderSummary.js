@@ -26,6 +26,22 @@ const OrderSummary = ({
   const { theme } = useTheme();
   const hasDiscount = Number(discountAmount) > 0;
 
+  let scheduledLabel = null;
+  if (scheduledTime && scheduledTime !== 'ASAP') {
+    const asDate = new Date(scheduledTime);
+    if (!Number.isNaN(asDate.getTime()) && String(scheduledTime).includes('T')) {
+      scheduledLabel = asDate.toLocaleString([], {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    } else {
+      scheduledLabel = scheduledTime;
+    }
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Order Summary</Text>
@@ -99,9 +115,9 @@ const OrderSummary = ({
             {orderType === 'delivery' ? '🚗  Delivery' : '🏪  Pickup'}
           </Text>
         </View>
-        {scheduledTime && scheduledTime !== 'ASAP' ? (
+        {scheduledLabel ? (
           <View style={[styles.badge, { backgroundColor: '#f0f0f0' }]}>
-            <Text style={styles.badgeText}>🕐  {scheduledTime}</Text>
+            <Text style={styles.badgeText}>🕐  {scheduledLabel}</Text>
           </View>
         ) : scheduledTime === 'ASAP' ? (
           <View style={[styles.badge, { backgroundColor: '#f0f0f0' }]}>

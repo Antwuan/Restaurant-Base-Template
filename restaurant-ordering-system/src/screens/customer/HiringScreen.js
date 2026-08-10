@@ -27,6 +27,15 @@ function genFileId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function notify(title, message) {
+  const text = message ? `${title}\n\n${message}` : title;
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(text);
+    return;
+  }
+  Alert.alert(title, message);
+}
+
 const DESKTOP_BP = 768;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_RESUME_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -36,6 +45,7 @@ export default function HiringScreen({ navigation }) {
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BP;
+  const restaurantReady = Boolean(restaurant?.id);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -104,6 +114,14 @@ export default function HiringScreen({ navigation }) {
   };
 
   const handleSubmit = async () => {
+    if (!restaurantReady) {
+      notify(
+        'Please wait',
+        'Restaurant info is still loading. Try again in a moment.',
+      );
+      return;
+    }
+
     const validationErrors = validate();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
@@ -116,7 +134,7 @@ export default function HiringScreen({ navigation }) {
       let resumePath = null;
       let resumeFileName = null;
 
-      if (fileObj && restaurant?.id) {
+      if (fileObj) {
         const fileId = genFileId();
         const result = await uploadApplicationPDF({
           restaurantId: restaurant.id,
@@ -128,7 +146,7 @@ export default function HiringScreen({ navigation }) {
       }
 
       await submitApplication({
-        restaurantId: restaurant?.id,
+        restaurantId: restaurant.id,
         fullName: name.trim(),
         email: email.trim(),
         phone: phone.trim() || null,
@@ -139,7 +157,10 @@ export default function HiringScreen({ navigation }) {
 
       setSubmitted(true);
     } catch (e) {
-      Alert.alert('Submission Error', e.message || 'Could not submit your application. Please try again.');
+      notify(
+        'Submission Error',
+        e.message || 'Could not submit your application. Please try again.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -288,11 +309,21 @@ export default function HiringScreen({ navigation }) {
               Upload a PDF resume (max 5 MB). Either a comment or an attachment is required.
             </Text>
 
+            {!restaurantReady ? (
+              <Text style={s.errorText}>
+                Loading restaurant info… Submit will unlock when ready.
+              </Text>
+            ) : null}
+
             <TouchableOpacity
-              style={[s.submitBtn, { backgroundColor: theme.colors.brand }, submitting && { opacity: 0.65 }]}
+              style={[
+                s.submitBtn,
+                { backgroundColor: theme.colors.brand },
+                (submitting || !restaurantReady) && { opacity: 0.65 },
+              ]}
               onPress={handleSubmit}
               activeOpacity={0.85}
-              disabled={submitting}
+              disabled={submitting || !restaurantReady}
             >
               {submitting ? (
                 <ActivityIndicator color="#fff" size="small" />

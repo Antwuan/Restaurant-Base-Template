@@ -9,8 +9,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useFocusMode } from '../../context/FocusModeContext';
 
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { key: 'Orders',       label: 'Orders',       icon: 'receipt',          iconOutline: 'receipt-outline'          },
   { key: 'Analytics',    label: 'Analytics',    icon: 'bar-chart',        iconOutline: 'bar-chart-outline'        },
   { key: 'Menu',         label: 'Menu',         icon: 'restaurant',       iconOutline: 'restaurant-outline'       },
@@ -25,6 +26,8 @@ const NAV_ITEMS = [
 export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
   const { theme } = useTheme();
   const { restaurant } = useRestaurantContext();
+  const { enabled, sessionUnlocked, isTabAllowed } = useFocusMode();
+  const showLocks = enabled && !sessionUnlocked;
 
   return (
     <View style={[
@@ -45,7 +48,9 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
             <Text style={[styles.brandName, { color: theme.colors.textPrimary }]} numberOfLines={1}>
               {restaurant?.name ?? 'Admin'}
             </Text>
-            <Text style={[styles.brandSub, { color: theme.colors.textSecondary }]}>Dashboard</Text>
+            <Text style={[styles.brandSub, { color: theme.colors.textSecondary }]}>
+              {showLocks ? 'Focus Mode' : 'Dashboard'}
+            </Text>
           </View>
         )}
       </View>
@@ -54,40 +59,82 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
       <View style={styles.navList}>
         {NAV_ITEMS.map((item) => {
           const isActive = activeSection === item.key;
+          const locked = showLocks && !isTabAllowed(item.key);
+          const iconColor = locked
+            ? theme.colors.textDisabled
+            : isActive
+              ? theme.colors.brand
+              : theme.colors.textSecondary;
+          const labelColor = locked
+            ? theme.colors.textDisabled
+            : isActive
+              ? theme.colors.brand
+              : theme.colors.textPrimary;
+
           return (
             <TouchableOpacity
               key={item.key}
               style={[
                 styles.navItem,
-                isActive && { backgroundColor: theme.colors.brandLight },
+                isActive && !locked && { backgroundColor: theme.colors.brandLight },
+                locked && styles.navItemLocked,
               ]}
               onPress={() => onNavigate(item.key)}
               activeOpacity={0.7}
             >
               <Ionicons
-                name={isActive ? item.icon : item.iconOutline}
+                name={isActive && !locked ? item.icon : item.iconOutline}
                 size={20}
-                color={isActive ? theme.colors.brand : theme.colors.textSecondary}
+                color={iconColor}
                 style={styles.navIcon}
               />
               {!collapsed && (
                 <Text
                   style={[
                     styles.navLabel,
-                    isActive
-                      ? { color: theme.colors.brand, fontWeight: '600' }
-                      : { color: theme.colors.textPrimary },
+                    {
+                      color: labelColor,
+                      fontWeight: isActive && !locked ? '600' : '400',
+                    },
                   ]}
                 >
                   {item.label}
                 </Text>
               )}
-              {isActive && !collapsed && (
+              {locked && (
+                <Ionicons
+                  name="lock-closed"
+                  size={14}
+                  color={theme.colors.textDisabled}
+                  style={styles.lockIcon}
+                />
+              )}
+              {isActive && !locked && !collapsed && (
                 <View style={[styles.activeIndicator, { backgroundColor: theme.colors.brand }]} />
               )}
             </TouchableOpacity>
           );
         })}
+
+        {showLocks && (
+          <TouchableOpacity
+            style={[styles.navItem, styles.unlockItem]}
+            onPress={() => onNavigate('UnlockFocus')}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="lock-open-outline"
+              size={20}
+              color={theme.colors.brand}
+              style={styles.navIcon}
+            />
+            {!collapsed && (
+              <Text style={[styles.navLabel, { color: theme.colors.brand, fontWeight: '600' }]}>
+                Unlock
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Footer */}
@@ -163,6 +210,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     position: 'relative',
   },
+  navItemLocked: {
+    opacity: 0.75,
+  },
+  unlockItem: {
+    marginTop: 6,
+  },
   navIcon: {
     flexShrink: 0,
   },
@@ -170,6 +223,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 10,
     flex: 1,
+  },
+  lockIcon: {
+    marginLeft: 4,
   },
   activeIndicator: {
     width: 4,

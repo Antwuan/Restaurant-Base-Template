@@ -181,24 +181,26 @@ export default function ConfirmationScreen({ route, navigation }) {
                       hour: 'numeric',
                       minute: '2-digit',
                     })}`
-                  : order?.order_type === 'delivery'
-                    ? '30–45 minutes'
-                    : '15–20 minutes'}
+                  : '15–20 minutes'}
               </Text>
             </View>
           </View>
         </FadeInView>
 
-        {/* Restaurant Contact */}
+        {/* Restaurant Contact / pickup location */}
         {restaurant && (
           <FadeInView delay={400} duration={380} fromY={14} style={{ width: '100%' }}>
             <View style={styles.infoCard}>
               <Text style={styles.infoIcon}>📍</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.infoTitle}>{restaurant.name}</Text>
-                {restaurant.address && (
-                  <Text style={styles.infoBody}>{restaurant.address}</Text>
-                )}
+                <Text style={styles.infoTitle}>
+                  Pickup: {order?.pickup_location?.name || restaurant.name}
+                </Text>
+                {(order?.pickup_location?.address || restaurant.address) ? (
+                  <Text style={styles.infoBody}>
+                    {order?.pickup_location?.address || restaurant.address}
+                  </Text>
+                ) : null}
                 {restaurant.phone && (
                   <Text
                     style={[

@@ -6,6 +6,7 @@ import { View, ActivityIndicator, Text, StyleSheet, Platform } from 'react-nativ
 import { RestaurantProvider, useRestaurantContext } from './src/context/RestaurantContext';
 import { AuthProvider } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
+import { PickupLocationProvider } from './src/context/PickupLocationContext';
 import { ThemeProvider, useTheme, buildPaperTheme } from './src/theme';
 import RootNavigator from './src/navigation/RootNavigator';
 import { GlobalConfirmModal } from './src/components/ConfirmModal';
@@ -43,8 +44,10 @@ const AppContent = () => {
     <View style={styles.root}>
       <PaperProvider theme={paperTheme}>
         <CartProvider restaurantId={restaurant?.id}>
-          <RootNavigator />
-          <GlobalConfirmModal />
+          <PickupLocationProvider>
+            <RootNavigator />
+            <GlobalConfirmModal />
+          </PickupLocationProvider>
         </CartProvider>
       </PaperProvider>
     </View>

@@ -13,7 +13,9 @@ export async function submitApplication({
   resumePath,
   resumeFileName,
 }) {
-  const { data, error } = await supabase
+  // Insert only — no .select().single(). RLS allows public INSERT but
+  // staff-only SELECT, so RETURNING would fail for anon applicants.
+  const { error } = await supabase
     .from('job_applications')
     .insert({
       restaurant_id: restaurantId,
@@ -23,11 +25,9 @@ export async function submitApplication({
       comment: comment || null,
       resume_path: resumePath || null,
       resume_file_name: resumeFileName || null,
-    })
-    .select()
-    .single();
+    });
   if (error) throw error;
-  return data;
+  return { ok: true };
 }
 
 /**

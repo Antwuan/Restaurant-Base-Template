@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Alert } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import HomeScreen from '../screens/customer/HomeScreen';
@@ -13,11 +14,13 @@ import CateringScreen from '../screens/customer/CateringScreen';
 import ReviewScreen from '../screens/customer/ReviewScreen';
 import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
+import { usePickupLocation } from '../context/PickupLocationContext';
 
 const Stack = createNativeStackNavigator();
 
 function MenuScreenWithCart({ navigation, route }) {
   const [cartOpen, setCartOpen] = useState(false);
+  const { hasSelection, needsChoice, setEditing } = usePickupLocation();
 
   const openCart = useCallback(() => setCartOpen(true), []);
   const closeCart = useCallback(() => setCartOpen(false), []);
@@ -30,6 +33,15 @@ function MenuScreenWithCart({ navigation, route }) {
   }, [route.params?.openCart, navigation]);
 
   const handleCheckout = () => {
+    if (needsChoice || !hasSelection) {
+      setEditing(true);
+      setCartOpen(false);
+      Alert.alert(
+        'Pickup location needed',
+        'Please choose which location you are ordering for before checkout.',
+      );
+      return;
+    }
     setCartOpen(false);
     navigation.navigate('Checkout');
   };

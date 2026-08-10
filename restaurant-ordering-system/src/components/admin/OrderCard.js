@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '../../theme';
+import { useRestaurantContext } from '../../context/RestaurantContext';
 import StatusButton from './StatusButton';
 
 const STATUS_COLORS = {
@@ -45,9 +46,14 @@ function formatElapsed(ms) {
 
 export default function OrderCard({ order, onStatusUpdate }) {
   const { theme } = useTheme();
+  const { restaurant } = useRestaurantContext();
   const c = theme.colors;
   const [updatingStatus, setUpdatingStatus] = useState(null);
   const [checkedItems, setCheckedItems] = useState({});
+
+  // Main store orders store null pickup_location_id; fall back to restaurant.
+  const pickupName = order.pickup_location?.name || restaurant?.name || null;
+  const pickupAddress = order.pickup_location?.address || restaurant?.address || null;
 
   const showTimer =
     order.menu_type !== 'catering' && SHOW_TIMER_STATUSES.includes(order.status);
@@ -149,6 +155,13 @@ export default function OrderCard({ order, onStatusUpdate }) {
           })}
         </Text>
       )}
+
+      {(pickupName || pickupAddress) ? (
+        <Text style={[styles.customerPhone, { color: c.textSecondary }]} numberOfLines={2}>
+          📍 {pickupName || 'Pickup'}
+          {pickupAddress ? ` · ${pickupAddress}` : ''}
+        </Text>
+      ) : null}
 
       {/* Items — always visible */}
       <View style={styles.itemsContainer}>

@@ -71,6 +71,15 @@ export async function updateCustomerProfile(customerId, updates) {
   return data;
 }
 
+/** Persist preferred pickup location for a signed-in customer. */
+export async function updatePreferredPickupLocation(customerId, preference) {
+  if (!customerId) throw new Error('customerId is required');
+  return updateCustomerProfile(customerId, {
+    preferred_pickup_is_main: preference?.preferred_pickup_is_main ?? null,
+    preferred_pickup_location_id: preference?.preferred_pickup_location_id ?? null,
+  });
+}
+
 /**
  * Service-role edge function — works without a client JWT (email-confirm signup).
  */
