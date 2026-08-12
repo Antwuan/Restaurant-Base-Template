@@ -21,26 +21,47 @@ const NEXT_STATUS = {
 };
 
 const URGENCY_THRESHOLD_MS = 15 * 60 * 1000;
+const SCHEDULED_TIMER_LEAD_MS = 30 * 60 * 1000;
 const SHOW_TIMER_STATUSES = ['pending', 'accepted', 'preparing', 'ready'];
 
-function useElapsedTimer(createdAt, active) {
-  const [elapsed, setElapsed] = useState(Date.now() - new Date(createdAt).getTime());
+/**
+ * Kitchen timer start:
+ * - ASAP (no scheduled_time): order created_at
+ * - Scheduled: 30 minutes before pickup — timer stays idle until then
+ */
+function getTimerStartMs(order) {
+  if (order?.scheduled_time) {
+    const pickupMs = new Date(order.scheduled_time).getTime();
+    if (Number.isFinite(pickupMs)) return pickupMs - SCHEDULED_TIMER_LEAD_MS;
+  }
+  const createdMs = new Date(order?.created_at).getTime();
+  return Number.isFinite(createdMs) ? createdMs : Date.now();
+}
+
+function useKitchenTimer(order, active) {
+  const timerStartMs = getTimerStartMs(order);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     if (!active) return;
-    const id = setInterval(() => {
-      setElapsed(Date.now() - new Date(createdAt).getTime());
-    }, 1000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [createdAt, active]);
+  }, [active, timerStartMs]);
 
-  return elapsed;
+  const started = now >= timerStartMs;
+  const elapsed = started ? Math.max(0, now - timerStartMs) : 0;
+  const untilStart = started ? 0 : Math.max(0, timerStartMs - now);
+  return { started, elapsed, untilStart, timerStartMs };
 }
 
 function formatElapsed(ms) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
@@ -57,8 +78,8 @@ export default function OrderCard({ order, onStatusUpdate }) {
 
   const showTimer =
     order.menu_type !== 'catering' && SHOW_TIMER_STATUSES.includes(order.status);
-  const elapsed = useElapsedTimer(order.created_at, showTimer);
-  const isUrgent = showTimer && elapsed >= URGENCY_THRESHOLD_MS;
+  const { started: timerStarted, elapsed, untilStart } = useKitchenTimer(order, showTimer);
+  const isUrgent = showTimer && timerStarted && elapsed >= URGENCY_THRESHOLD_MS;
 
   const statusStyle = STATUS_COLORS[order.status] || STATUS_COLORS.pending;
   const nextAction = NEXT_STATUS[order.status];
@@ -112,7 +133,7 @@ export default function OrderCard({ order, onStatusUpdate }) {
           </View>
         </View>
 
-        {showTimer && (
+        {showTimer && timerStarted ? (
           <Text
             style={[
               styles.timer,
@@ -122,7 +143,11 @@ export default function OrderCard({ order, onStatusUpdate }) {
           >
             {formatElapsed(elapsed)}
           </Text>
-        )}
+        ) : showTimer && order.scheduled_time ? (
+          <Text style={[styles.timerPending, { color: c.textSecondary }]}>
+            Starts in {formatElapsed(untilStart)}
+          </Text>
+        ) : null}
       </View>
 
       {/* Customer info */}
@@ -306,6 +331,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
     letterSpacing: 0.5,
   },
+  timerPending: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 4,
+  },
   timerUrgent: {
     color: '#FF6B35',
   },
@@ -356,14 +386,14 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   checkbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 5,
     borderWidth: 1.5,
-    marginRight: 6,
+    marginRight: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 1,
+    marginTop: 0,
     flexShrink: 0,
   },
   checkboxChecked: {
@@ -372,9 +402,9 @@ const styles = StyleSheet.create({
   },
   checkmark: {
     color: '#fff',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
-    lineHeight: 13,
+    lineHeight: 14,
   },
   itemQty: {
     fontSize: 12,

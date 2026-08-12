@@ -10,75 +10,124 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  Image,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
+
+const MAX_QTY = 99;
+const THUMB = 64;
+
+function formatMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '$0.00';
+  return `$${n.toFixed(2)}`;
+}
 
 const CartItem = ({ item, onIncrease, onDecrease, onRemove }) => {
   const { theme } = useTheme();
-  const lineTotal = (item.price * item.quantity).toFixed(2);
-
   const primary = theme.colors.brand;
+  const qty = Math.max(0, Math.min(MAX_QTY, Number(item.quantity) || 0));
+  const unit = Number(item.price);
+  const lineTotal = Number.isFinite(unit) ? unit * qty : 0;
+  const atMax = qty >= MAX_QTY;
+  const atMin = qty <= 1;
+  const mods = Array.isArray(item.selectedModifiers) ? item.selectedModifiers : [];
+  const name = (item.name || 'Item').trim() || 'Item';
+  const imageUrl = item.image_url || item.imageUrl || null;
 
   return (
     <View style={styles.container}>
       <View style={styles.topRow}>
-        {/* Name & Price */}
+        <View style={styles.thumbWrap} accessibilityElementsHidden>
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} style={styles.thumb} resizeMode="cover" />
+          ) : (
+            <View style={[styles.thumb, styles.thumbPlaceholder]}>
+              <Ionicons name="restaurant-outline" size={22} color="#c4c4c4" />
+            </View>
+          )}
+        </View>
+
         <View style={styles.nameBlock}>
-          <Text style={styles.name} numberOfLines={2}>
-            {item.name}
+          <Text style={styles.name} numberOfLines={3}>
+            {name}
           </Text>
-          <Text style={styles.unitPrice}>${item.price.toFixed(2)} each</Text>
+          <Text style={styles.unitPrice}>{formatMoney(unit)} each</Text>
           {item.specialInstructions ? (
-            <Text style={styles.instructions} numberOfLines={2}>
+            <Text style={styles.instructions} numberOfLines={4}>
               Note: {item.specialInstructions}
             </Text>
           ) : null}
-          {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
-            <Text style={styles.instructions} numberOfLines={3}>
-              {item.selectedModifiers.map((m) => m.optionName).join(', ')}
-            </Text>
+          {mods.length > 0 ? (
+            <View style={styles.modList}>
+              {mods.map((m, idx) => (
+                <Text
+                  key={m.optionId || `${m.optionName}-${idx}`}
+                  style={styles.instructions}
+                  numberOfLines={2}
+                >
+                  {m.optionName || 'Option'}
+                </Text>
+              ))}
+            </View>
           ) : null}
         </View>
 
-        {/* Line total */}
-        <Text style={styles.lineTotal}>${lineTotal}</Text>
+        <Text style={styles.lineTotal}>{formatMoney(lineTotal)}</Text>
       </View>
 
-      {/* Controls row */}
       <View style={styles.controlsRow}>
-        {/* Remove */}
         <TouchableOpacity
-          onPress={() => onRemove(item.id)}
+          onPress={onRemove}
           style={styles.removeButton}
-          accessibilityLabel={`Remove ${item.name}`}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${name} from cart`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Text style={styles.removeText}>Remove</Text>
         </TouchableOpacity>
 
-        {/* Quantity controls */}
         <View style={styles.qtyControls}>
           <TouchableOpacity
-            onPress={() => onDecrease(item.id)}
-            style={[
-              styles.qtyButton,
-              { borderColor: primary },
-            ]}
-            accessibilityLabel="Decrease quantity"
+            onPress={onDecrease}
+            style={[styles.qtyButton, { borderColor: primary }]}
+            accessibilityRole="button"
+            accessibilityLabel={atMin ? `Remove ${name}` : `Decrease quantity of ${name}`}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           >
             <Text style={[styles.qtyButtonText, { color: primary }]}>−</Text>
           </TouchableOpacity>
 
-          <Text style={styles.qtyText}>{item.quantity}</Text>
+          <Text
+            style={styles.qtyText}
+            accessibilityLabel={`Quantity ${qty}`}
+          >
+            {qty}
+          </Text>
 
           <TouchableOpacity
-            onPress={() => onIncrease(item.id)}
+            onPress={onIncrease}
+            disabled={atMax}
             style={[
               styles.qtyButton,
-              { backgroundColor: primary, borderColor: primary },
+              {
+                backgroundColor: atMax ? '#e5e7eb' : primary,
+                borderColor: atMax ? '#e5e7eb' : primary,
+              },
             ]}
-            accessibilityLabel="Increase quantity"
+            accessibilityRole="button"
+            accessibilityLabel={
+              atMax
+                ? `Maximum quantity of ${MAX_QTY} reached`
+                : `Increase quantity of ${name}`
+            }
+            accessibilityState={{ disabled: atMax }}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           >
-            <Text style={[styles.qtyButtonText, { color: '#fff' }]}>+</Text>
+            <Text style={[styles.qtyButtonText, { color: atMax ? '#9ca3af' : '#fff' }]}>
+              +
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -107,11 +156,30 @@ const styles = StyleSheet.create({
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 10,
+    gap: 10,
+  },
+  thumbWrap: {
+    width: THUMB,
+    height: THUMB,
+    borderRadius: 10,
+    overflow: 'hidden',
+    flexShrink: 0,
+    backgroundColor: '#f3f4f6',
+  },
+  thumb: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
   },
   nameBlock: {
     flex: 1,
-    marginRight: 12,
+    minWidth: 0,
   },
   name: {
     fontSize: 15,
@@ -121,19 +189,23 @@ const styles = StyleSheet.create({
   },
   unitPrice: {
     fontSize: 13,
-    color: '#888',
+    color: '#666',
   },
   instructions: {
     fontSize: 12,
-    color: '#aaa',
-    fontStyle: 'italic',
+    color: '#555',
     marginTop: 4,
+    lineHeight: 16,
+  },
+  modList: {
+    marginTop: 2,
   },
   lineTotal: {
     fontSize: 16,
     fontWeight: '700',
     color: '#1a1a1a',
     alignSelf: 'flex-start',
+    flexShrink: 0,
   },
   controlsRow: {
     flexDirection: 'row',
@@ -141,12 +213,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   removeButton: {
-    paddingVertical: 4,
+    paddingVertical: 8,
+    paddingRight: 8,
+    minHeight: 36,
+    justifyContent: 'center',
   },
   removeText: {
     fontSize: 13,
-    color: '#e53935',
-    fontWeight: '500',
+    color: '#b91c1c',
+    fontWeight: '600',
   },
   qtyControls: {
     flexDirection: 'row',
@@ -154,26 +229,26 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   qtyButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1.5,
     justifyContent: 'center',
     alignItems: 'center',
   },
   qtyButtonText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
-    lineHeight: 18,
+    lineHeight: 20,
   },
   qtyText: {
     fontSize: 16,
     fontWeight: '700',
-    minWidth: 24,
+    minWidth: 28,
     textAlign: 'center',
     color: '#1a1a1a',
   },
 });
 
 export default CartItem;
-
+export { MAX_QTY, formatMoney };

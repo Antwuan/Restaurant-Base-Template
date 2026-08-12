@@ -40,7 +40,7 @@ import PickupLocationPicker, {
   isPickupLocationReady,
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
-import { createPaymentIntent } from '../../services/stripeApi';
+import { createPaymentIntent, getPaymentMethodSummary } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
@@ -49,6 +49,11 @@ import {
   listPickupOptions,
   toPersistablePickupLocationId,
 } from '../../services/locationsService';
+import {
+  extractPaymentDetailsFromIntent,
+  mergeOrderItemImages,
+  saveConfirmationPayload,
+} from '../../utils/confirmationPayload';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import {
@@ -358,10 +363,11 @@ function CateringCheckoutForm({
         customerName: name,
         customerPhone: phone,
         customerEmail: email,
-        items: items.map(({ id, name: n, price, quantity, specialInstructions, selectedModifiers }) => ({
+        items: items.map(({ id, name: n, price, quantity, specialInstructions, selectedModifiers, image_url }) => ({
           id, name: n, price, quantity,
           special_instructions: specialInstructions || '',
           selected_modifiers: selectedModifiers || [],
+          image_url: image_url || null,
         })),
         subtotal: cartSubtotal,
         tax,
@@ -400,20 +406,31 @@ function CateringCheckoutForm({
       }
 
       clearCart('catering');
-      navigation.replace('Confirmation', {
-        order: {
-          ...order,
-          pickup_location: pickupLocation
-            ? {
-                id: toPersistablePickupLocationId(pickupLocation),
-                name: pickupLocation.name,
-                address: pickupLocation.address,
-                is_main: Boolean(pickupLocation.is_main),
-              }
-            : null,
-        },
-        pointsEarned,
-      });
+      const paymentFromIntent = extractPaymentDetailsFromIntent(paymentIntent);
+      const paymentFromApi = paymentIntent?.id && paymentIntent?.client_secret
+        ? await getPaymentMethodSummary(paymentIntent.id, {
+            clientSecret: paymentIntent.client_secret,
+            restaurantId: restaurant?.id,
+          })
+        : null;
+      const payment = paymentFromApi || paymentFromIntent || { label: 'Card' };
+
+      const confirmationOrder = {
+        ...order,
+        items: mergeOrderItemImages(order?.items, items),
+        pickup_location: pickupLocation
+          ? {
+              id: toPersistablePickupLocationId(pickupLocation),
+              name: pickupLocation.name,
+              address: pickupLocation.address,
+              is_main: Boolean(pickupLocation.is_main),
+            }
+          : null,
+        payment,
+      };
+      const confirmationPayload = { order: confirmationOrder, pointsEarned };
+      saveConfirmationPayload(confirmationPayload);
+      navigation.replace('Confirmation', confirmationPayload);
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -754,7 +771,7 @@ const ic = StyleSheet.create({
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function CateringScreen({ navigation }) {
   const { restaurant } = useRestaurantContext();
-  const { categoriesWithItems, menuByCategory, loading } = useMenu(restaurant?.id, 'catering');
+  const { categoriesWithItems, menuByCategory, allItems, loading } = useMenu(restaurant?.id, 'catering');
   const {
     cateringItems: cartItems,
     cateringSubtotal: cartSubtotal,
@@ -763,12 +780,23 @@ export default function CateringScreen({ navigation }) {
     addItem,
     removeItem,
     updateQuantity,
+    hydrateImages,
   } = useCartContext();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BP;
 
   const brandColor = theme.colors.brand;
+
+  // Backfill image_url on catering cart lines saved before images were stored.
+  useEffect(() => {
+    if (!allItems?.length || !hydrateImages) return;
+    const imageById = {};
+    allItems.forEach((item) => {
+      if (item?.id && item.image_url) imageById[item.id] = item.image_url;
+    });
+    if (Object.keys(imageById).length) hydrateImages(imageById);
+  }, [allItems, hydrateImages]);
 
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -1203,10 +1231,26 @@ export default function CateringScreen({ navigation }) {
                 <>
                   {cartItems.map((item, i) => (
                     <View key={`${item.id}-${i}`} style={s.cartItemRow}>
+                      <View style={s.cartThumbWrap}>
+                        {item.image_url ? (
+                          <Image
+                            source={{ uri: item.image_url }}
+                            style={s.cartThumb}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={[s.cartThumb, s.cartThumbPlaceholder]}>
+                            <Ionicons name="restaurant-outline" size={16} color="#c4c4c4" />
+                          </View>
+                        )}
+                      </View>
                       <View style={s.qtyControls}>
                         <TouchableOpacity
                           style={s.qtyBtn}
                           onPress={() => updateQuantity(item.id, item.quantity - 1, item.specialInstructions, 'catering', item.selectedModifiers)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Decrease quantity of ${item.name}`}
                         >
                           <Ionicons name="remove" size={14} color="#555" />
                         </TouchableOpacity>
@@ -1214,12 +1258,15 @@ export default function CateringScreen({ navigation }) {
                         <TouchableOpacity
                           style={s.qtyBtn}
                           onPress={() => updateQuantity(item.id, item.quantity + 1, item.specialInstructions, 'catering', item.selectedModifiers)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Increase quantity of ${item.name}`}
                         >
                           <Ionicons name="add" size={14} color="#555" />
                         </TouchableOpacity>
                       </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.cartItemName} numberOfLines={1}>{item.name}</Text>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={s.cartItemName} numberOfLines={2}>{item.name}</Text>
                         {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
                           <Text style={s.cartItemMods} numberOfLines={2}>
                             {item.selectedModifiers.map((m) => m.optionName).join(', ')}
@@ -1227,7 +1274,12 @@ export default function CateringScreen({ navigation }) {
                         ) : null}
                       </View>
                       <Text style={s.cartItemPrice}>${(item.price * item.quantity).toFixed(2)}</Text>
-                      <TouchableOpacity onPress={() => removeItem(item.id, item.specialInstructions, 'catering', item.selectedModifiers)} style={{ padding: 4 }}>
+                      <TouchableOpacity
+                        onPress={() => removeItem(item.id, item.specialInstructions, 'catering', item.selectedModifiers)}
+                        style={{ padding: 8, minWidth: 36, minHeight: 36, alignItems: 'center', justifyContent: 'center' }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${item.name}`}
+                      >
                         <Ionicons name="close" size={15} color="#aaa" />
                       </TouchableOpacity>
                     </View>
@@ -1402,21 +1454,31 @@ const s = StyleSheet.create({
   itemsHeading: { fontSize: 15, fontWeight: '800', color: '#111', marginBottom: 12 },
   itemsEmpty: { fontSize: 13, color: '#999', textAlign: 'center', paddingVertical: 24 },
 
-  cartItemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cartItemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
+  cartThumbWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    overflow: 'hidden',
+    flexShrink: 0,
+    backgroundColor: '#f3f4f6',
+  },
+  cartThumb: { width: '100%', height: '100%' },
+  cartThumbPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6' },
+  qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
   qtyBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#ddd',
     alignItems: 'center',
     justifyContent: 'center',
   },
   qtyText: { fontSize: 13, fontWeight: '700', color: '#111', minWidth: 18, textAlign: 'center' },
-  cartItemName: { flex: 1, fontSize: 13, color: '#333' },
+  cartItemName: { fontSize: 13, color: '#333', fontWeight: '500' },
   cartItemMods: { fontSize: 11, color: '#888', marginTop: 2 },
-  cartItemPrice: { fontSize: 13, fontWeight: '600', color: '#111' },
+  cartItemPrice: { fontSize: 13, fontWeight: '600', color: '#111', flexShrink: 0 },
 
   totalsBlock: { borderTopWidth: 1, borderTopColor: '#f0f0f0', marginTop: 8, paddingTop: 10, gap: 5 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between' },

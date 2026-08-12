@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Alert } from 'react-native';
+import { View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import HomeScreen from '../screens/customer/HomeScreen';
@@ -18,9 +18,9 @@ import { usePickupLocation } from '../context/PickupLocationContext';
 
 const Stack = createNativeStackNavigator();
 
-function MenuScreenWithCart({ navigation, route }) {
+function GuestScreenWithCart({ navigation, route, currentRoute, children }) {
   const [cartOpen, setCartOpen] = useState(false);
-  const { hasSelection, needsChoice, setEditing } = usePickupLocation();
+  const { hasSelection, needsChoice } = usePickupLocation();
 
   const openCart = useCallback(() => setCartOpen(true), []);
   const closeCart = useCallback(() => setCartOpen(false), []);
@@ -33,13 +33,8 @@ function MenuScreenWithCart({ navigation, route }) {
   }, [route.params?.openCart, navigation]);
 
   const handleCheckout = () => {
+    // Keep the drawer open when blocked — CartPanel shows location + disables Proceed.
     if (needsChoice || !hasSelection) {
-      setEditing(true);
-      setCartOpen(false);
-      Alert.alert(
-        'Pickup location needed',
-        'Please choose which location you are ordering for before checkout.',
-      );
       return;
     }
     setCartOpen(false);
@@ -48,14 +43,34 @@ function MenuScreenWithCart({ navigation, route }) {
 
   return (
     <>
-      <CustomerNavbar navigation={navigation} currentRoute="Menu" onOpenCart={openCart} />
-      <MenuScreen />
+      <CustomerNavbar
+        navigation={navigation}
+        currentRoute={currentRoute}
+        onOpenCart={openCart}
+      />
+      {children}
       <CartDrawer
         visible={cartOpen}
         onClose={closeCart}
         onCheckout={handleCheckout}
       />
     </>
+  );
+}
+
+function HomeScreenWithCart({ navigation, route }) {
+  return (
+    <GuestScreenWithCart navigation={navigation} route={route} currentRoute="Home">
+      <HomeScreen navigation={navigation} />
+    </GuestScreenWithCart>
+  );
+}
+
+function MenuScreenWithCart({ navigation, route }) {
+  return (
+    <GuestScreenWithCart navigation={navigation} route={route} currentRoute="Menu">
+      <MenuScreen />
+    </GuestScreenWithCart>
   );
 }
 
@@ -70,10 +85,10 @@ function CheckoutScreenWithNav({ navigation }) {
 
 function ConfirmationScreenWithNav({ navigation, route }) {
   return (
-    <>
+    <View style={{ flex: 1 }}>
       <CustomerNavbar navigation={navigation} currentRoute="Confirmation" />
       <ConfirmationScreen navigation={navigation} route={route} />
-    </>
+    </View>
   );
 }
 
@@ -118,7 +133,7 @@ export default function CustomerNavigator() {
         headerShown: false,
       }}
     >
-      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Home" component={HomeScreenWithCart} />
       <Stack.Screen name="Menu" component={MenuScreenWithCart} />
       <Stack.Screen name="Catering" component={CateringScreenWithNav} />
       <Stack.Screen name="Rewards" component={RewardsScreenWithNav} />
