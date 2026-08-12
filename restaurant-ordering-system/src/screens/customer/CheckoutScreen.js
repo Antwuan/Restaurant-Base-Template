@@ -444,8 +444,11 @@ function CheckoutForm({
 
       clearCart();
       const paymentFromIntent = extractPaymentDetailsFromIntent(paymentIntent);
-      const paymentFromApi = paymentIntent?.id
-        ? await getPaymentMethodSummary(paymentIntent.id)
+      const paymentFromApi = paymentIntent?.id && paymentIntent?.client_secret
+        ? await getPaymentMethodSummary(paymentIntent.id, {
+            clientSecret: paymentIntent.client_secret,
+            restaurantId: restaurant?.id,
+          })
         : null;
       const payment = paymentFromApi || paymentFromIntent || { label: 'Card' };
 

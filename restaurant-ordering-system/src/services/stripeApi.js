@@ -101,16 +101,24 @@ export async function createPaymentIntent(amount, restaurantId, { email } = {}) 
 
 /**
  * Fetches a display-safe card summary (brand + last4) for a PaymentIntent.
+ * Requires the PaymentIntent client_secret as proof of possession.
  * Returns null when unavailable so checkout can still complete.
  */
-export async function getPaymentMethodSummary(paymentIntentId) {
-  if (!BACKEND_URL || !paymentIntentId) return null;
+export async function getPaymentMethodSummary(paymentIntentId, {
+  clientSecret,
+  restaurantId,
+} = {}) {
+  if (!BACKEND_URL || !paymentIntentId || !clientSecret || !restaurantId) return null;
 
   try {
     const response = await fetch(`${BACKEND_URL}/payment-method-summary`, {
       method: 'POST',
       headers: getFunctionHeaders(),
-      body: JSON.stringify({ paymentIntentId }),
+      body: JSON.stringify({
+        paymentIntentId,
+        clientSecret,
+        restaurantId,
+      }),
     });
     let payload;
     try {
