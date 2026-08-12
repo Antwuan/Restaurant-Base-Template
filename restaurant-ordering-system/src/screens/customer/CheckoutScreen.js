@@ -29,10 +29,15 @@ import PickupLocationPicker, {
   isPickupLocationReady,
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
-import { createPaymentIntent } from '../../services/stripeApi';
+import { createPaymentIntent, getPaymentMethodSummary } from '../../services/stripeApi';
 import { createOrder } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
+import {
+  extractPaymentDetailsFromIntent,
+  mergeOrderItemImages,
+  saveConfirmationPayload,
+} from '../../utils/confirmationPayload';
 import { applyPromoToTotals } from '../../services/promoService';
 import { toPersistablePickupLocationId } from '../../services/locationsService';
 import { usePickupLocation } from '../../context/PickupLocationContext';
@@ -393,13 +398,14 @@ function CheckoutForm({
         customerName: name,
         customerPhone: phone,
         customerEmail: email,
-        items: items.map(({ id, name: itemName, price, quantity, specialInstructions, selectedModifiers }) => ({
+        items: items.map(({ id, name: itemName, price, quantity, specialInstructions, selectedModifiers, image_url }) => ({
           id,
           name: itemName,
           price,
           quantity,
           special_instructions: specialInstructions || '',
           selected_modifiers: selectedModifiers || [],
+          image_url: image_url || null,
         })),
         subtotal: cartSubtotal,
         tax,
@@ -437,20 +443,28 @@ function CheckoutForm({
       }
 
       clearCart();
-      navigation.replace('Confirmation', {
-        order: {
-          ...order,
-          pickup_location: selectedLocation
-            ? {
-                id: toPersistablePickupLocationId(selectedLocation),
-                name: selectedLocation.name,
-                address: selectedLocation.address,
-                is_main: Boolean(selectedLocation.is_main),
-              }
-            : null,
-        },
-        pointsEarned,
-      });
+      const paymentFromIntent = extractPaymentDetailsFromIntent(paymentIntent);
+      const paymentFromApi = paymentIntent?.id
+        ? await getPaymentMethodSummary(paymentIntent.id)
+        : null;
+      const payment = paymentFromApi || paymentFromIntent || { label: 'Card' };
+
+      const confirmationOrder = {
+        ...order,
+        items: mergeOrderItemImages(order?.items, items),
+        pickup_location: selectedLocation
+          ? {
+              id: toPersistablePickupLocationId(selectedLocation),
+              name: selectedLocation.name,
+              address: selectedLocation.address,
+              is_main: Boolean(selectedLocation.is_main),
+            }
+          : null,
+        payment,
+      };
+      const confirmationPayload = { order: confirmationOrder, pointsEarned };
+      saveConfirmationPayload(confirmationPayload);
+      navigation.replace('Confirmation', confirmationPayload);
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {

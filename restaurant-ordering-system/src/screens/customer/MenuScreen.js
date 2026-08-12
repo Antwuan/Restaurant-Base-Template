@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   Platform,
   useWindowDimensions,
   Linking,
+  Alert,
+  AccessibilityInfo,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
@@ -22,6 +24,12 @@ import { useTheme } from '../../theme';
 import CategorySection from '../../components/CategorySection';
 import MenuItemModal from '../../components/MenuItemModal';
 import PickupLocationPicker from '../../components/PickupLocationPicker';
+import AdminHoverTab from '../../components/admin/AdminHoverTab';
+import {
+  getClosedUntilLabel,
+  getNotAcceptingReason,
+  isAcceptingOrdersNow,
+} from '../../utils/hoursUtils';
 
 const SIDEBAR_WIDTH = 188;
 const DESKTOP_BREAKPOINT = 768;
@@ -29,7 +37,7 @@ const NAVBAR_OFFSET = 60;
 
 export default function MenuScreen() {
   const { restaurant } = useRestaurantContext();
-  const { customerProfile, isCustomerAuthenticated, user } = useAuth();
+  const { customerProfile, user } = useAuth();
   const {
     locations,
     selectedLocationId,
@@ -41,12 +49,13 @@ export default function MenuScreen() {
   const {
     categoriesWithItems,
     menuByCategory,
+    allItems,
     loading,
     error,
     refetch,
   } = useMenu(restaurant?.id, 'regular');
 
-  const { addItem } = useCartContext();
+  const { addItem, hydrateImages } = useCartContext();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
 
@@ -62,6 +71,49 @@ export default function MenuScreen() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [hoursTick, setHoursTick] = useState(() => Date.now());
+  const c = theme.colors;
+
+  // Backfill image_url on cart lines saved before images were stored.
+  useEffect(() => {
+    if (!allItems?.length || !hydrateImages) return;
+    const imageById = {};
+    allItems.forEach((item) => {
+      if (item?.id && item.image_url) imageById[item.id] = item.image_url;
+    });
+    if (Object.keys(imageById).length) hydrateImages(imageById);
+  }, [allItems, hydrateImages]);
+
+  // Re-evaluate open/accepting status every minute so the pill flips near close.
+  useEffect(() => {
+    const id = setInterval(() => setHoursTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const acceptingOrders = useMemo(
+    () => isAcceptingOrdersNow(restaurant),
+    // hoursTick forces a refresh as closing time approaches
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [restaurant?.is_accepting_orders, restaurant?.hours_of_operation, hoursTick],
+  );
+  const notAcceptingReason = useMemo(
+    () => (acceptingOrders ? null : getNotAcceptingReason(restaurant)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [acceptingOrders, restaurant?.is_accepting_orders, restaurant?.hours_of_operation, hoursTick],
+  );
+  // Same closed tag copy as CateringScreen
+  const closedLabel = useMemo(
+    () => getClosedUntilLabel(restaurant?.hours_of_operation),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [restaurant?.hours_of_operation, hoursTick],
+  );
+  const statusTagLabel = closedLabel
+    || (notAcceptingReason === 'paused'
+      ? 'Not accepting orders'
+      : notAcceptingReason === 'closing_soon'
+        ? 'Closing soon'
+        : null);
 
   // Refs for each category section (keyed by category id)
   const sectionRefs = useRef({});
@@ -94,8 +146,19 @@ export default function MenuScreen() {
   }, [categoriesWithItems, menuByCategory]);
 
   const handleAddToCart = useCallback((item, quantity = 1, specialInstructions = '', menuType = 'regular', selectedModifiers = [], unitPrice) => {
+    // Soft-block: multi-location restaurants need a pickup choice before cart changes.
+    if (multiLocation && !hasSelection) {
+      Alert.alert(
+        'Pickup location needed',
+        'Choose where you’ll pick up this order, then add items. Use the location picker near the top of the menu.',
+        [{ text: 'Got it' }],
+      );
+      return;
+    }
     addItem(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
-  }, [addItem]);
+    const qtyLabel = quantity > 1 ? `${quantity} × ${item.name}` : item.name;
+    AccessibilityInfo.announceForAccessibility?.(`${qtyLabel} added to cart`);
+  }, [addItem, multiLocation, hasSelection]);
 
   const handleModalClose = useCallback(() => {
     setModalVisible(false);
@@ -153,12 +216,15 @@ export default function MenuScreen() {
   if (error) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.errorText}>Failed to load menu.</Text>
+        <Text style={styles.errorText}>We couldn’t load the menu.</Text>
+        <Text style={styles.errorHint}>Check your connection, then try again.</Text>
         <TouchableOpacity
           onPress={refetch}
           style={[styles.retryBtn, { backgroundColor: theme.colors.brand }]}
+          accessibilityRole="button"
+          accessibilityLabel="Try loading the menu again"
         >
-          <Text style={styles.retryBtnText}>Retry</Text>
+          <Text style={styles.retryBtnText}>Try again</Text>
         </TouchableOpacity>
       </View>
     );
@@ -180,6 +246,20 @@ export default function MenuScreen() {
   );
   const noResults = query.length > 0 && visibleCategories.length === 0;
 
+  // Info-bar location tracks the selected pickup store (not always HQ address).
+  const headerLocationLabel = (() => {
+    if (selectedLocation) {
+      const locName = selectedLocation.name?.trim();
+      const locAddress = selectedLocation.address?.trim();
+      const nameDiffers =
+        locName &&
+        locName.toLowerCase() !== (restaurant?.name || '').trim().toLowerCase();
+      if (nameDiffers && locAddress) return `${locName} · ${locAddress}`;
+      return locAddress || locName || null;
+    }
+    return restaurant?.address || null;
+  })();
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -195,40 +275,38 @@ export default function MenuScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── Slim info bar (replaces RestaurantHeader) ── */}
-        <View style={styles.infoBar}>
+        <View style={[styles.infoBar, { borderBottomColor: c.border }]}>
           <View style={styles.infoBarInner}>
             <View style={styles.infoLeft}>
               {restaurant?.name ? (
-                <Text style={styles.infoName}>{restaurant.name}</Text>
+                <Text style={[styles.infoName, { color: c.textPrimary }]}>{restaurant.name}</Text>
               ) : null}
               <View style={styles.infoMeta}>
-                {restaurant?.address ? (
+                {headerLocationLabel ? (
                   <View style={styles.infoMetaItem}>
-                    <Ionicons name="location-outline" size={13} color="#666" />
-                    <Text style={styles.infoMetaText} numberOfLines={1}>
-                      {restaurant.address}
+                    <Ionicons name="location-outline" size={13} color={c.textSecondary} />
+                    <Text style={[styles.infoMetaText, { color: c.textSecondary }]} numberOfLines={1}>
+                      {headerLocationLabel}
                     </Text>
                   </View>
                 ) : null}
-                {restaurant?.is_accepting_orders === false ? (
-                  <View style={[styles.statusPill, styles.statusPillClosed]}>
-                    <Text style={styles.statusPillText}>Closed</Text>
+                {statusTagLabel ? (
+                  <View style={styles.closedBadge}>
+                    <Text style={styles.closedBadgeText}>{statusTagLabel}</Text>
                   </View>
-                ) : (
-                  <View style={[styles.statusPill, styles.statusPillOpen]}>
-                    <Text style={styles.statusPillText}>Open Now</Text>
-                  </View>
-                )}
+                ) : null}
               </View>
             </View>
             {restaurant?.phone ? (
               <TouchableOpacity
                 onPress={() => Linking.openURL(`tel:${restaurant.phone}`)}
-                style={styles.phoneBtn}
+                style={[styles.phoneBtn, { borderColor: c.border }]}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Call ${restaurant.phone}`}
               >
-                <Ionicons name="call-outline" size={14} color={theme.colors.brand} />
-                <Text style={[styles.phoneBtnText, { color: theme.colors.brand }]}>
+                <Ionicons name="call-outline" size={14} color={c.brand} />
+                <Text style={[styles.phoneBtnText, { color: c.brand }]}>
                   {restaurant.phone}
                 </Text>
               </TouchableOpacity>
@@ -236,27 +314,15 @@ export default function MenuScreen() {
           </View>
         </View>
 
-        {/* ── Not accepting orders banner ── */}
-        {restaurant?.is_accepting_orders === false && (
-          <View style={styles.closedBanner}>
-            <Ionicons name="alert-circle-outline" size={16} color="#fff" />
-            <Text style={styles.closedBannerText}>
-              Currently not accepting orders
-            </Text>
-          </View>
-        )}
-
-        {/* ── Pickup location (compact summary → popup with map) ── */}
+        {/* Pickup location (compact summary → popup with map) */}
         {!locationsLoading && (multiLocation || selectedLocation) ? (
-          <View style={styles.pickupSection}>
+          <View style={[styles.pickupSection, { borderBottomColor: c.border }]}>
             <View style={styles.pickupSectionInner}>
               {multiLocation && !hasSelection ? (
-                <Text style={styles.pickupGreeting}>
+                <Text style={[styles.pickupGreeting, { color: c.textPrimary }]}>
                   {greetName
-                    ? `Welcome, ${greetName}!`
-                    : isCustomerAuthenticated
-                      ? 'Welcome!'
-                      : 'Welcome — where are you picking up?'}
+                    ? `Hi ${greetName} — where are you picking up?`
+                    : 'Where are you picking up?'}
                 </Text>
               ) : null}
               <PickupLocationPicker
@@ -264,14 +330,14 @@ export default function MenuScreen() {
                 selectedLocationId={selectedLocationId}
                 onSelect={(id) => setPickupLocation(id)}
                 restaurant={restaurant}
-                brandColor={theme.colors.brand}
+                brandColor={c.brand}
                 label=""
                 compact
                 autoOpenWhenUnset={multiLocation && !hasSelection}
               />
               {multiLocation && !hasSelection ? (
-                <Text style={styles.pickupHint}>
-                  Choose a location to continue ordering.
+                <Text style={[styles.pickupHint, { color: c.errorText }]}>
+                  Choose a location first so we know which kitchen gets your order.
                 </Text>
               ) : null}
             </View>
@@ -281,25 +347,41 @@ export default function MenuScreen() {
         {/* ── Two-column layout: sidebar + menu items ── */}
         {isEmpty ? (
           <View style={styles.emptyBlock}>
-            <Text style={styles.emptyText}>No menu items available right now.</Text>
+            <Text style={styles.emptyText}>This menu doesn’t have items yet.</Text>
+            <Text style={styles.emptyHint}>Check back soon, or try another location if you have more than one.</Text>
           </View>
         ) : (
           <View style={[styles.menuLayout, isDesktop && styles.menuLayoutDesktop]}>
 
             {/* Sidebar — search + category nav (desktop only, sticky) */}
             {isDesktop && (
-              <View style={styles.sidebar}>
+              <View style={[styles.sidebar, { borderRightColor: c.border }]}>
                 <View style={styles.sidebarInner}>
-                  <View style={styles.searchBox}>
-                    <Ionicons name="search-outline" size={16} color="#999" />
+                  <View
+                    style={[
+                      styles.searchBox,
+                      {
+                        borderColor: searchFocused ? c.brand : c.border,
+                        backgroundColor: c.backgroundSunken,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="search-outline"
+                      size={16}
+                      color={searchFocused ? c.brand : c.textSecondary}
+                    />
                     <TextInput
-                      style={styles.searchInput}
-                      placeholder="Search menu…"
-                      placeholderTextColor="#999"
+                      style={[styles.searchInput, { color: c.textPrimary }]}
+                      placeholder="Search menu"
+                      placeholderTextColor={c.textDisabled}
                       value={searchQuery}
                       onChangeText={setSearchQuery}
+                      onFocus={() => setSearchFocused(true)}
+                      onBlur={() => setSearchFocused(false)}
                       returnKeyType="search"
                       clearButtonMode="while-editing"
+                      accessibilityLabel="Search menu by name or description"
                     />
                     {searchQuery.length > 0 && (
                       <TouchableOpacity
@@ -307,32 +389,40 @@ export default function MenuScreen() {
                         accessibilityLabel="Clear search"
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       >
-                        <Ionicons name="close-circle" size={16} color="#bbb" />
+                        <Ionicons name="close-circle" size={16} color={c.textDisabled} />
                       </TouchableOpacity>
                     )}
                   </View>
                   {visibleCategories.map((category) => {
                     const isActive = category.id === activeCategory;
                     return (
-                      <TouchableOpacity
+                      <AdminHoverTab
                         key={category.id}
+                        isActive={isActive}
+                        brandLight={c.brandLight}
+                        washRadius={8}
+                        onPress={() => handleSidebarPress(category.id)}
                         style={[
                           styles.sidebarItem,
-                          isActive && { borderLeftColor: theme.colors.brand },
+                          isActive && { backgroundColor: c.brandLight },
                         ]}
-                        onPress={() => handleSidebarPress(category.id)}
-                        activeOpacity={0.7}
+                        accessibilityLabel={category.name}
                       >
-                        <Text
-                          style={[
-                            styles.sidebarItemText,
-                            isActive && { color: theme.colors.brand, fontWeight: '700' },
-                          ]}
-                          numberOfLines={2}
-                        >
-                          {category.name}
-                        </Text>
-                      </TouchableOpacity>
+                        {({ hovered }) => (
+                          <Text
+                            style={[
+                              styles.sidebarItemText,
+                              {
+                                color: isActive || hovered ? c.brand : c.textSecondary,
+                              },
+                              isActive && { fontWeight: '700' },
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {category.name}
+                          </Text>
+                        )}
+                      </AdminHoverTab>
                     );
                   })}
                 </View>
@@ -341,17 +431,32 @@ export default function MenuScreen() {
 
             {/* Mobile search + horizontal category scroll */}
             {!isDesktop && (
-              <View style={styles.mobileNav}>
-                <View style={styles.searchBox}>
-                  <Ionicons name="search-outline" size={16} color="#999" />
+              <View style={[styles.mobileNav, { borderBottomColor: c.border }]}>
+                <View
+                  style={[
+                    styles.searchBox,
+                    {
+                      borderColor: searchFocused ? c.brand : c.border,
+                      backgroundColor: c.backgroundSunken,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="search-outline"
+                    size={16}
+                    color={searchFocused ? c.brand : c.textSecondary}
+                  />
                   <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search menu…"
-                    placeholderTextColor="#999"
+                    style={[styles.searchInput, { color: c.textPrimary }]}
+                    placeholder="Search menu"
+                    placeholderTextColor={c.textDisabled}
                     value={searchQuery}
                     onChangeText={setSearchQuery}
+                    onFocus={() => setSearchFocused(true)}
+                    onBlur={() => setSearchFocused(false)}
                     returnKeyType="search"
                     clearButtonMode="while-editing"
+                    accessibilityLabel="Search menu by name or description"
                   />
                   {searchQuery.length > 0 && (
                     <TouchableOpacity
@@ -359,7 +464,7 @@ export default function MenuScreen() {
                       accessibilityLabel="Clear search"
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Ionicons name="close-circle" size={16} color="#bbb" />
+                      <Ionicons name="close-circle" size={16} color={c.textDisabled} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -371,24 +476,36 @@ export default function MenuScreen() {
                   {visibleCategories.map((category) => {
                     const isActive = category.id === activeCategory;
                     return (
-                      <TouchableOpacity
+                      <AdminHoverTab
                         key={category.id}
+                        isActive={isActive}
+                        brandLight={c.brandLight}
+                        washRadius={20}
+                        onPress={() => handleSidebarPress(category.id)}
                         style={[
                           styles.mobileCategoryChip,
-                          isActive && { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
+                          { borderColor: isActive ? c.brand : c.border },
+                          isActive && { backgroundColor: c.brand },
                         ]}
-                        onPress={() => handleSidebarPress(category.id)}
-                        activeOpacity={0.75}
+                        accessibilityLabel={category.name}
                       >
-                        <Text
-                          style={[
-                            styles.mobileCategoryChipText,
-                            isActive && { color: '#fff' },
-                          ]}
-                        >
-                          {category.name}
-                        </Text>
-                      </TouchableOpacity>
+                        {({ hovered }) => (
+                          <Text
+                            style={[
+                              styles.mobileCategoryChipText,
+                              {
+                                color: isActive
+                                  ? (c.brandText || '#fff')
+                                  : hovered
+                                    ? c.brand
+                                    : c.textSecondary,
+                              },
+                            ]}
+                          >
+                            {category.name}
+                          </Text>
+                        )}
+                      </AdminHoverTab>
                     );
                   })}
                 </ScrollView>
@@ -399,10 +516,20 @@ export default function MenuScreen() {
             <View style={[styles.menuItems, isDesktop && styles.menuItemsDesktop]}>
               {noResults ? (
                 <View style={styles.noResults}>
-                  <Ionicons name="search-outline" size={28} color="#bbb" />
-                  <Text style={styles.noResultsText}>
+                  <Ionicons name="search-outline" size={28} color={c.textDisabled} />
+                  <Text style={[styles.noResultsText, { color: c.textSecondary }]}>
                     No items match “{searchQuery.trim()}”.
                   </Text>
+                  <TouchableOpacity
+                    onPress={() => setSearchQuery('')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear search"
+                    style={styles.noResultsAction}
+                  >
+                    <Text style={[styles.noResultsActionText, { color: c.brand }]}>
+                      Clear search
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               ) : (
                 visibleCategories.map((category) => (
@@ -493,28 +620,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 20,
+  // Matches CateringScreen closedBadge
+  closedBadge: {
+    backgroundColor: '#fde8ec',
+    borderRadius: 100,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  statusPillOpen: {
-    backgroundColor: '#D1FAE5',
-  },
-  statusPillClosed: {
-    backgroundColor: '#FEE2E2',
-  },
-  statusPillText: {
+  closedBadgeText: {
     fontSize: 11,
-    fontWeight: '700',
-    color: '#374151',
+    fontWeight: '600',
+    color: '#c2314f',
   },
   phoneBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 8,
+    minHeight: 36,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#e0e0e0',
@@ -524,22 +648,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // ── Closed banner
-  closedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#EF4444',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  closedBannerText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-
-  // ── Pickup location
   pickupSection: {
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -555,13 +663,13 @@ const styles = StyleSheet.create({
   pickupGreeting: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#0a2540',
+    color: '#111',
     marginBottom: 10,
   },
   pickupHint: {
     marginTop: 8,
     fontSize: 12,
-    color: '#c0392b',
+    fontWeight: '500',
   },
 
   // ── Menu layout (no flex:1 — lets outer ScrollView grow with content)
@@ -581,6 +689,7 @@ const styles = StyleSheet.create({
   sidebar: {
     width: SIDEBAR_WIDTH,
     flexShrink: 0,
+    minWidth: 0,
     ...Platform.select({
       web: { position: 'sticky', top: 60, alignSelf: 'flex-start' },
     }),
@@ -592,12 +701,16 @@ const styles = StyleSheet.create({
   },
   sidebarInner: {
     paddingHorizontal: 0,
+    minWidth: 0,
+    width: '100%',
   },
   sidebarItem: {
     paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderLeftWidth: 3,
-    borderLeftColor: 'transparent',
+    paddingVertical: 11,
+    minHeight: 40,
+    borderRadius: 8,
+    justifyContent: 'center',
+    marginBottom: 2,
   },
   sidebarItemText: {
     fontSize: 14,
@@ -611,19 +724,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#e2e2e2',
     borderRadius: 22,
     paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'web' ? 8 : 6,
+    paddingVertical: Platform.OS === 'web' ? 10 : 8,
     marginBottom: 14,
     backgroundColor: '#fafafa',
+    minWidth: 0,
+    maxWidth: '100%',
   },
   searchInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 14,
+    lineHeight: 20,
     color: '#222',
-    ...Platform.select({ web: { outlineStyle: 'none' } }),
+    paddingVertical: 2,
+    ...Platform.select({
+      web: {
+        outlineStyle: 'none',
+        width: '100%',
+      },
+    }),
   },
 
   // ── Mobile nav (search + chips)
@@ -635,16 +758,19 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   mobileCategoryContent: {
-    paddingBottom: 10,
+    paddingBottom: 12,
     gap: 8,
+    alignItems: 'center',
   },
   mobileCategoryChip: {
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 9,
+    minHeight: 36,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#ddd',
     backgroundColor: '#fff',
+    justifyContent: 'center',
   },
   mobileCategoryChipText: {
     fontSize: 13,
@@ -676,6 +802,15 @@ const styles = StyleSheet.create({
     color: '#888',
     textAlign: 'center',
   },
+  noResultsAction: {
+    marginTop: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  noResultsActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
 
   // ── States
   emptyBlock: {
@@ -684,6 +819,7 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     paddingHorizontal: 24,
     minHeight: 200,
+    gap: 8,
   },
   loadingText: {
     marginTop: 12,
@@ -693,12 +829,26 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 16,
     color: '#cc2222',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  errorHint: {
+    fontSize: 14,
+    color: '#888',
     marginBottom: 16,
+    textAlign: 'center',
   },
   emptyText: {
     fontSize: 16,
+    color: '#555',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  emptyHint: {
+    fontSize: 14,
     color: '#888',
     textAlign: 'center',
+    lineHeight: 20,
   },
   retryBtn: {
     paddingHorizontal: 24,

@@ -98,3 +98,36 @@ export async function createPaymentIntent(amount, restaurantId, { email } = {}) 
 
   return clientSecret;
 }
+
+/**
+ * Fetches a display-safe card summary (brand + last4) for a PaymentIntent.
+ * Returns null when unavailable so checkout can still complete.
+ */
+export async function getPaymentMethodSummary(paymentIntentId) {
+  if (!BACKEND_URL || !paymentIntentId) return null;
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/payment-method-summary`, {
+      method: 'POST',
+      headers: getFunctionHeaders(),
+      body: JSON.stringify({ paymentIntentId }),
+    });
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+    if (!response.ok) return null;
+    return {
+      brand: payload.brand || null,
+      last4: payload.last4 || null,
+      funding: payload.funding || null,
+      wallet: payload.wallet || null,
+      label: payload.label || null,
+      type: payload.type || 'card',
+    };
+  } catch {
+    return null;
+  }
+}

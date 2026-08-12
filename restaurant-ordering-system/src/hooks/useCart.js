@@ -78,8 +78,17 @@ function loadInitialCarts() {
 }
 
 function computeTotals(items) {
-  const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
-  const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const safeItems = Array.isArray(items) ? items : [];
+  const itemCount = safeItems.reduce((sum, i) => {
+    const q = Number(i.quantity);
+    return sum + (Number.isFinite(q) && q > 0 ? q : 0);
+  }, 0);
+  const subtotal = safeItems.reduce((sum, i) => {
+    const q = Number(i.quantity);
+    const p = Number(i.price);
+    if (!Number.isFinite(q) || !Number.isFinite(p) || q <= 0) return sum;
+    return sum + p * q;
+  }, 0);
   const tax = subtotal * TAX_RATE;
   const total = subtotal + tax;
   return { itemCount, subtotal, tax, total };
@@ -139,10 +148,19 @@ export const useCart = (restaurantId) => {
         lineMatches(i, menuItem.id, specialInstructions, mods)
       );
 
+      const imageUrl = menuItem.image_url || menuItem.imageUrl || null;
+
       if (existing) {
         return prev.map((i) =>
           lineMatches(i, menuItem.id, specialInstructions, mods)
-            ? { ...i, quantity: i.quantity + quantity, menuType: type, price }
+            ? {
+                ...i,
+                quantity: i.quantity + quantity,
+                menuType: type,
+                price,
+                // Keep newest image if the line was added before images were stored
+                image_url: imageUrl || i.image_url || null,
+              }
             : i
         );
       }
@@ -158,6 +176,7 @@ export const useCart = (restaurantId) => {
           restaurantId,
           menuType: type,
           selectedModifiers: mods,
+          image_url: imageUrl,
         },
       ];
     },
@@ -175,11 +194,12 @@ export const useCart = (restaurantId) => {
     ) => {
       const type = normalizeMenuType(menuType);
       const setItems = getSetter(type);
+      const qty = Math.min(99, Math.max(1, Math.floor(Number(quantity)) || 1));
       setItems((current) =>
         appendOrMergeItem(
           current,
           menuItem,
-          quantity,
+          qty,
           specialInstructions,
           type,
           selectedModifiers,
@@ -202,15 +222,17 @@ export const useCart = (restaurantId) => {
 
   const updateQuantity = useCallback(
     (itemId, quantity, specialInstructions = '', menuType = 'regular', selectedModifiers = []) => {
-      if (quantity <= 0) {
+      const nextQty = Math.floor(Number(quantity));
+      if (!Number.isFinite(nextQty) || nextQty <= 0) {
         removeItem(itemId, specialInstructions, menuType, selectedModifiers);
         return;
       }
+      const clamped = Math.min(99, nextQty);
       const setItems = getSetter(menuType);
       setItems((prev) =>
         prev.map((i) =>
           lineMatches(i, itemId, specialInstructions, selectedModifiers)
-            ? { ...i, quantity }
+            ? { ...i, quantity: clamped }
             : i
         )
       );
@@ -241,6 +263,23 @@ export const useCart = (restaurantId) => {
   const regularTotals = computeTotals(regularItems);
   const cateringTotals = computeTotals(cateringItems);
 
+  const hydrateImages = useCallback((imageById) => {
+    if (!imageById || typeof imageById !== 'object') return;
+    const patch = (prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (item.image_url || item.imageUrl) return item;
+        const url = imageById[item.id] || imageById[String(item.id)] || null;
+        if (!url) return item;
+        changed = true;
+        return { ...item, image_url: url };
+      });
+      return changed ? next : prev;
+    };
+    setRegularItems(patch);
+    setCateringItems(patch);
+  }, []);
+
   return {
     // Regular cart (navbar, drawer, checkout)
     items: regularItems,
@@ -262,5 +301,6 @@ export const useCart = (restaurantId) => {
     removeItem,
     updateQuantity,
     clearCart,
+    hydrateImages,
   };
 };

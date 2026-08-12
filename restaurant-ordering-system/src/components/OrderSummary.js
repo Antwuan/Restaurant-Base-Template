@@ -1,6 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
+
+const THUMB = 44;
+
+function formatMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '$0.00';
+  return `$${n.toFixed(2)}`;
+}
 
 /**
  * Props:
@@ -12,6 +21,7 @@ import { useTheme } from '../theme';
  *   promoCode      {string}  optional applied code label
  *   orderType      {'pickup' | 'delivery'}
  *   scheduledTime  {string | null}
+ *   taxLabel       {string}  default "Estimated tax" — avoid claiming a false rate
  */
 const OrderSummary = ({
   items = [],
@@ -22,9 +32,11 @@ const OrderSummary = ({
   promoCode = null,
   orderType,
   scheduledTime,
+  taxLabel = 'Estimated tax',
 }) => {
   const { theme } = useTheme();
   const hasDiscount = Number(discountAmount) > 0;
+  const isDelivery = orderType === 'delivery';
 
   let scheduledLabel = null;
   if (scheduledTime && scheduledTime !== 'ASAP') {
@@ -49,41 +61,53 @@ const OrderSummary = ({
       {/* Line items */}
       {items.length > 0 && (
         <View style={styles.lineItems}>
-          {items.map((item, index) => (
-            <View key={`${item.id}-${index}`} style={styles.lineItem}>
-              <View style={styles.lineItemLeft}>
-                <View style={[styles.qtyBadge, { backgroundColor: theme.colors.brand }]}>
-                  <Text style={styles.qtyText}>{item.quantity}</Text>
-                </View>
-                <View style={styles.lineItemInfo}>
-                  <Text style={styles.lineItemName} numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  {item.specialInstructions ? (
-                    <Text style={styles.lineItemNote} numberOfLines={1}>
-                      {item.specialInstructions}
+          {items.map((item, index) => {
+            const qty = Number(item.quantity) || 0;
+            const price = Number(item.price);
+            const line = Number.isFinite(price) ? price * qty : 0;
+            const imageUrl = item.image_url || item.imageUrl || null;
+            return (
+              <View key={`${item.id}-${index}`} style={styles.lineItem}>
+                <View style={styles.lineItemLeft}>
+                  <View style={styles.thumbWrap}>
+                    {imageUrl ? (
+                      <Image source={{ uri: imageUrl }} style={styles.thumb} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.thumb, styles.thumbPlaceholder]}>
+                        <Ionicons name="restaurant-outline" size={18} color="#c4c4c4" />
+                      </View>
+                    )}
+                    <View style={[styles.qtyBadge, { backgroundColor: theme.colors.brand }]}>
+                      <Text style={styles.qtyText}>{qty}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.lineItemInfo}>
+                    <Text style={styles.lineItemName} numberOfLines={2}>
+                      {item.name || 'Item'}
                     </Text>
-                  ) : null}
-                  {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
-                    <Text style={styles.lineItemNote} numberOfLines={2}>
-                      {item.selectedModifiers.map((m) => m.optionName).join(', ')}
-                    </Text>
-                  ) : null}
+                    {item.specialInstructions ? (
+                      <Text style={styles.lineItemNote} numberOfLines={2}>
+                        {item.specialInstructions}
+                      </Text>
+                    ) : null}
+                    {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
+                      <Text style={styles.lineItemNote} numberOfLines={4}>
+                        {item.selectedModifiers.map((m) => m.optionName).filter(Boolean).join(', ')}
+                      </Text>
+                    ) : null}
+                  </View>
                 </View>
+                <Text style={styles.lineItemPrice}>{formatMoney(line)}</Text>
               </View>
-              <Text style={styles.lineItemPrice}>
-                ${(item.price * item.quantity).toFixed(2)}
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
       )}
 
-      {/* Totals */}
       <View style={styles.totals}>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Subtotal</Text>
-          <Text style={styles.totalValue}>${Number(subtotal).toFixed(2)}</Text>
+          <Text style={styles.totalValue}>{formatMoney(subtotal)}</Text>
         </View>
         {hasDiscount ? (
           <View style={styles.totalRow}>
@@ -91,37 +115,44 @@ const OrderSummary = ({
               Discount{promoCode ? ` (${promoCode})` : ''}
             </Text>
             <Text style={[styles.totalValue, styles.discountValue]}>
-              −${Number(discountAmount).toFixed(2)}
+              −{formatMoney(discountAmount)}
             </Text>
           </View>
         ) : null}
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Tax (8%)</Text>
-          <Text style={styles.totalValue}>${Number(tax).toFixed(2)}</Text>
+          <Text style={styles.totalLabel}>{taxLabel}</Text>
+          <Text style={styles.totalValue}>{formatMoney(tax)}</Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.totalRow}>
           <Text style={styles.grandLabel}>Total</Text>
           <Text style={[styles.grandValue, { color: theme.colors.brand }]}>
-            ${Number(total).toFixed(2)}
+            {formatMoney(total)}
           </Text>
         </View>
       </View>
 
-      {/* Order meta badges */}
       <View style={styles.metaBlock}>
         <View style={[styles.badge, { backgroundColor: theme.colors.brandLight || '#E8F0FE' }]}>
+          <Ionicons
+            name={isDelivery ? 'bicycle-outline' : 'storefront-outline'}
+            size={14}
+            color={theme.colors.brand}
+            style={{ marginRight: 4 }}
+          />
           <Text style={[styles.badgeText, { color: theme.colors.brand }]}>
-            {orderType === 'delivery' ? '🚗  Delivery' : '🏪  Pickup'}
+            {isDelivery ? 'Delivery' : 'Pickup'}
           </Text>
         </View>
         {scheduledLabel ? (
           <View style={[styles.badge, { backgroundColor: '#f0f0f0' }]}>
-            <Text style={styles.badgeText}>🕐  {scheduledLabel}</Text>
+            <Ionicons name="time-outline" size={14} color="#444" style={{ marginRight: 4 }} />
+            <Text style={styles.badgeText}>{scheduledLabel}</Text>
           </View>
         ) : scheduledTime === 'ASAP' ? (
           <View style={[styles.badge, { backgroundColor: '#f0f0f0' }]}>
-            <Text style={styles.badgeText}>🕐  ASAP</Text>
+            <Ionicons name="flash-outline" size={14} color="#444" style={{ marginRight: 4 }} />
+            <Text style={styles.badgeText}>ASAP</Text>
           </View>
         ) : null}
       </View>
@@ -167,24 +198,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     flex: 1,
+    minWidth: 0,
     gap: 10,
   },
+  thumbWrap: {
+    width: THUMB,
+    height: THUMB,
+    borderRadius: 8,
+    overflow: 'visible',
+    flexShrink: 0,
+    position: 'relative',
+  },
+  thumb: {
+    width: THUMB,
+    height: THUMB,
+    borderRadius: 8,
+  },
+  thumbPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
+  },
   qtyBadge: {
-    width: 22,
+    position: 'absolute',
+    top: -6,
+    left: -6,
+    minWidth: 22,
     height: 22,
+    paddingHorizontal: 5,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 1,
-    flexShrink: 0,
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   qtyText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#ffffff',
   },
   lineItemInfo: {
     flex: 1,
+    minWidth: 0,
   },
   lineItemName: {
     fontSize: 14,
@@ -252,6 +307,8 @@ const styles = StyleSheet.create({
     paddingTop: 16,
   },
   badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 20,
