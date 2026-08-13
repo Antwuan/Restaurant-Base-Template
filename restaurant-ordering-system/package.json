@@ -4,7 +4,8 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start --web",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build": "expo export -p web"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
