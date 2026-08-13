@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { View, StyleSheet, Platform } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createStackNavigator } from '@react-navigation/stack';
 
 import HomeScreen from '../screens/customer/HomeScreen';
 import MenuScreen from '../screens/customer/MenuScreen';
@@ -17,12 +17,11 @@ import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
 import { usePickupLocation } from '../context/PickupLocationContext';
 
-const Stack = createNativeStackNavigator();
+// JS stack on web: native-stack keeps prior routes in document flow in static
+// Expo exports, which stacked a second CustomerNavbar under Home.
+const Stack =
+  Platform.OS === 'web' ? createStackNavigator() : createNativeStackNavigator();
 
-/**
- * One chrome shell per customer route so native-stack web can't leave a second
- * sticky navbar in document flow from another mounted screen.
- */
 function ScreenChrome({
   navigation,
   route,
@@ -30,7 +29,6 @@ function ScreenChrome({
   withCart = false,
   children,
 }) {
-  const isFocused = useIsFocused();
   const [cartOpen, setCartOpen] = useState(false);
   const { hasSelection, needsChoice } = usePickupLocation();
 
@@ -44,10 +42,6 @@ function ScreenChrome({
     }
   }, [withCart, route.params?.openCart, navigation]);
 
-  useEffect(() => {
-    if (!isFocused) setCartOpen(false);
-  }, [isFocused]);
-
   const handleCheckout = () => {
     if (needsChoice || !hasSelection) return;
     setCartOpen(false);
@@ -56,15 +50,13 @@ function ScreenChrome({
 
   return (
     <View style={styles.screen}>
-      {isFocused ? (
-        <CustomerNavbar
-          navigation={navigation}
-          currentRoute={currentRoute}
-          onOpenCart={withCart ? openCart : undefined}
-        />
-      ) : null}
+      <CustomerNavbar
+        navigation={navigation}
+        currentRoute={currentRoute}
+        onOpenCart={withCart ? openCart : undefined}
+      />
       <View style={styles.body}>{children}</View>
-      {withCart && isFocused ? (
+      {withCart ? (
         <CartDrawer
           visible={cartOpen}
           onClose={closeCart}
@@ -107,7 +99,7 @@ function ConfirmationScreenWithNav({ navigation, route }) {
   );
 }
 
-function TrackerScreenWithNav({ navigation, route }) {
+function TrackerScreenWithNav({ navigation }) {
   return (
     <View style={styles.screen}>
       <TrackerScreen navigation={navigation} />
@@ -115,7 +107,7 @@ function TrackerScreenWithNav({ navigation, route }) {
   );
 }
 
-function RewardsScreenWithNav({ navigation, route }) {
+function RewardsScreenWithNav({ navigation }) {
   return (
     <View style={styles.screen}>
       <RewardsScreen navigation={navigation} />
@@ -123,7 +115,7 @@ function RewardsScreenWithNav({ navigation, route }) {
   );
 }
 
-function ProfileScreenWithNav({ navigation, route }) {
+function ProfileScreenWithNav({ navigation }) {
   return (
     <View style={styles.screen}>
       <ProfileScreen navigation={navigation} />
@@ -160,7 +152,8 @@ export default function CustomerNavigator() {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
-        animation: 'fade',
+        animationEnabled: Platform.OS === 'web' ? false : true,
+        cardStyle: styles.stackContent,
         contentStyle: styles.stackContent,
       }}
     >

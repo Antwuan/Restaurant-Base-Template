@@ -13,7 +13,6 @@ import {
   AccessibilityInfo,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useIsFocused } from '@react-navigation/native';
 import { useRestaurantContext } from '../context/RestaurantContext';
 import { useCartContext } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -95,9 +94,6 @@ function NavLink({ label, isActive, onPress }) {
 }
 
 export default function CustomerNavbar({ navigation, currentRoute, onOpenCart }) {
-  // native-stack on web can keep prior routes mounted; hide chrome when unfocused
-  // so sticky/relative bars don't stack (duplicate nav).
-  const isFocused = useIsFocused();
   const { restaurant } = useRestaurantContext();
   const { itemCount } = useCartContext();
   const {
@@ -249,8 +245,6 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
     inputRange: [0, 1],
     outputRange: [-8, 0],
   });
-
-  if (!isFocused) return null;
 
   const pointsPill = (
     <TouchableOpacity
@@ -461,8 +455,7 @@ const styles = StyleSheet.create({
   navbarShell: {
     zIndex: 100,
     ...Platform.select({
-      // sticky can leak a second bar when native-stack keeps another screen mounted on web
-      web: { position: 'relative', top: 0 },
+      web: { position: 'sticky', top: 0 },
     }),
   },
   navbar: {
