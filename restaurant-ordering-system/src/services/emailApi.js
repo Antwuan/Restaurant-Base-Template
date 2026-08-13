@@ -40,8 +40,8 @@ export async function syncMarketingContact({
   });
 }
 
-export async function sendBroadcast({ restaurantId, subject, html, previewText, name }) {
-  return invoke('send-broadcast', { restaurantId, subject, html, previewText, name });
+export async function sendBroadcast({ restaurantId, subject, html, previewText, name, promoCodeId }) {
+  return invoke('send-broadcast', { restaurantId, subject, html, previewText, name, promoCodeId });
 }
 
 export async function manageEmailDomain(payload) {
@@ -54,7 +54,7 @@ export async function listEmailBroadcasts(restaurantId) {
   const { data, error } = await supabase
     .from('email_broadcasts')
     .select(
-      'id, restaurant_id, resend_broadcast_id, subject, preview_text, name, sent_at, delivered_count, opened_count, clicked_count, bounced_count, complained_count',
+      'id, restaurant_id, resend_broadcast_id, subject, preview_text, name, sent_at, delivered_count, opened_count, clicked_count, bounced_count, complained_count, promo_code_id, promo_codes(code, title)',
     )
     .eq('restaurant_id', restaurantId)
     .order('sent_at', { ascending: false });

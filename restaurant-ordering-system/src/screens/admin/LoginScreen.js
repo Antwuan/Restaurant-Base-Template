@@ -14,12 +14,15 @@ import {
   Alert,
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
+import { useRestaurantContext } from '../../context/RestaurantContext';
+import { isStaffForRestaurant } from '../../services/authService';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, signOut, isStaffUser } = useAuth();
+  const { signIn, signOut } = useAuth();
+  const { restaurant } = useRestaurantContext();
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -32,12 +35,12 @@ export default function LoginScreen({ navigation }) {
       const data = await signIn(email, password);
       const userId = data?.user?.id;
       if (userId) {
-        const staff = await isStaffUser(userId);
-        if (!staff) {
+        const staffHere = await isStaffForRestaurant(userId, restaurant?.id);
+        if (!staffHere) {
           await signOut();
           Alert.alert(
             'Not an admin account',
-            'This account is not an admin account. Please sign in with a staff account, or use the customer Sign in on the restaurant site.',
+            `This account is not an admin for ${restaurant?.name || 'this restaurant'}.`,
           );
           return;
         }
