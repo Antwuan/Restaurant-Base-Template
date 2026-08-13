@@ -8,7 +8,7 @@
     "build": "expo export -p web"
   },
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
