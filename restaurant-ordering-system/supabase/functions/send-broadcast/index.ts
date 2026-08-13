@@ -1,7 +1,8 @@
 /**
  * Admin marketing broadcast to the restaurant's Resend segment.
- * Body: { restaurantId, subject, html, previewText? }
+ * Body: { restaurantId, subject, html, previewText?, name?, promoCodeId? }
  * Requires {{{RESEND_UNSUBSCRIBE_URL}}} in html.
+ * promoCodeId is optional; when set it must belong to restaurantId.
  */
 import { Resend } from 'npm:resend';
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -27,7 +28,7 @@ Deno.serve(async (req: Request) => {
     const apiKey = Deno.env.get('RESEND_API_KEY');
     if (!apiKey) return json({ error: 'RESEND_API_KEY is not configured' }, 500);
 
-    const { restaurantId, subject, html, previewText, name } = await req.json();
+    const { restaurantId, subject, html, previewText, name, promoCodeId } = await req.json();
 
     if (!restaurantId || !subject?.trim() || !html?.trim()) {
       return json({ error: 'restaurantId, subject, and html are required' }, 400);
@@ -68,6 +69,27 @@ Deno.serve(async (req: Request) => {
       }, 400);
     }
 
+    let resolvedPromoCodeId: string | null = null;
+    const rawPromoId = typeof promoCodeId === 'string' ? promoCodeId.trim() : promoCodeId;
+    if (rawPromoId) {
+      const { data: promo, error: promoErr } = await supabase
+        .from('promo_codes')
+        .select('id, restaurant_id')
+        .eq('id', rawPromoId)
+        .maybeSingle();
+
+      if (promoErr) {
+        return json({ error: 'Invalid promo code' }, 400);
+      }
+      if (!promo) {
+        return json({ error: 'Promo code not found' }, 404);
+      }
+      if (promo.restaurant_id !== restaurantId) {
+        return json({ error: 'Promo code does not belong to this restaurant' }, 400);
+      }
+      resolvedPromoCodeId = promo.id;
+    }
+
     const resend = new Resend(apiKey);
     const broadcastName = name?.trim() || `${restaurant.name} — ${new Date().toISOString().slice(0, 10)}`;
 
@@ -97,6 +119,7 @@ Deno.serve(async (req: Request) => {
         subject: subject.trim(),
         preview_text: previewText?.trim() || null,
         name: broadcastName,
+        promo_code_id: resolvedPromoCodeId,
         sent_at: new Date().toISOString(),
       })
       .select('id')

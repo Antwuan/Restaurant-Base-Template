@@ -20,7 +20,6 @@ import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useCarousel } from '../../hooks/useCarousel';
 import { useGallery } from '../../hooks/useGallery';
 import { useTheme } from '../../theme';
-import CustomerNavbar from '../../components/CustomerNavbar';
 import LocationCard from '../../components/LocationCard';
 import { ScrollReveal, PressableScale } from '../../components/motion';
 
@@ -362,8 +361,6 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.root}>
-      <CustomerNavbar navigation={navigation} currentRoute="Home" />
-
       <View style={styles.content}>
         {pageLoading ? (
           <View style={styles.loaderOverlay} pointerEvents="auto">

@@ -27,6 +27,8 @@ import * as restaurantService from '../../services/restaurantService';
 import * as rewardsService from '../../services/rewardsService';
 import * as promoService from '../../services/promoService';
 import * as menuService from '../../services/menuService';
+import { sendBroadcast } from '../../services/emailApi';
+import { confirmAsync } from '../../utils/confirm';
 
 const BENEFIT_TYPES = promoService.BENEFIT_TYPES;
 
@@ -446,9 +448,10 @@ function OfferForm({ offer, brandColor, menuItems, onSave, onCancel }) {
   );
 }
 
-function PromoForm({ promo, brandColor, menuItems, onSave, onCancel }) {
+function PromoForm({ promo, brandColor, menuItems, emailReady, onSave, onCancel }) {
   const { theme } = useTheme();
   const c = theme.colors;
+  const isCreate = !promo;
   const [title, setTitle] = useState(promo?.title ?? '');
   const [description, setDescription] = useState(promo?.description ?? '');
   const [code, setCode] = useState(promo?.code ?? promoService.generatePromoCode());
@@ -470,6 +473,7 @@ function PromoForm({ promo, brandColor, menuItems, onSave, onCancel }) {
     promo?.expires_at ? String(promo.expires_at).slice(0, 10) : '',
   );
   const [isActive, setIsActive] = useState(promo?.is_active ?? true);
+  const [emailCustomers, setEmailCustomers] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
 
@@ -501,6 +505,7 @@ function PromoForm({ promo, brandColor, menuItems, onSave, onCancel }) {
         max_redemptions: maxRedemptions.trim() ? parseInt(maxRedemptions, 10) : null,
         expires_at: expiresAt.trim() ? new Date(`${expiresAt.trim()}T23:59:59`).toISOString() : null,
         is_active: isActive,
+        ...(isCreate ? { emailCustomers: emailReady && emailCustomers } : {}),
       });
     } catch {
       // Parent shows notify(); keep modal open for retry
@@ -638,6 +643,29 @@ function PromoForm({ promo, brandColor, menuItems, onSave, onCancel }) {
             trackColor={{ true: brandColor, false: '#ccc' }}
           />
         </View>
+
+        {isCreate ? (
+          <View style={[form.switchRow, form.emailSwitchRow, !emailReady && { opacity: 0.55 }]}>
+            <View style={form.emailSwitchCopy}>
+              <Text style={[form.label, { color: c.textSecondary, marginTop: 0, marginBottom: 0 }]}>
+                Email customers
+              </Text>
+              <Text style={[form.helperText, { color: c.textSecondary, marginTop: 4 }]}>
+                {emailReady
+                  ? 'Send this promo to opted-in customers after saving.'
+                  : 'Complete email domain setup in Settings (verified domain + marketing segment) before sending.'}
+              </Text>
+            </View>
+            <Switch
+              value={emailReady && emailCustomers}
+              onValueChange={(v) => { if (emailReady) setEmailCustomers(v); }}
+              disabled={!emailReady}
+              trackColor={{ true: brandColor, false: '#ccc' }}
+              accessibilityLabel="Email customers"
+              accessibilityState={{ disabled: !emailReady, checked: emailReady && emailCustomers }}
+            />
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={form.footer}>
@@ -683,6 +711,8 @@ const form = StyleSheet.create({
     marginTop: 16,
     marginBottom: 8,
   },
+  emailSwitchRow: { alignItems: 'flex-start' },
+  emailSwitchCopy: { flex: 1, paddingRight: 12 },
   codeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   codeInput: { flex: 1 },
   regenBtn: {
@@ -755,6 +785,11 @@ export default function AdminRewardsScreen() {
   const [editingOffer, setEditingOffer] = useState(null);
   const [showPromoForm, setShowPromoForm] = useState(false);
   const [editingPromo, setEditingPromo] = useState(null);
+  const [sendingPromoId, setSendingPromoId] = useState(null);
+
+  const domainOk = restaurant?.email_domain_status === 'verified' && restaurant?.resend_from_email;
+  const segmentOk = Boolean(restaurant?.resend_segment_id && restaurant?.resend_marketing_topic_id);
+  const emailReady = Boolean(domainOk && segmentOk);
 
   const closeForm = () => {
     setShowForm(false);
@@ -856,18 +891,69 @@ export default function AdminRewardsScreen() {
     }
   };
 
+  const sendPromoBroadcast = async (promo) => {
+    await sendBroadcast({
+      restaurantId: restaurant.id,
+      subject: promo.title,
+      html: promoService.buildPromoBroadcastHtml(promo),
+      previewText: promoService.formatPromoEmailBlurb(promo),
+      name: `Promo ${String(promo.code || '').toUpperCase()}`,
+      promoCodeId: promo.id,
+    });
+  };
+
   const handleSavePromo = async (data) => {
+    const { emailCustomers, ...promoData } = data;
     try {
       if (editingPromo) {
-        await promoService.updatePromo(editingPromo.id, data);
-      } else {
-        await promoService.createPromo(restaurant.id, data);
+        await promoService.updatePromo(editingPromo.id, promoData);
+        closePromoForm();
+        await loadPromos();
+        return;
+      }
+      const created = await promoService.createPromo(restaurant.id, promoData);
+      if (emailCustomers) {
+        try {
+          await sendPromoBroadcast(created);
+          notify('Sent', 'Your marketing email is on its way.');
+        } catch (e) {
+          notify(
+            'Promo saved',
+            e.message || 'Could not send the email. Use Send email on the promo to retry.',
+          );
+        }
       }
       closePromoForm();
       await loadPromos();
     } catch (e) {
       notify('Error', e.message || 'Could not save promo.');
       throw e; // keep PromoForm aware save failed
+    }
+  };
+
+  const handleSendPromoEmail = async (promo) => {
+    if (promo?.source_offer_id) return;
+    if (!emailReady) {
+      notify(
+        'Email not ready',
+        'Verify your sending domain in Settings before sending marketing emails.',
+      );
+      return;
+    }
+    const confirmed = await confirmAsync({
+      title: 'Send email?',
+      message: `Send “${promo.title}” to opted-in contacts for ${restaurant.name}?`,
+      confirmText: 'Send',
+    });
+    if (!confirmed) return;
+    setSendingPromoId(promo.id);
+    try {
+      await sendPromoBroadcast(promo);
+      notify('Sent', 'Your marketing email is on its way.');
+    } catch (e) {
+      notify('Send failed', e.message || 'Could not send broadcast.');
+    } finally {
+      setSendingPromoId(null);
     }
   };
 
@@ -891,16 +977,6 @@ export default function AdminRewardsScreen() {
       await loadPromos();
     } catch (e) {
       notify('Error', e.message || 'Could not delete promo.');
-    }
-  };
-
-  const handleCopyForEmail = async (promo) => {
-    const blurb = promoService.formatPromoEmailBlurb(promo);
-    try {
-      await promoService.copyTextToClipboard(blurb);
-      notify('Copied', 'Promo blurb copied — paste into Marketing email HTML.');
-    } catch {
-      notify('Copy for email', blurb);
     }
   };
 
@@ -1007,7 +1083,7 @@ export default function AdminRewardsScreen() {
           </TouchableOpacity>
         </View>
         <Text style={[s.sectionSub, { color: c.textSecondary }]}>
-          Checkout codes for email campaigns (separate from points offers). Copy a blurb into Marketing.
+          Checkout codes for email campaigns (separate from points offers). Email customers when you create a promo, or send later from the list.
         </Text>
 
         {loadingPromos ? (
@@ -1038,9 +1114,34 @@ export default function AdminRewardsScreen() {
                     onValueChange={() => handleTogglePromoActive(promo)}
                     trackColor={{ true: c.brand, false: '#ccc' }}
                   />
-                  <TouchableOpacity style={s.iconBtn} onPress={() => handleCopyForEmail(promo)}>
-                    <Ionicons name="copy-outline" size={18} color={c.textSecondary} />
-                  </TouchableOpacity>
+                  {!promo.source_offer_id ? (
+                    <TouchableOpacity
+                      style={[
+                        s.sendEmailBtn,
+                        { borderColor: c.border },
+                        (!emailReady || sendingPromoId === promo.id) && { opacity: 0.45 },
+                      ]}
+                      onPress={() => handleSendPromoEmail(promo)}
+                      disabled={sendingPromoId === promo.id}
+                      accessibilityLabel="Send email"
+                      accessibilityState={{ disabled: sendingPromoId === promo.id }}
+                    >
+                      {sendingPromoId === promo.id ? (
+                        <ActivityIndicator color={c.brand} size="small" />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name="mail-outline"
+                            size={15}
+                            color={emailReady ? c.brand : c.textSecondary}
+                          />
+                          <Text style={[s.sendEmailText, { color: emailReady ? c.brand : c.textSecondary }]}>
+                            Send email
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity
                     style={s.iconBtn}
                     onPress={() => { setEditingPromo(promo); setShowPromoForm(true); }}
@@ -1132,6 +1233,7 @@ export default function AdminRewardsScreen() {
               promo={editingPromo}
               brandColor={c.brand}
               menuItems={menuItems}
+              emailReady={emailReady}
               onSave={handleSavePromo}
               onCancel={closePromoForm}
             />
@@ -1215,8 +1317,21 @@ const s = StyleSheet.create({
   offerDesc: { fontSize: 12, marginTop: 2, lineHeight: 17 },
   offerPts: { fontSize: 13, fontWeight: '700', marginTop: 4 },
   promoCode: { fontSize: 14, fontWeight: '800', marginTop: 2, letterSpacing: 0.5 },
-  offerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  offerActions: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' },
   iconBtn: { padding: 6 },
+  sendEmailBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 32,
+    minWidth: 32,
+    justifyContent: 'center',
+  },
+  sendEmailText: { fontSize: 12, fontWeight: '700' },
 
   empty: { paddingVertical: 24, alignItems: 'center' },
   emptyText: { fontSize: 14 },

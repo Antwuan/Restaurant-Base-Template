@@ -4,15 +4,15 @@
  * Priority:
  *   1. ?restaurant=<slug>
  *   2. sessionStorage restaurant_slug (survives /menu navigation)
- *   3. EXPO_PUBLIC_RESTAURANT_SLUG on localhost
+ *   3. EXPO_PUBLIC_RESTAURANT_SLUG on localhost / *.vercel.app
  *   4. First URL path segment (not a reserved app route)
- *   5. Hostname → restaurants.domain (non-localhost)
+ *   5. Hostname → restaurants.domain (custom domains only; not *.vercel.app)
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { restaurantService } from '../services/restaurantService';
 import { useAuth } from './AuthContext';
-import { getRestaurantForUser } from '../services/authService';
+import { isStaffForRestaurant } from '../services/authService';
 
 const RestaurantContext = createContext(null);
 
@@ -41,6 +41,10 @@ function isLocalhost(hostname) {
   );
 }
 
+function isVercelHost(hostname) {
+  return hostname === 'vercel.app' || hostname.endsWith('.vercel.app');
+}
+
 /**
  * @returns {{ type: 'slug' | 'domain', value: string } | null}
  */
@@ -64,19 +68,20 @@ function getRestaurantIdentifierFromURL() {
     // sessionStorage unavailable
   }
 
-  if (isLocalhost(hostname)) {
-    const envSlug = process.env.EXPO_PUBLIC_RESTAURANT_SLUG;
-    if (envSlug) {
-      return { type: 'slug', value: envSlug };
-    }
-  } else {
-    return { type: 'domain', value: hostname.replace(/^www\./, '') };
+  const envSlug = process.env.EXPO_PUBLIC_RESTAURANT_SLUG;
+  if ((isLocalhost(hostname) || isVercelHost(hostname)) && envSlug) {
+    return { type: 'slug', value: envSlug };
   }
 
   const pathSegments = window.location.pathname.split('/').filter(Boolean);
   const first = pathSegments[0];
   if (first && !RESERVED_PATH_SEGMENTS.has(first)) {
     return { type: 'slug', value: first };
+  }
+
+  // Custom domains only — *.vercel.app is not stored in restaurants.domain
+  if (!isLocalhost(hostname) && !isVercelHost(hostname)) {
+    return { type: 'domain', value: hostname.replace(/^www\./, '') };
   }
 
   return null;
@@ -95,7 +100,7 @@ function isAdminPath() {
 }
 
 export function RestaurantProvider({ children }) {
-  const { user, isStaffUser, signOut, loading: authLoading } = useAuth();
+  const { user, signOut, loading: authLoading } = useAuth();
   const [restaurant, setRestaurant] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -111,32 +116,12 @@ export function RestaurantProvider({ children }) {
         return;
       }
 
-      // Admin routes: staff load their linked restaurant; customer sessions are
-      // cleared so slug/domain resolution can mount LoginScreen (no dead-end error).
-      if (isAdminPath() && user?.id) {
-        const staff = await isStaffUser(user.id);
-        if (staff) {
-          try {
-            const staffData = await getRestaurantForUser(user.id);
-            setRestaurant(staffData.restaurant);
-            return;
-          } catch (staffErr) {
-            setError(
-              staffErr.message ||
-                'No restaurant is linked to this admin account. Add a row to restaurant_staff in Supabase.',
-            );
-            setRestaurant(null);
-            return;
-          }
-        }
-        await signOut();
-        // Fall through to slug/domain/sessionStorage resolution for LoginScreen.
-      }
-
       const identifier = getRestaurantIdentifierFromURL();
 
       if (!identifier) {
-        setError('No restaurant identifier found in URL.');
+        setError(
+          'No restaurant identifier found. Open your custom domain, or add ?restaurant=your-slug to the URL.',
+        );
         setRestaurant(null);
         return;
       }
@@ -166,6 +151,15 @@ export function RestaurantProvider({ children }) {
       if (data.name) {
         document.title = `${data.name} — Order Online`;
       }
+
+      // Domain/slug always wins. Staff-anywhere sessions that are not staff
+      // for this restaurant are signed out; LoginScreen stays branded here.
+      if (isAdminPath() && user?.id) {
+        const staffHere = await isStaffForRestaurant(user.id, data.id);
+        if (!staffHere) {
+          await signOut();
+        }
+      }
     } catch (err) {
       console.error('[RestaurantContext] Failed to load restaurant:', err);
       setError(err.message || 'Failed to load restaurant.');
@@ -177,7 +171,7 @@ export function RestaurantProvider({ children }) {
       }
     }
     // signOut is intentionally omitted: AuthContext does not memoize it.
-  }, [user?.id, isStaffUser, authLoading]);
+  }, [user?.id, authLoading]);
 
   useEffect(() => {
     loadRestaurant();

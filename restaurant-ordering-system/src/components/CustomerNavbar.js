@@ -10,6 +10,7 @@ import {
   Animated,
   Pressable,
   Modal,
+  AccessibilityInfo,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
@@ -111,6 +112,9 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
+  const cartPulse = useRef(new Animated.Value(1)).current;
+  const prevItemCount = useRef(itemCount);
+
   useEffect(() => {
     if (!isCustomerAuthenticated || !user?.id || !restaurant?.id || customerProfile) return;
     linkCustomer(restaurant.id, user.email, user).catch(() => {});
@@ -121,6 +125,42 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
       refreshCustomerProfile(restaurant.id);
     }
   }, [isCustomerAuthenticated, restaurant?.id, refreshCustomerProfile]);
+
+  // Cart add acknowledgment: pulse icon when count rises
+  useEffect(() => {
+    const prev = prevItemCount.current;
+    prevItemCount.current = itemCount;
+    if (!(itemCount > prev)) return;
+
+    let cancelled = false;
+    (async () => {
+      let reduceMotion = false;
+      try {
+        reduceMotion = !!(await AccessibilityInfo.isReduceMotionEnabled?.());
+      } catch {
+        reduceMotion = false;
+      }
+      if (cancelled || reduceMotion) return;
+
+      cartPulse.setValue(1);
+      Animated.sequence([
+        Animated.timing(cartPulse, {
+          toValue: 1.18,
+          duration: 110,
+          useNativeDriver: true,
+        }),
+        Animated.timing(cartPulse, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [itemCount, cartPulse]);
 
   const menuAnim = useRef(new Animated.Value(0)).current;
 
@@ -319,10 +359,12 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
               <TouchableOpacity
                 style={styles.cartBtn}
                 onPress={onOpenCart}
-                accessibilityLabel="Open cart"
+                accessibilityLabel={`Open cart${itemCount > 0 ? `, ${itemCount} items` : ''}`}
                 activeOpacity={0.7}
               >
-                <Ionicons name="cart-outline" size={24} color="#fff" />
+                <Animated.View style={{ transform: [{ scale: cartPulse }] }}>
+                  <Ionicons name="cart-outline" size={24} color="#fff" />
+                </Animated.View>
                 <AnimatedBadge value={itemCount > 0 ? itemCount : 0} />
               </TouchableOpacity>
             )}

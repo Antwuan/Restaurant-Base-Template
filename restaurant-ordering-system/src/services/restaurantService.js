@@ -2,13 +2,20 @@ import { supabase } from '../config/supabase';
 
 let _cache = null;
 
+function notFoundError(kind, value) {
+  return new Error(
+    `Restaurant not found (${kind}: ${value}). Use ?restaurant=<slug> on Vercel URLs, or open the custom domain configured in Supabase.`,
+  );
+}
+
 export async function getRestaurantByDomain(domain) {
   const { data, error } = await supabase
     .from('restaurants')
     .select('*')
     .eq('domain', domain)
-    .single();
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw notFoundError('domain', domain);
   return data;
 }
 
@@ -17,8 +24,9 @@ export async function getRestaurantBySlug(slug) {
     .from('restaurants')
     .select('*')
     .eq('slug', slug)
-    .single();
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw notFoundError('slug', slug);
   return data;
 }
 

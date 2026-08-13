@@ -50,6 +50,15 @@ export function formatPromoEmailHtml(promo) {
   return `<p><strong>${blurb}</strong></p>\n<p>Enter <code>${code}</code> at checkout.</p>\n`;
 }
 
+const UNSUBSCRIBE_TOKEN = '{{{RESEND_UNSUBSCRIBE_URL}}}';
+
+/** Full HTML body for sendBroadcast: greeting + promo snippet + required unsubscribe token. */
+export function buildPromoBroadcastHtml(promo) {
+  const body = formatPromoEmailHtml(promo);
+  return `<p>Hi {{{FIRST_NAME|there}}},</p>
+${body}<p><a href="${UNSUBSCRIBE_TOKEN}">Unsubscribe</a></p>`;
+}
+
 function lineQty(line) {
   return Math.max(0, Number(line?.quantity) || 1);
 }

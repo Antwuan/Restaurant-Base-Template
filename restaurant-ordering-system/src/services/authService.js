@@ -22,6 +22,20 @@ export async function getCurrentUser() {
   return user;
 }
 
+/** True when this auth user has a restaurant_staff row for this restaurant. */
+export async function isStaffForRestaurant(userId, restaurantId) {
+  if (!userId || !restaurantId) return false;
+  const { data, error } = await supabase
+    .from('restaurant_staff')
+    .select('id')
+    .eq('auth_user_id', userId)
+    .eq('restaurant_id', restaurantId)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  return true;
+}
+
 export async function getRestaurantForUser(userId) {
   const { data, error } = await supabase
     .from('restaurant_staff')
