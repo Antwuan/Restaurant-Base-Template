@@ -152,6 +152,28 @@ export function canOrderAsap(hours_of_operation, bufferMins = ORDER_CLOSE_BUFFER
 }
 
 /**
+ * Guest-facing "accepting orders" state:
+ * staff pause (`is_accepting_orders === false`) OR outside open hours /
+ * within `bufferMins` of close → not accepting.
+ */
+export function isAcceptingOrdersNow(restaurant, bufferMins = ORDER_CLOSE_BUFFER_MINS, now = new Date()) {
+  if (restaurant?.is_accepting_orders === false) return false;
+  return canOrderAsap(restaurant?.hours_of_operation, bufferMins, now);
+}
+
+/**
+ * Why orders aren't accepted right now. Null when accepting.
+ * @returns {'paused'|'closed'|'closing_soon'|null}
+ */
+export function getNotAcceptingReason(restaurant, bufferMins = ORDER_CLOSE_BUFFER_MINS, now = new Date()) {
+  if (restaurant?.is_accepting_orders === false) return 'paused';
+  if (!isOpenNow(restaurant?.hours_of_operation)) return 'closed';
+  const mins = minutesUntilClose(restaurant?.hours_of_operation, now);
+  if (mins != null && mins < bufferMins) return 'closing_soon';
+  return null;
+}
+
+/**
  * Same-day relative ready options that land at or before close − buffer.
  * Returns `{ key, label, minutesFromNow }[]`. ASAP included when allowed.
  */

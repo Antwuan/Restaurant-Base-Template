@@ -4,9 +4,9 @@
  * Priority:
  *   1. ?restaurant=<slug>
  *   2. sessionStorage restaurant_slug (survives /menu navigation)
- *   3. EXPO_PUBLIC_RESTAURANT_SLUG on localhost
+ *   3. EXPO_PUBLIC_RESTAURANT_SLUG on localhost / *.vercel.app
  *   4. First URL path segment (not a reserved app route)
- *   5. Hostname → restaurants.domain (non-localhost)
+ *   5. Hostname → restaurants.domain (custom domains only; not *.vercel.app)
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
@@ -41,6 +41,10 @@ function isLocalhost(hostname) {
   );
 }
 
+function isVercelHost(hostname) {
+  return hostname === 'vercel.app' || hostname.endsWith('.vercel.app');
+}
+
 /**
  * @returns {{ type: 'slug' | 'domain', value: string } | null}
  */
@@ -64,19 +68,20 @@ function getRestaurantIdentifierFromURL() {
     // sessionStorage unavailable
   }
 
-  if (isLocalhost(hostname)) {
-    const envSlug = process.env.EXPO_PUBLIC_RESTAURANT_SLUG;
-    if (envSlug) {
-      return { type: 'slug', value: envSlug };
-    }
-  } else {
-    return { type: 'domain', value: hostname.replace(/^www\./, '') };
+  const envSlug = process.env.EXPO_PUBLIC_RESTAURANT_SLUG;
+  if ((isLocalhost(hostname) || isVercelHost(hostname)) && envSlug) {
+    return { type: 'slug', value: envSlug };
   }
 
   const pathSegments = window.location.pathname.split('/').filter(Boolean);
   const first = pathSegments[0];
   if (first && !RESERVED_PATH_SEGMENTS.has(first)) {
     return { type: 'slug', value: first };
+  }
+
+  // Custom domains only — *.vercel.app is not stored in restaurants.domain
+  if (!isLocalhost(hostname) && !isVercelHost(hostname)) {
+    return { type: 'domain', value: hostname.replace(/^www\./, '') };
   }
 
   return null;
@@ -136,7 +141,9 @@ export function RestaurantProvider({ children }) {
       const identifier = getRestaurantIdentifierFromURL();
 
       if (!identifier) {
-        setError('No restaurant identifier found in URL.');
+        setError(
+          'No restaurant identifier found. Open your custom domain, or add ?restaurant=your-slug to the URL.',
+        );
         setRestaurant(null);
         return;
       }

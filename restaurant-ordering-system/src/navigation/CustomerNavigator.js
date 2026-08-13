@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import HomeScreen from '../screens/customer/HomeScreen';
@@ -18,7 +19,18 @@ import { usePickupLocation } from '../context/PickupLocationContext';
 
 const Stack = createNativeStackNavigator();
 
-function GuestScreenWithCart({ navigation, route, currentRoute, children }) {
+/**
+ * One chrome shell per customer route so native-stack web can't leave a second
+ * sticky navbar in document flow from another mounted screen.
+ */
+function ScreenChrome({
+  navigation,
+  route,
+  currentRoute,
+  withCart = false,
+  children,
+}) {
+  const isFocused = useIsFocused();
   const [cartOpen, setCartOpen] = useState(false);
   const { hasSelection, needsChoice } = usePickupLocation();
 
@@ -26,104 +38,121 @@ function GuestScreenWithCart({ navigation, route, currentRoute, children }) {
   const closeCart = useCallback(() => setCartOpen(false), []);
 
   useEffect(() => {
-    if (route.params?.openCart) {
+    if (withCart && route.params?.openCart) {
       setCartOpen(true);
       navigation.setParams({ openCart: undefined });
     }
-  }, [route.params?.openCart, navigation]);
+  }, [withCart, route.params?.openCart, navigation]);
+
+  useEffect(() => {
+    if (!isFocused) setCartOpen(false);
+  }, [isFocused]);
 
   const handleCheckout = () => {
-    // Keep the drawer open when blocked — CartPanel shows location + disables Proceed.
-    if (needsChoice || !hasSelection) {
-      return;
-    }
+    if (needsChoice || !hasSelection) return;
     setCartOpen(false);
     navigation.navigate('Checkout');
   };
 
   return (
-    <>
-      <CustomerNavbar
-        navigation={navigation}
-        currentRoute={currentRoute}
-        onOpenCart={openCart}
-      />
-      {children}
-      <CartDrawer
-        visible={cartOpen}
-        onClose={closeCart}
-        onCheckout={handleCheckout}
-      />
-    </>
+    <View style={styles.screen}>
+      {isFocused ? (
+        <CustomerNavbar
+          navigation={navigation}
+          currentRoute={currentRoute}
+          onOpenCart={withCart ? openCart : undefined}
+        />
+      ) : null}
+      <View style={styles.body}>{children}</View>
+      {withCart && isFocused ? (
+        <CartDrawer
+          visible={cartOpen}
+          onClose={closeCart}
+          onCheckout={handleCheckout}
+        />
+      ) : null}
+    </View>
   );
 }
 
 function HomeScreenWithCart({ navigation, route }) {
   return (
-    <GuestScreenWithCart navigation={navigation} route={route} currentRoute="Home">
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Home" withCart>
       <HomeScreen navigation={navigation} />
-    </GuestScreenWithCart>
+    </ScreenChrome>
   );
 }
 
 function MenuScreenWithCart({ navigation, route }) {
   return (
-    <GuestScreenWithCart navigation={navigation} route={route} currentRoute="Menu">
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Menu" withCart>
       <MenuScreen />
-    </GuestScreenWithCart>
+    </ScreenChrome>
   );
 }
 
-function CheckoutScreenWithNav({ navigation }) {
+function CheckoutScreenWithNav({ navigation, route }) {
   return (
-    <>
-      <CustomerNavbar navigation={navigation} currentRoute="Checkout" />
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Checkout">
       <CheckoutScreen navigation={navigation} />
-    </>
+    </ScreenChrome>
   );
 }
 
 function ConfirmationScreenWithNav({ navigation, route }) {
   return (
-    <View style={{ flex: 1 }}>
-      <CustomerNavbar navigation={navigation} currentRoute="Confirmation" />
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Confirmation">
       <ConfirmationScreen navigation={navigation} route={route} />
+    </ScreenChrome>
+  );
+}
+
+function TrackerScreenWithNav({ navigation, route }) {
+  return (
+    <View style={styles.screen}>
+      <TrackerScreen navigation={navigation} />
     </View>
   );
 }
 
-function TrackerScreenWithNav({ navigation }) {
-  return <TrackerScreen navigation={navigation} />;
-}
-
-function RewardsScreenWithNav({ navigation }) {
-  return <RewardsScreen navigation={navigation} />;
-}
-
-function ProfileScreenWithNav({ navigation }) {
-  return <ProfileScreen navigation={navigation} />;
-}
-
-function HiringScreenWithNav({ navigation }) {
+function RewardsScreenWithNav({ navigation, route }) {
   return (
-    <>
-      <CustomerNavbar navigation={navigation} currentRoute="Hiring" />
+    <View style={styles.screen}>
+      <RewardsScreen navigation={navigation} />
+    </View>
+  );
+}
+
+function ProfileScreenWithNav({ navigation, route }) {
+  return (
+    <View style={styles.screen}>
+      <ProfileScreen navigation={navigation} />
+    </View>
+  );
+}
+
+function HiringScreenWithNav({ navigation, route }) {
+  return (
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Hiring">
       <HiringScreen navigation={navigation} />
-    </>
+    </ScreenChrome>
   );
 }
 
 function CateringScreenWithNav({ navigation, route }) {
   return (
-    <>
-      <CustomerNavbar navigation={navigation} currentRoute="Catering" />
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Catering">
       <CateringScreen navigation={navigation} route={route} />
-    </>
+    </ScreenChrome>
   );
 }
 
 function ReviewScreenWithNav({ navigation, route }) {
-  return <ReviewScreen navigation={navigation} route={route} />;
+  return (
+    <View style={styles.screen}>
+      <ReviewScreen navigation={navigation} route={route} />
+    </View>
+  );
 }
 
 export default function CustomerNavigator() {
@@ -131,6 +160,8 @@ export default function CustomerNavigator() {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
+        animation: 'fade',
+        contentStyle: styles.stackContent,
       }}
     >
       <Stack.Screen name="Home" component={HomeScreenWithCart} />
@@ -140,12 +171,22 @@ export default function CustomerNavigator() {
       <Stack.Screen name="Profile" component={ProfileScreenWithNav} />
       <Stack.Screen name="Hiring" component={HiringScreenWithNav} />
       <Stack.Screen name="Checkout" component={CheckoutScreenWithNav} />
-      <Stack.Screen
-        name="Confirmation"
-        component={ConfirmationScreenWithNav}
-      />
+      <Stack.Screen name="Confirmation" component={ConfirmationScreenWithNav} />
       <Stack.Screen name="OrderTracker" component={TrackerScreenWithNav} />
       <Stack.Screen name="Review" component={ReviewScreenWithNav} />
     </Stack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    minHeight: '100%',
+  },
+  body: {
+    flex: 1,
+  },
+  stackContent: {
+    flex: 1,
+  },
+});
