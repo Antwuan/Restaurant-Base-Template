@@ -42,12 +42,6 @@ function ScreenChrome({
     }
   }, [withCart, route.params?.openCart, navigation]);
 
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7261/ingest/be8b971d-14d5-4da3-b2c6-a65e02c108c0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9a6c7c'},body:JSON.stringify({sessionId:'9a6c7c',runId:'post-fix',hypothesisId:'A',location:'CustomerNavigator.js:ScreenChrome',message:'ScreenChrome mounted with navbar',data:{currentRoute,withCart:!!withCart,path:typeof window!=='undefined'?window.location.pathname:null},timestamp:Date.now()})}).catch(()=>{});
-  }, [currentRoute, withCart]);
-  // #endregion
-
   const handleCheckout = () => {
     if (needsChoice || !hasSelection) return;
     setCartOpen(false);
