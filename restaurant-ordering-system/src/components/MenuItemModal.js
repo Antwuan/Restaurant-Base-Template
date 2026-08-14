@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
 import { useAuth } from '../context/AuthContext';
 import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
+import CustomerSignInModal from './CustomerSignInModal';
+import { itemRequiresCustomization } from '../utils/menuCustomization';
 
 /* ─────────────────────────────────────────────────────────
    Suggestion card — toggle on/off; does NOT immediately add to cart
@@ -286,7 +288,7 @@ export default function MenuItemModal({
       <ScrollView
         showsVerticalScrollIndicator={false}
         bounces={false}
-        style={styles.scrollView}
+        style={mobileSheet ? styles.scrollViewSheet : styles.scrollViewDesktop}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.imageWrap}>
@@ -634,7 +636,9 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 680,
-    maxHeight: '100%',
+    maxHeight: Platform.OS === 'web' ? '85vh' : '100%',
+    flexDirection: 'column',
+    minHeight: 0,
     backgroundColor: '#fff',
     borderRadius: 20,
     overflow: 'hidden',
@@ -647,6 +651,7 @@ const styles = StyleSheet.create({
   sheetInner: {
     flex: 1,
     minHeight: 0,
+    flexDirection: 'column',
   },
 
   // Image
@@ -701,11 +706,17 @@ const styles = StyleSheet.create({
     }),
   },
 
-  // Scroll body
-  scrollView: {
+  // Scroll body — sheet has an explicit height, so flex:1 fills it.
+  // Desktop card is height-auto with maxHeight only; flex:1 would collapse to 0.
+  scrollViewSheet: {
     flex: 1,
+    minHeight: 0,
+  },
+  scrollViewDesktop: {
     flexGrow: 1,
     flexShrink: 1,
+    flexBasis: 'auto',
+    minHeight: 0,
   },
   body: {
     paddingHorizontal: 20,
@@ -832,6 +843,7 @@ const styles = StyleSheet.create({
 
   // Footer
   footer: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,

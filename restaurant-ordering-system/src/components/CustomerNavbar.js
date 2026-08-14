@@ -17,6 +17,7 @@ import { useRestaurantContext } from '../context/RestaurantContext';
 import { useCartContext } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme';
+import { useNavbarCollapse } from '../context/NavbarCollapseContext';
 import CustomerSignInModal from './CustomerSignInModal';
 import { AnimatedBadge } from './motion';
 
@@ -93,6 +94,38 @@ function NavLink({ label, isActive, onPress }) {
   );
 }
 
+function MenuRow({ icon, label, onPress, destructive = false, disabled = false }) {
+  const [hovered, setHovered] = useState(false);
+  const color = destructive ? '#c0392b' : '#1a1a1a';
+  const webHover =
+    Platform.OS === 'web' && !disabled
+      ? {
+          onMouseEnter: () => setHovered(true),
+          onMouseLeave: () => setHovered(false),
+        }
+      : {};
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.75}
+      accessibilityRole="menuitem"
+      {...webHover}
+      style={[
+        styles.menuRow,
+        hovered && (destructive ? styles.menuRowHoverDestructive : styles.menuRowHover),
+        Platform.OS === 'web' && { cursor: disabled ? 'default' : 'pointer' },
+      ]}
+    >
+      {icon ? (
+        <Ionicons name={icon} size={18} color={color} style={{ marginRight: 10 }} />
+      ) : null}
+      <Text style={[styles.menuRowText, { color }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function CustomerNavbar({ navigation, currentRoute, onOpenCart }) {
   const { restaurant } = useRestaurantContext();
   const { itemCount } = useCartContext();
@@ -106,6 +139,7 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
   } = useAuth();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
+  const { collapsed } = useNavbarCollapse();
   const [signInVisible, setSignInVisible] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [menuMounted, setMenuMounted] = useState(false);
@@ -163,6 +197,7 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
   }, [itemCount, cartPulse]);
 
   const menuAnim = useRef(new Animated.Value(0)).current;
+  const collapseHeight = useRef(new Animated.Value(60)).current;
 
   const animateMenu = (open) => {
     setMobileMenuOpen(open);
@@ -189,6 +224,20 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
       setMenuMounted(false);
     }
   }, [isMobile, mobileMenuOpen, menuMounted, menuAnim]);
+
+  useEffect(() => {
+    if (!isMobile) {
+      collapseHeight.setValue(60);
+      return;
+    }
+    if (collapsed) closeMobileMenu();
+    Animated.timing(collapseHeight, {
+      toValue: collapsed ? 0 : 60,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed, isMobile, collapseHeight]);
 
   const isSignedIn = isCustomerAuthenticated;
   const points = customerProfile?.points_balance ?? 0;
@@ -284,28 +333,21 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
         <View style={styles.dropdownAnchor}>
           <Pressable style={styles.dropdown} onPress={(e) => e.stopPropagation?.()}>
             {ACCOUNT_MENU.map((item) => (
-              <TouchableOpacity
+              <MenuRow
                 key={item.route}
-                style={styles.dropdownItem}
+                icon={item.icon}
+                label={item.label}
                 onPress={() => handleNavPress(item.route)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name={item.icon} size={18} color="#333" style={{ marginRight: 10 }} />
-                <Text style={styles.dropdownItemText}>{item.label}</Text>
-              </TouchableOpacity>
+              />
             ))}
             <View style={styles.dropdownDivider} />
-            <TouchableOpacity
-              style={styles.dropdownItem}
+            <MenuRow
+              icon="log-out-outline"
+              label={signingOut ? 'Signing out…' : 'Log out'}
               onPress={handleLogOut}
               disabled={signingOut}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="log-out-outline" size={18} color="#c0392b" style={{ marginRight: 10 }} />
-              <Text style={[styles.dropdownItemText, { color: '#c0392b' }]}>
-                {signingOut ? 'Signing out…' : 'Log out'}
-              </Text>
-            </TouchableOpacity>
+              destructive
+            />
           </Pressable>
         </View>
       </Pressable>
@@ -314,7 +356,18 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
 
   return (
     <>
-      <View style={styles.navbarShell}>
+      <Animated.View
+        style={[
+          styles.navbarShell,
+          isMobile && {
+            height: collapsed ? 0 : 60,
+            maxHeight: collapsed ? 0 : undefined,
+            minHeight: 0,
+            overflow: collapsed ? 'hidden' : 'visible',
+          },
+        ]}
+        pointerEvents={isMobile && collapsed ? 'none' : 'auto'}
+      >
         <View style={[styles.navbar, { backgroundColor: theme.colors.brand }]}>
           <TouchableOpacity
             style={styles.logoBlock}
@@ -391,7 +444,6 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
             pointerEvents={mobileMenuOpen ? 'auto' : 'none'}
             style={[
               styles.mobileMenu,
-              { backgroundColor: theme.colors.brand },
               {
                 opacity: menuOpacity,
                 transform: [{ translateY: menuTranslateY }],
@@ -399,47 +451,56 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
             ]}
           >
             <View style={styles.mobileAccountRow}>
-              {pointsPill}
+              <TouchableOpacity
+                style={[styles.pointsPill, styles.pointsPillOnLight, isSignedIn && styles.pointsPillActiveOnLight]}
+                onPress={handleAccountToggle}
+                activeOpacity={0.75}
+                accessibilityLabel={isSignedIn ? `${points} points, open account menu` : 'Sign in'}
+              >
+                <Ionicons
+                  name={isSignedIn ? 'gift' : 'person-outline'}
+                  size={16}
+                  color={theme.colors.brand}
+                  style={{ marginRight: 5 }}
+                />
+                <Text style={[styles.pointsPillText, { color: theme.colors.brand }]}>
+                  {isSignedIn ? `${points} pts` : 'Sign in'}
+                </Text>
+              </TouchableOpacity>
             </View>
             {isSignedIn
               ? ACCOUNT_MENU.map((item) => (
-                  <TouchableOpacity
+                  <MenuRow
                     key={item.route}
-                    style={styles.mobileNavItem}
+                    icon={item.icon}
+                    label={item.label}
                     onPress={() => handleNavPress(item.route)}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name={item.icon} size={18} color="#fff" style={{ marginRight: 10 }} />
-                    <Text style={styles.mobileNavText}>{item.label}</Text>
-                  </TouchableOpacity>
+                  />
                 ))
               : null}
             {isSignedIn ? (
-              <TouchableOpacity
-                style={styles.mobileNavItem}
-                onPress={handleLogOut}
-                disabled={signingOut}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="log-out-outline" size={18} color="#fff" style={{ marginRight: 10 }} />
-                <Text style={styles.mobileNavText}>
-                  {signingOut ? 'Signing out…' : 'Log out'}
-                </Text>
-              </TouchableOpacity>
+              <>
+                <View style={styles.dropdownDivider} />
+                <MenuRow
+                  icon="log-out-outline"
+                  label={signingOut ? 'Signing out…' : 'Log out'}
+                  onPress={handleLogOut}
+                  disabled={signingOut}
+                  destructive
+                />
+              </>
             ) : null}
+            <View style={styles.dropdownDivider} />
             {NAV_LINKS.map((link) => (
-              <TouchableOpacity
+              <MenuRow
                 key={link.route}
-                style={styles.mobileNavItem}
+                label={link.label}
                 onPress={() => handleNavPress(link.route)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.mobileNavText}>{link.label}</Text>
-              </TouchableOpacity>
+              />
             ))}
           </Animated.View>
         )}
-      </View>
+      </Animated.View>
 
       {!isMobile ? accountDropdown : null}
 
@@ -454,8 +515,9 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
 const styles = StyleSheet.create({
   navbarShell: {
     zIndex: 100,
+    minHeight: 0,
     ...Platform.select({
-      web: { position: 'sticky', top: 0 },
+      web: { position: 'relative', flexShrink: 0 },
     }),
   },
   navbar: {
@@ -548,6 +610,13 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.85)',
     backgroundColor: 'rgba(255,255,255,0.14)',
   },
+  pointsPillOnLight: {
+    borderColor: 'rgba(0,0,0,0.12)',
+  },
+  pointsPillActiveOnLight: {
+    borderColor: 'rgba(0,0,0,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
   pointsPillText: {
     color: '#fff',
     fontSize: 13,
@@ -566,36 +635,50 @@ const styles = StyleSheet.create({
     }),
   },
   dropdown: {
-    minWidth: 200,
-    backgroundColor: '#fff',
+    minWidth: 220,
+    backgroundColor: 'rgba(255,255,255,0.78)',
     borderRadius: 12,
-    paddingVertical: 6,
+    padding: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.08)',
     ...Platform.select({
-      web: { boxShadow: '0 8px 28px rgba(0,0,0,0.18)' },
+      web: {
+        backdropFilter: 'blur(18px) saturate(1.35)',
+        WebkitBackdropFilter: 'blur(18px) saturate(1.35)',
+        boxShadow: '0 10px 32px rgba(0,0,0,0.14)',
+      },
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.18,
-        shadowRadius: 12,
+        shadowOpacity: 0.16,
+        shadowRadius: 14,
       },
       android: { elevation: 8 },
     }),
   },
-  dropdownItem: {
+  menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
   },
-  dropdownItemText: {
+  menuRowHover: {
+    backgroundColor: 'rgba(0,0,0,0.06)',
+  },
+  menuRowHoverDestructive: {
+    backgroundColor: 'rgba(192,57,43,0.08)',
+  },
+  menuRowText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#222',
+    color: '#1a1a1a',
   },
   dropdownDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e5e5e5',
+    backgroundColor: 'rgba(0,0,0,0.08)',
     marginVertical: 4,
+    marginHorizontal: 6,
   },
   cartBtn: {
     padding: 8,
@@ -607,33 +690,32 @@ const styles = StyleSheet.create({
   },
   mobileMenu: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 60,
+    left: 8,
+    right: 8,
+    top: 64,
     zIndex: 99,
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderRadius: 14,
+    padding: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.08)',
     ...Platform.select({
       web: {
-        boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+        backdropFilter: 'blur(18px) saturate(1.35)',
+        WebkitBackdropFilter: 'blur(18px) saturate(1.35)',
+        boxShadow: '0 10px 32px rgba(0,0,0,0.14)',
       },
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.16,
+        shadowRadius: 14,
+      },
+      android: { elevation: 8 },
     }),
   },
   mobileAccountRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-  },
-  mobileNavItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-  },
-  mobileNavText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
   },
 });

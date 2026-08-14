@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ScrollView,
   Pressable,
 } from 'react-native';
@@ -51,7 +50,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
-  const [staffWarning, setStaffWarning] = useState(false);
+  const [cardMessage, setCardMessage] = useState(null);
   const [confirmingSignOut, setConfirmingSignOut] = useState(false);
   const mobileSheet = useMobileBottomSheet();
 
@@ -74,7 +73,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       setTouched({});
       setMode('signin');
       setLoading(false);
-      setStaffWarning(false);
+      setCardMessage(null);
       setConfirmingSignOut(false);
     }
   }, [visible]);
@@ -144,13 +143,13 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
   const handleEmailChange = (value) => {
     setEmail(value);
-    setStaffWarning(false);
+    setCardMessage(null);
     if (touched.email) clearFieldError('email');
   };
 
   const handlePasswordChange = (value) => {
     setPassword(value);
-    setStaffWarning(false);
+    setCardMessage(null);
     if (touched.password) clearFieldError('password');
     if (touched.confirmPassword && confirmPassword && value === confirmPassword) {
       clearFieldError('confirmPassword');
@@ -173,12 +172,12 @@ export default function CustomerSignInModal({ visible, onClose }) {
     });
   };
 
-  const switchMode = (nextMode) => {
+  const switchMode = (nextMode, { keepMessage = false } = {}) => {
     setMode(nextMode);
     setErrors({});
     setTouched({});
     setConfirmPassword('');
-    setStaffWarning(false);
+    if (!keepMessage) setCardMessage(null);
     if (nextMode === 'signin') {
       setFirstName('');
       setLastName('');
@@ -186,18 +185,16 @@ export default function CustomerSignInModal({ visible, onClose }) {
     }
   };
 
+  const showCardError = (text) => setCardMessage({ type: 'error', text });
+  const showCardInfo = (text) => setCardMessage({ type: 'info', text });
+
   const showStaffWarning = () => {
-    setStaffWarning(true);
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.alert(`Staff account\n\n${STAFF_WARNING}`);
-      return;
-    }
-    Alert.alert('Staff account', STAFF_WARNING);
+    setCardMessage({ type: 'warning', text: STAFF_WARNING });
   };
 
   const handleSignIn = async () => {
     if (!restaurant?.id) {
-      Alert.alert('Error', 'Restaurant is still loading. Please try again in a moment.');
+      showCardError('Restaurant is still loading. Please try again in a moment.');
       return;
     }
 
@@ -208,7 +205,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       return;
     }
     setErrors({});
-    setStaffWarning(false);
+    setCardMessage(null);
 
     setLoading(true);
     try {
@@ -216,7 +213,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       const signedInUser = result?.user;
 
       if (!signedInUser) {
-        Alert.alert('Sign in failed', 'Could not sign in. Please try again.');
+        showCardError('Could not sign in. Please try again.');
         return;
       }
 
@@ -231,19 +228,13 @@ export default function CustomerSignInModal({ visible, onClose }) {
       try {
         profile = await linkCustomer(restaurant.id, email.trim(), signedInUser);
       } catch (linkError) {
-        Alert.alert(
-          'Sign in failed',
-          linkError.message || 'Could not load your customer profile.',
-        );
+        showCardError(linkError.message || 'Could not load your customer profile.');
         return;
       }
 
       if (!profile) {
         await signOut();
-        Alert.alert(
-          'No account',
-          'No customer account exists for this restaurant. Create an account first.',
-        );
+        showCardError('No customer account exists for this restaurant. Create an account first.');
         return;
       }
 
@@ -263,7 +254,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
       onClose();
     } catch (error) {
-      Alert.alert('Sign in failed', error.message || 'Invalid email or password.');
+      showCardError(error.message || 'Invalid email or password.');
     } finally {
       setLoading(false);
     }
@@ -271,7 +262,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
   const handleSignUp = async () => {
     if (!restaurant?.id) {
-      Alert.alert('Error', 'Restaurant is still loading. Please try again in a moment.');
+      showCardError('Restaurant is still loading. Please try again in a moment.');
       return;
     }
 
@@ -289,7 +280,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       return;
     }
     setErrors({});
-    setStaffWarning(false);
+    setCardMessage(null);
 
     const trimmedFirst = firstName.trim();
     const trimmedLast = lastName.trim();
@@ -302,20 +293,14 @@ export default function CustomerSignInModal({ visible, onClose }) {
       const signedInUser = result?.user;
 
       if (!signedInUser) {
-        Alert.alert(
-          'Check your email',
-          'We sent a confirmation link. Confirm your email, then sign in.',
-        );
+        showCardInfo('We sent a confirmation link. Confirm your email, then sign in.');
         return;
       }
 
       // Fake / duplicate signup response (confirm-email enabled, user already exists)
       if (!result.session && Array.isArray(signedInUser.identities) && signedInUser.identities.length === 0) {
-        Alert.alert(
-          'Account exists',
-          'This email is already registered. Confirm your email if needed, then sign in.',
-        );
-        switchMode('signin');
+        switchMode('signin', { keepMessage: true });
+        showCardInfo('This email is already registered. Confirm your email if needed, then sign in.');
         return;
       }
 
@@ -359,13 +344,11 @@ export default function CustomerSignInModal({ visible, onClose }) {
       }
 
       if (!result.session) {
-        Alert.alert(
-          'Confirm your email',
-          profile
-            ? 'We created your account. Confirm the link we emailed you, then sign in.'
-            : 'We created your login. Confirm the email link, then sign in to finish setting up your customer profile.',
-        );
-        switchMode('signin');
+        const confirmText = profile
+          ? 'We created your account. Confirm the link we emailed you, then sign in.'
+          : 'We created your login. Confirm the email link, then sign in to finish setting up your customer profile.';
+        switchMode('signin', { keepMessage: true });
+        showCardInfo(confirmText);
         return;
       }
 
@@ -375,10 +358,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
       if (!profile) {
         await signOut();
-        Alert.alert(
-          'Account setup failed',
-          'Could not create your customer profile. Please try signing in after a moment.',
-        );
+        showCardError('Could not create your customer profile. Please try signing in after a moment.');
         return;
       }
 
@@ -400,12 +380,9 @@ export default function CustomerSignInModal({ visible, onClose }) {
     } catch (error) {
       const msg = String(error?.message || '');
       if (/rate limit/i.test(msg)) {
-        Alert.alert(
-          'Sign up temporarily blocked',
-          'Too many confirmation emails were sent. Wait a few minutes, then try again.',
-        );
+        showCardError('Too many confirmation emails were sent. Wait a few minutes, then try again.');
       } else {
-        Alert.alert('Sign up failed', msg || 'Could not create account.');
+        showCardError(msg || 'Could not create account.');
       }
     } finally {
       setLoading(false);
@@ -419,7 +396,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       setConfirmingSignOut(false);
       onClose();
     } catch (error) {
-      Alert.alert('Error', error.message || 'Could not sign out.');
+      showCardError(error.message || 'Could not sign out.');
     } finally {
       setLoading(false);
     }
@@ -449,6 +426,43 @@ export default function CustomerSignInModal({ visible, onClose }) {
                   ? `Sign in to order from ${restaurant.name}`
                   : 'Sign in or create an account'}
             </Text>
+
+            {cardMessage ? (
+              <View
+                style={[
+                  styles.warningBanner,
+                  cardMessage.type === 'error' && styles.errorBanner,
+                  cardMessage.type === 'info' && styles.infoBanner,
+                ]}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                <Ionicons
+                  name={
+                    cardMessage.type === 'info'
+                      ? 'information-circle-outline'
+                      : 'warning-outline'
+                  }
+                  size={18}
+                  color={
+                    cardMessage.type === 'error'
+                      ? '#c0392b'
+                      : cardMessage.type === 'info'
+                        ? '#555'
+                        : '#9a3412'
+                  }
+                />
+                <Text
+                  style={[
+                    styles.warningText,
+                    cardMessage.type === 'error' && styles.errorBannerText,
+                    cardMessage.type === 'info' && styles.infoBannerText,
+                  ]}
+                >
+                  {cardMessage.text}
+                </Text>
+              </View>
+            ) : null}
 
             {signedInAsCustomer ? (
               <View style={{ gap: 14 }}>
@@ -527,13 +541,6 @@ export default function CustomerSignInModal({ visible, onClose }) {
                     </Text>
                   </TouchableOpacity>
                 </View>
-
-                {staffWarning ? (
-                  <View style={styles.warningBanner}>
-                    <Ionicons name="warning-outline" size={18} color="#9a3412" />
-                    <Text style={styles.warningText}>{STAFF_WARNING}</Text>
-                  </View>
-                ) : null}
 
                 {mode === 'signup' ? (
                   <>
@@ -803,6 +810,21 @@ const styles = StyleSheet.create({
     color: '#9a3412',
     lineHeight: 18,
     fontWeight: '600',
+  },
+  errorBanner: {
+    backgroundColor: '#fff8f7',
+    borderColor: '#c0392b',
+  },
+  errorBannerText: {
+    color: '#c0392b',
+  },
+  infoBanner: {
+    backgroundColor: '#f8f8f8',
+    borderColor: '#e5e5e5',
+  },
+  infoBannerText: {
+    color: '#333',
+    fontWeight: '500',
   },
   tabs: {
     flexDirection: 'row',
