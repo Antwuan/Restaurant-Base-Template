@@ -20,6 +20,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 
 const DESKTOP_BP = 640;
 
@@ -155,7 +156,8 @@ export default function PickupLocationPicker({
   autoOpenWhenUnset = false,
 }) {
   const { width } = useWindowDimensions();
-  const isDesktop = width >= DESKTOP_BP;
+  const mobileSheet = useMobileBottomSheet();
+  const isDesktop = width >= DESKTOP_BP && !mobileSheet;
 
   const count = locations.length;
   const multi = count >= 2;
@@ -288,18 +290,9 @@ export default function PickupLocationPicker({
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeModal}
-        statusBarTranslucent
-      >
-        <Pressable style={modalStyles.backdrop} onPress={closeModal}>
-          <Pressable
-            style={[modalStyles.card, isDesktop && modalStyles.cardDesktop]}
-            onPress={() => {}}
-          >
+      {(() => {
+        const pickerBody = (
+          <>
             <View style={[modalStyles.listPanel, isDesktop && modalStyles.listPanelDesktop]}>
               <TouchableOpacity style={modalStyles.closeBtn} onPress={closeModal} hitSlop={8}>
                 <Ionicons name="close" size={18} color="#333" />
@@ -394,9 +387,36 @@ export default function PickupLocationPicker({
                 <MapPanel address={draftLocation?.address || ''} brandColor={brandColor} fill />
               </View>
             </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </>
+        );
+
+        if (mobileSheet) {
+          return (
+            <BottomSheet visible={modalVisible} onClose={closeModal} expand>
+              <View style={modalStyles.sheetCard}>{pickerBody}</View>
+            </BottomSheet>
+          );
+        }
+
+        return (
+          <Modal
+            visible={modalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={closeModal}
+            statusBarTranslucent
+          >
+            <Pressable style={modalStyles.backdrop} onPress={closeModal}>
+              <Pressable
+                style={[modalStyles.card, isDesktop && modalStyles.cardDesktop]}
+                onPress={() => {}}
+              >
+                {pickerBody}
+              </Pressable>
+            </Pressable>
+          </Modal>
+        );
+      })()}
     </View>
   );
 }
@@ -545,6 +565,11 @@ const modalStyles = StyleSheet.create({
     flexDirection: 'row',
     maxHeight: 640,
     minHeight: 560,
+  },
+  sheetCard: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: '#fff',
   },
   listPanel: {
     padding: 20,

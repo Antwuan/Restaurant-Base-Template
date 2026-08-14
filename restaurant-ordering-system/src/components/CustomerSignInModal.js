@@ -18,6 +18,7 @@ import { useRestaurantContext } from '../context/RestaurantContext';
 import { useAuth } from '../context/AuthContext';
 import { syncMarketingContact } from '../services/emailApi';
 import * as customerService from '../services/customerService';
+import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
@@ -36,6 +37,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
     isStaffUser,
     refreshCustomerProfile,
     isCustomerAuthenticated,
+    roleLoading,
   } = useAuth();
 
   const [mode, setMode] = useState('signin');
@@ -51,6 +53,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
   const [touched, setTouched] = useState({});
   const [staffWarning, setStaffWarning] = useState(false);
   const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const mobileSheet = useMobileBottomSheet();
 
   useEffect(() => {
     if (visible && restaurant?.id) {
@@ -185,6 +188,10 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
   const showStaffWarning = () => {
     setStaffWarning(true);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`Staff account\n\n${STAFF_WARNING}`);
+      return;
+    }
     Alert.alert('Staff account', STAFF_WARNING);
   };
 
@@ -238,6 +245,20 @@ export default function CustomerSignInModal({ visible, onClose }) {
           'No customer account exists for this restaurant. Create an account first.',
         );
         return;
+      }
+
+      if (profile.marketing_opt_in && !profile.resend_contact_id) {
+        try {
+          await syncMarketingContact({
+            restaurantId: restaurant.id,
+            email: profile.email || email.trim(),
+            fullName: [profile.first_name, profile.last_name].filter(Boolean).join(' '),
+            phone: profile.phone,
+            marketingOptIn: true,
+          });
+        } catch {
+          // Non-blocking — sign-in still succeeds
+        }
       }
 
       onClose();
@@ -404,27 +425,12 @@ export default function CustomerSignInModal({ visible, onClose }) {
     }
   };
 
-  const signedInAsCustomer = isCustomerAuthenticated;
+  const signedInAsCustomer = isCustomerAuthenticated && !roleLoading;
   const brandColor = restaurant?.brand_color || '#007AFF';
   const displayEmail = customerProfile?.email || user?.email || '';
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="fade"
-      transparent
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        {/* Dim backdrop — tap to close */}
-        <Pressable style={styles.backdrop} onPress={onClose} />
-
-        {/* Floating card */}
-        <View style={styles.card}>
+  const cardInner = (
+    <>
           {/* Close button */}
           <TouchableOpacity style={styles.closeBtn} onPress={onClose} hitSlop={8}>
             <Ionicons name="close" size={18} color="#555" />
@@ -665,7 +671,31 @@ export default function CustomerSignInModal({ visible, onClose }) {
               </>
             )}
           </ScrollView>
-        </View>
+    </>
+  );
+
+  if (mobileSheet) {
+    return (
+      <BottomSheet visible={visible} onClose={onClose} keyboard>
+        <View style={styles.sheetCard}>{cardInner}</View>
+      </BottomSheet>
+    );
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Pressable style={styles.backdrop} onPress={onClose} />
+        <View style={styles.card}>{cardInner}</View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -695,6 +725,10 @@ const styles = StyleSheet.create({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 16 },
       android: { elevation: 12 },
     }),
+  },
+  sheetCard: {
+    padding: 28,
+    paddingTop: 12,
   },
   closeBtn: {
     position: 'absolute',

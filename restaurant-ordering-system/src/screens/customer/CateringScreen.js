@@ -40,6 +40,7 @@ import PickupLocationPicker, {
   isPickupLocationReady,
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
+import BottomSheet, { useMobileBottomSheet } from '../../components/BottomSheet';
 import { createPaymentIntent, getPaymentMethodSummary } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
@@ -109,6 +110,7 @@ function buildCalendarCells(hours_of_operation) {
 
 // ─── Schedule picker modal ────────────────────────────────────────────────────
 function ScheduleModal({ visible, onClose, restaurant, brandColor, selectedSlot, onSelect }) {
+  const mobileSheet = useMobileBottomSheet();
   const { cells } = useMemo(
     () => buildCalendarCells(restaurant?.hours_of_operation),
     [restaurant?.hours_of_operation],
@@ -180,10 +182,8 @@ function ScheduleModal({ visible, onClose, restaurant, brandColor, selectedSlot,
     return ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }, [date, cells]);
 
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={sm.backdrop}>
-        <View style={sm.sheet}>
+  const inner = (
+    <>
           <View style={sm.headerRow}>
             <Text style={sm.title}>Schedule pickup</Text>
             <TouchableOpacity onPress={onClose} style={sm.closeBtn}>
@@ -268,7 +268,21 @@ function ScheduleModal({ visible, onClose, restaurant, brandColor, selectedSlot,
               )}
             </>
           )}
-        </View>
+    </>
+  );
+
+  if (mobileSheet) {
+    return (
+      <BottomSheet visible={visible} onClose={onClose}>
+        <View style={sm.sheetInSheet}>{inner}</View>
+      </BottomSheet>
+    );
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={sm.backdrop}>
+        <View style={sm.sheet}>{inner}</View>
       </View>
     </Modal>
   );
@@ -277,6 +291,7 @@ function ScheduleModal({ visible, onClose, restaurant, brandColor, selectedSlot,
 const sm = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 20 },
   sheet: { backgroundColor: '#fff', borderRadius: 14, padding: 20, width: '100%', maxWidth: 460 },
+  sheetInSheet: { backgroundColor: '#fff', padding: 20, paddingTop: 8, width: '100%' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { fontSize: 17, fontWeight: '800', color: '#111' },
   closeBtn: { padding: 4 },

@@ -28,6 +28,45 @@ function normalizeOptionalString(value: unknown): string | null {
   return trimmed.length ? trimmed : null;
 }
 
+type ProfileRow = {
+  marketing_opt_in?: boolean | null;
+  email?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+};
+
+/** Best-effort Resend upsert. Failures must not block profile create/patch. */
+async function syncIfOptedIn(profile: ProfileRow | null, restaurantId: string) {
+  if (profile?.marketing_opt_in !== true || !profile.email) return;
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (!supabaseUrl || !serviceRoleKey) return;
+  const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/sync-marketing-contact`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        restaurantId,
+        email: profile.email,
+        fullName: fullName || undefined,
+        phone: profile.phone || undefined,
+        marketingOptIn: true,
+      }),
+    });
+    if (!res.ok) {
+      console.error('ensure-customer-profile Resend sync failed:', res.status, await res.text());
+    }
+  } catch (err) {
+    console.error('ensure-customer-profile Resend sync error:', err);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -131,6 +170,7 @@ Deno.serve(async (req: Request) => {
           console.error('ensure-customer-profile patch error:', patchErr);
           return json({ ok: true, profile: existing, created: false });
         }
+        await syncIfOptedIn(patched, metaRestaurantId);
         return json({ ok: true, profile: patched, created: false });
       }
       return json({ ok: true, profile: existing, created: false });
@@ -162,6 +202,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: insertErr.message || 'Insert failed' }, 500);
     }
 
+    await syncIfOptedIn(created, metaRestaurantId);
     return json({ ok: true, profile: created, created: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';

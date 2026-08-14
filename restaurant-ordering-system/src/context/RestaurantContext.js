@@ -104,6 +104,7 @@ export function RestaurantProvider({ children }) {
   const [restaurant, setRestaurant] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [adminLoginError, setAdminLoginError] = useState(null);
 
   const loadRestaurant = useCallback(async () => {
     setLoading(true);
@@ -157,7 +158,14 @@ export function RestaurantProvider({ children }) {
       if (isAdminPath() && user?.id) {
         const staffHere = await isStaffForRestaurant(user.id, data.id);
         if (!staffHere) {
+          // Set before signOut so the banner survives LoginScreen unmount
+          // while roleLoading is true (Alert.alert is a no-op on web).
+          setAdminLoginError(
+            `This account is not an admin for ${data.name || 'this restaurant'}.`,
+          );
           await signOut();
+        } else {
+          setAdminLoginError(null);
         }
       }
     } catch (err) {
@@ -189,6 +197,8 @@ export function RestaurantProvider({ children }) {
     restaurant,
     loading,
     error,
+    adminLoginError,
+    setAdminLoginError,
     refetch: loadRestaurant,
     refreshRestaurant: loadRestaurant,
     patchRestaurant,

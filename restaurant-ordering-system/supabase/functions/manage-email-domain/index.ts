@@ -22,6 +22,94 @@ function json(body: unknown, status = 200) {
   });
 }
 
+const BACKFILL_LIMIT = 25;
+
+async function invokeSyncMarketingContact(opts: {
+  restaurantId: string;
+  email: string;
+  fullName?: string;
+  phone?: string | null;
+}) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const res = await fetch(`${supabaseUrl}/functions/v1/sync-marketing-contact`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: serviceRoleKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      restaurantId: opts.restaurantId,
+      email: opts.email,
+      fullName: opts.fullName || undefined,
+      phone: opts.phone || undefined,
+      marketingOptIn: true,
+    }),
+  });
+  let payload: { ok?: boolean; skipped?: boolean; error?: string } = {};
+  try {
+    payload = await res.json();
+  } catch {
+    payload = { error: `sync-marketing-contact returned ${res.status}` };
+  }
+  if (!res.ok && !payload.error) payload.error = `sync-marketing-contact returned ${res.status}`;
+  return payload;
+}
+
+async function backfillPendingMarketingContacts(
+  supabase: ReturnType<typeof createClient>,
+  restaurantId: string,
+) {
+  const { data: pending, error } = await supabase
+    .from('restaurant_customers')
+    .select('id, email, first_name, last_name, phone')
+    .eq('restaurant_id', restaurantId)
+    .eq('marketing_opt_in', true)
+    .is('resend_contact_id', null)
+    .limit(BACKFILL_LIMIT);
+
+  if (error) {
+    console.error('domain-verify backfill query error:', error);
+    return { processed: 0, skipped: 0, failed: 0, total: 0, error: error.message };
+  }
+
+  const rows = pending || [];
+  let processed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const row of rows) {
+    const email = typeof row.email === 'string' ? row.email.trim() : '';
+    if (!email) {
+      failed += 1;
+      continue;
+    }
+    try {
+      const result = await invokeSyncMarketingContact({
+        restaurantId,
+        email,
+        fullName: [row.first_name, row.last_name].filter(Boolean).join(' '),
+        phone: row.phone,
+      });
+      if (result.error) failed += 1;
+      else if (result.skipped) skipped += 1;
+      else processed += 1;
+    } catch (err) {
+      console.error('domain-verify backfill contact error:', err);
+      failed += 1;
+    }
+  }
+
+  return {
+    processed,
+    skipped,
+    failed,
+    total: rows.length,
+    hasMore: rows.length === BACKFILL_LIMIT,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -156,6 +244,7 @@ Deno.serve(async (req: Request) => {
         .eq('id', restaurantId);
 
       // Ensure segment/topic exist once verified
+      let backfill: Awaited<ReturnType<typeof backfillPendingMarketingContacts>> | undefined;
       if (status === 'verified') {
         const updates: Record<string, unknown> = { email_domain_status: 'verified' };
         if (!restaurant.resend_segment_id) {
@@ -176,6 +265,14 @@ Deno.serve(async (req: Request) => {
         if (Object.keys(updates).length > 1) {
           await supabase.from('restaurants').update(updates).eq('id', restaurantId);
         }
+
+        if (action === 'verify') {
+          try {
+            backfill = await backfillPendingMarketingContacts(supabase, restaurantId);
+          } catch (err) {
+            console.error('domain-verify backfill error:', err);
+          }
+        }
       }
 
       return json({
@@ -184,6 +281,7 @@ Deno.serve(async (req: Request) => {
         records: domainData?.records || [],
         domainId,
         fromEmail: restaurant.resend_from_email,
+        ...(backfill ? { backfill } : {}),
       });
     }
 
