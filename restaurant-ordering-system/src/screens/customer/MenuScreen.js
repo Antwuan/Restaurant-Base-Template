@@ -21,6 +21,7 @@ import { usePickupLocation } from '../../context/PickupLocationContext';
 import { useMenu } from '../../hooks/useMenu';
 import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
+import { useNavbarCollapse } from '../../context/NavbarCollapseContext';
 import CategorySection from '../../components/CategorySection';
 import MenuItemModal from '../../components/MenuItemModal';
 import PickupLocationPicker from '../../components/PickupLocationPicker';
@@ -58,6 +59,7 @@ export default function MenuScreen() {
   const { addItem, hydrateImages } = useCartContext();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
+  const { setCollapsed: setNavbarCollapsed } = useNavbarCollapse();
 
   const isDesktop = width >= DESKTOP_BREAKPOINT;
   const greetName =
@@ -118,6 +120,9 @@ export default function MenuScreen() {
   // Refs for each category section (keyed by category id)
   const sectionRefs = useRef({});
   const scrollRef = useRef(null);
+  const headerBlockHeight = useRef(0);
+  const mobileNavHeight = useRef(0);
+  const navbarCollapsedRef = useRef(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -164,6 +169,39 @@ export default function MenuScreen() {
     setModalVisible(false);
   }, []);
 
+  useEffect(() => {
+    if (!modalVisible) setSelectedItem(null);
+  }, [modalVisible]);
+
+  useEffect(() => {
+    if (isDesktop) {
+      navbarCollapsedRef.current = false;
+      setNavbarCollapsed(false);
+    }
+  }, [isDesktop, setNavbarCollapsed]);
+
+  useEffect(() => () => {
+    navbarCollapsedRef.current = false;
+    setNavbarCollapsed(false);
+  }, [setNavbarCollapsed]);
+
+  const handleHeaderBlockLayout = useCallback((e) => {
+    headerBlockHeight.current = e.nativeEvent.layout.height;
+  }, []);
+
+  const handleMobileNavLayout = useCallback((e) => {
+    mobileNavHeight.current = e.nativeEvent.layout.height;
+  }, []);
+
+  const handleScroll = useCallback((e) => {
+    if (isDesktop || Platform.OS !== 'web') return;
+    const next = (e.nativeEvent.contentOffset?.y ?? 0) >= headerBlockHeight.current
+      && headerBlockHeight.current > 0;
+    if (next === navbarCollapsedRef.current) return;
+    navbarCollapsedRef.current = next;
+    setNavbarCollapsed(next);
+  }, [isDesktop, setNavbarCollapsed]);
+
   const handleSidebarPress = useCallback((categoryId) => {
     setActiveCategoryId(categoryId);
     const section = sectionRefs.current[categoryId];
@@ -171,7 +209,12 @@ export default function MenuScreen() {
     if (!section || !scroll) return;
 
     const scrollToSection = (y) => {
-      scroll.scrollTo({ y: Math.max(0, y - NAVBAR_OFFSET), animated: true });
+      const offset = isDesktop
+        ? NAVBAR_OFFSET
+        : (navbarCollapsedRef.current
+          ? (mobileNavHeight.current || NAVBAR_OFFSET)
+          : NAVBAR_OFFSET);
+      scroll.scrollTo({ y: Math.max(0, y - offset), animated: true });
     };
 
     const webFallback = () => {
@@ -200,7 +243,7 @@ export default function MenuScreen() {
     }
 
     webFallback();
-  }, []);
+  }, [isDesktop]);
 
   const isEmpty = !loading && !error && categoriesWithItems.length === 0;
 
@@ -265,6 +308,8 @@ export default function MenuScreen() {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={isEmpty ? styles.scrollEmpty : undefined}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         refreshControl={(
           <RefreshControl
             refreshing={refreshing}
@@ -275,6 +320,7 @@ export default function MenuScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── Slim info bar (replaces RestaurantHeader) ── */}
+        <View onLayout={handleHeaderBlockLayout}>
         <View style={[styles.infoBar, { borderBottomColor: c.border }]}>
           <View style={styles.infoBarInner}>
             <View style={styles.infoLeft}>
@@ -343,6 +389,7 @@ export default function MenuScreen() {
             </View>
           </View>
         ) : null}
+        </View>
 
         {/* ── Two-column layout: sidebar + menu items ── */}
         {isEmpty ? (
@@ -431,7 +478,10 @@ export default function MenuScreen() {
 
             {/* Mobile search + horizontal category scroll */}
             {!isDesktop && (
-              <View style={[styles.mobileNav, { borderBottomColor: c.border, backgroundColor: c.background || '#fff' }]}>
+              <View
+                onLayout={handleMobileNavLayout}
+                style={[styles.mobileNav, { borderBottomColor: c.border, backgroundColor: c.background || '#fff' }]}
+              >
                 <View
                   style={[
                     styles.searchBox,
@@ -759,8 +809,9 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         position: 'sticky',
-        top: NAVBAR_OFFSET,
-        zIndex: 20,
+        top: 0,
+        zIndex: 30,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
       },
     }),
   },

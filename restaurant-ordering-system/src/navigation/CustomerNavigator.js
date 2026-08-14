@@ -16,6 +16,7 @@ import ReviewScreen from '../screens/customer/ReviewScreen';
 import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
 import { usePickupLocation } from '../context/PickupLocationContext';
+import { NavbarCollapseProvider } from '../context/NavbarCollapseContext';
 
 // JS stack on web: native-stack keeps prior routes in document flow in static
 // Expo exports, which stacked a second CustomerNavbar under Home.
@@ -149,25 +150,27 @@ function ReviewScreenWithNav({ navigation, route }) {
 
 export default function CustomerNavigator() {
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animationEnabled: Platform.OS === 'web' ? false : true,
-        cardStyle: styles.stackContent,
-        contentStyle: styles.stackContent,
-      }}
-    >
-      <Stack.Screen name="Home" component={HomeScreenWithCart} />
-      <Stack.Screen name="Menu" component={MenuScreenWithCart} />
-      <Stack.Screen name="Catering" component={CateringScreenWithNav} />
-      <Stack.Screen name="Rewards" component={RewardsScreenWithNav} />
-      <Stack.Screen name="Profile" component={ProfileScreenWithNav} />
-      <Stack.Screen name="Hiring" component={HiringScreenWithNav} />
-      <Stack.Screen name="Checkout" component={CheckoutScreenWithNav} />
-      <Stack.Screen name="Confirmation" component={ConfirmationScreenWithNav} />
-      <Stack.Screen name="OrderTracker" component={TrackerScreenWithNav} />
-      <Stack.Screen name="Review" component={ReviewScreenWithNav} />
-    </Stack.Navigator>
+    <NavbarCollapseProvider>
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+          animationEnabled: Platform.OS === 'web' ? false : true,
+          cardStyle: styles.stackContent,
+          contentStyle: styles.stackContent,
+        }}
+      >
+        <Stack.Screen name="Home" component={HomeScreenWithCart} />
+        <Stack.Screen name="Menu" component={MenuScreenWithCart} />
+        <Stack.Screen name="Catering" component={CateringScreenWithNav} />
+        <Stack.Screen name="Rewards" component={RewardsScreenWithNav} />
+        <Stack.Screen name="Profile" component={ProfileScreenWithNav} />
+        <Stack.Screen name="Hiring" component={HiringScreenWithNav} />
+        <Stack.Screen name="Checkout" component={CheckoutScreenWithNav} />
+        <Stack.Screen name="Confirmation" component={ConfirmationScreenWithNav} />
+        <Stack.Screen name="OrderTracker" component={TrackerScreenWithNav} />
+        <Stack.Screen name="Review" component={ReviewScreenWithNav} />
+      </Stack.Navigator>
+    </NavbarCollapseProvider>
   );
 }
 

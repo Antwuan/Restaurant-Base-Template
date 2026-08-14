@@ -880,6 +880,10 @@ export default function CateringScreen({ navigation }) {
   }, [cartItems, appliedPromo]);
 
   useEffect(() => {
+    if (!modalVisible) setSelectedItem(null);
+  }, [modalVisible]);
+
+  useEffect(() => {
     if (!restaurant?.id) return;
     let cancelled = false;
     (async () => {

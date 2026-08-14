@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
-  Alert,
   AccessibilityInfo,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,19 +18,6 @@ import OrderSummary from './OrderSummary';
 import PickupLocationPicker from './PickupLocationPicker';
 
 const UNDO_MS = 5000;
-
-function confirmClearCart(onConfirm) {
-  const title = 'Clear cart?';
-  const message = "Remove all items from your order? This can't be undone.";
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-    if (window.confirm(`${title}\n\n${message}`)) onConfirm();
-    return;
-  }
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: 'Clear all', style: 'destructive', onPress: onConfirm },
-  ]);
-}
 
 export default function CartPanel({ onClose, onCheckout }) {
   const { theme } = useTheme();
@@ -57,6 +43,7 @@ export default function CartPanel({ onClose, onCheckout }) {
   } = useCartContext();
 
   const [undoBanner, setUndoBanner] = useState(null);
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const undoTimer = useRef(null);
 
@@ -66,6 +53,10 @@ export default function CartPanel({ onClose, onCheckout }) {
     || items.length === 0;
 
   useEffect(() => () => clearTimeout(undoTimer.current), []);
+
+  useEffect(() => {
+    if (items.length === 0) setConfirmingClear(false);
+  }, [items.length]);
 
   const showUndo = (line) => {
     clearTimeout(undoTimer.current);
@@ -133,12 +124,24 @@ export default function CartPanel({ onClose, onCheckout }) {
   };
 
   const handleClearAll = () => {
-    confirmClearCart(() => {
-      clearTimeout(undoTimer.current);
-      setUndoBanner(null);
-      clearCart();
-      AccessibilityInfo.announceForAccessibility?.('Cart cleared');
-    });
+    clearTimeout(undoTimer.current);
+    setUndoBanner(null);
+    setConfirmingClear(true);
+    AccessibilityInfo.announceForAccessibility?.(
+      'Clear all items from your order? This cannot be undone.',
+    );
+  };
+
+  const handleCancelClear = () => {
+    setConfirmingClear(false);
+  };
+
+  const handleConfirmClear = () => {
+    clearTimeout(undoTimer.current);
+    setUndoBanner(null);
+    setConfirmingClear(false);
+    clearCart();
+    AccessibilityInfo.announceForAccessibility?.('Cart cleared');
   };
 
   const handleCheckoutPress = () => {
@@ -181,14 +184,18 @@ export default function CartPanel({ onClose, onCheckout }) {
         <Text style={styles.headerTitle} numberOfLines={1}>
           Your order ({itemCount})
         </Text>
-        <TouchableOpacity
-          onPress={handleClearAll}
-          accessibilityRole="button"
-          accessibilityLabel="Clear all items from cart"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.clearText}>Clear all</Text>
-        </TouchableOpacity>
+        {confirmingClear ? (
+          <Text style={styles.clearTextMuted}>Clear all</Text>
+        ) : (
+          <TouchableOpacity
+            onPress={handleClearAll}
+            accessibilityRole="button"
+            accessibilityLabel="Clear all items from cart"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.clearText}>Clear all</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {!locationsLoading && (multiLocation || selectedLocation) ? (
@@ -216,7 +223,35 @@ export default function CartPanel({ onClose, onCheckout }) {
         </Text>
       ) : null}
 
-      {undoBanner ? (
+      {confirmingClear ? (
+        <View
+          style={styles.clearConfirm}
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+        >
+          <Text style={styles.clearConfirmText}>
+            Remove all items from your order? This can't be undone.
+          </Text>
+          <View style={styles.clearConfirmActions}>
+            <TouchableOpacity
+              style={styles.clearCancelBtn}
+              onPress={handleCancelClear}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel clearing cart"
+            >
+              <Text style={styles.clearCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.clearConfirmBtn}
+              onPress={handleConfirmClear}
+              accessibilityRole="button"
+              accessibilityLabel="Confirm clear all items from cart"
+            >
+              <Text style={styles.clearConfirmBtnText}>Clear all</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : undoBanner ? (
         <View
           style={styles.undoBanner}
           accessibilityRole="alert"
@@ -366,6 +401,54 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#b91c1c',
     fontWeight: '600',
+  },
+  clearTextMuted: {
+    fontSize: 14,
+    color: '#d1d5db',
+    fontWeight: '600',
+  },
+  clearConfirm: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#f3f4f6',
+    gap: 10,
+  },
+  clearConfirmText: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  clearConfirmActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  clearCancelBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+  },
+  clearCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  clearConfirmBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#FF3B30',
+  },
+  clearConfirmBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
   locationBlock: {
     paddingHorizontal: 16,
