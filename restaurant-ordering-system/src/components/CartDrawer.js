@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Animated,
   TouchableOpacity,
-  Text,
   Platform,
   useWindowDimensions,
 } from 'react-native';
@@ -59,7 +58,7 @@ export default function CartDrawer({ visible, onClose, onCheckout }) {
         ]}
       >
         <View style={styles.drawerHeader}>
-          <Text style={styles.drawerTitle}>Cart</Text>
+          <View style={{ flex: 1 }} />
           <TouchableOpacity
             onPress={onClose}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -98,16 +97,9 @@ const styles = StyleSheet.create({
   drawerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  drawerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111',
   },
 });

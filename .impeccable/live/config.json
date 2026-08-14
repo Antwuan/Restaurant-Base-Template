@@ -1,0 +1,6 @@
+{
+  "files": ["restaurant-ordering-system/public/index.html"],
+  "insertBefore": "</body>",
+  "commentSyntax": "html",
+  "cspChecked": true
+}

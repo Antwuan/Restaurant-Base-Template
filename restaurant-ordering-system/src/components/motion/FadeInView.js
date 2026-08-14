@@ -1,15 +1,10 @@
 /**
  * FadeInView
  * Fades + slides a view upward on mount.
- *
- * Props:
- *   delay    — ms before animation starts (default 0)
- *   duration — ms for the animation (default 420)
- *   fromY    — initial translateY offset in px (default 22)
- *   style    — extra styles for the Animated.View wrapper
+ * Skips motion when the user prefers reduced motion.
  */
-import React, { useRef, useEffect } from 'react';
-import { Animated } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { AccessibilityInfo, Animated } from 'react-native';
 
 export default function FadeInView({
   children,
@@ -20,8 +15,29 @@ export default function FadeInView({
 }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(fromY)).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled?.().then((enabled) => {
+      if (mounted) setReduceMotion(!!enabled);
+    });
+    const sub = AccessibilityInfo.addEventListener?.(
+      'reduceMotionChanged',
+      (enabled) => setReduceMotion(!!enabled),
+    );
+    return () => {
+      mounted = false;
+      sub?.remove?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      opacity.setValue(1);
+      translateY.setValue(0);
+      return;
+    }
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
@@ -37,7 +53,7 @@ export default function FadeInView({
       }),
     ]).start();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reduceMotion]);
 
   return (
     <Animated.View style={[{ opacity, transform: [{ translateY }] }, style]}>

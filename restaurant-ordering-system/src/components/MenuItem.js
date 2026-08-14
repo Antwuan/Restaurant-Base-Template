@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,25 +7,29 @@ import {
   Animated,
   StyleSheet,
   Platform,
+  AccessibilityInfo,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
+import { itemRequiresCustomization } from '../utils/menuCustomization';
 
 /**
  * Menu card layout:
  * - Bordered, rounded card with the image flush to the right edge.
- * - Left column: name, price, and a brand-colored description.
- * - Right column: full-height image with a white, rounded "+" button
- *   floating over the bottom-right corner.
+ * - Left column: name, price, and description.
+ * - Right column: full-height image with a white, rounded action button
+ *   floating over the bottom-right corner (add or customize).
  * - Hover: card lifts (web shadow + translateY). Image subtly zooms.
- * - Press "+": spring pop + brief success pulse on the button.
+ * - Press action: quick-add when no required modifiers; otherwise open customize.
+ *   Spring pop only on successful quick-add.
  */
 const CARD_HEIGHT_DEFAULT = 150;
 const CARD_HEIGHT_CATERING = 180;
 const MEDIA_WIDTH = '42%';
 
-const MenuItem = ({ item, onAddToCart, onItemPress, index = 0, variant = 'default' }) => {
+const MenuItem = ({ item, onAddToCart, onItemPress, variant = 'default' }) => {
   const { theme } = useTheme();
+  const c = theme.colors;
   const isUnavailable = !item.is_available;
   const cardHeight = variant === 'catering' ? CARD_HEIGHT_CATERING : CARD_HEIGHT_DEFAULT;
 
@@ -34,8 +38,10 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0, variant = 'defaul
   const imageScale = useRef(new Animated.Value(1)).current;
   const [hovered, setHovered] = useState(false);
 
-  // "+" button press pop
-  const addBtnScale = useRef(new Animated.Value(1)).current;
+  // "+" → check feedback (fade, brand colors)
+  const iconOpacity = useRef(new Animated.Value(1)).current;
+  const [showAddedCheck, setShowAddedCheck] = useState(false);
+  const addedResetTimer = useRef(null);
 
   const animateHoverIn = () => {
     setHovered(true);
@@ -53,22 +59,40 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0, variant = 'defaul
     ]).start();
   };
 
-  const popAddButton = () => {
-    Animated.sequence([
-      Animated.spring(addBtnScale, {
-        toValue: 1.35,
-        useNativeDriver: true,
-        tension: 400,
-        friction: 8,
-      }),
-      Animated.spring(addBtnScale, {
+  const playAddedCheck = () => {
+    clearTimeout(addedResetTimer.current);
+    Animated.timing(iconOpacity, {
+      toValue: 0,
+      duration: 120,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      setShowAddedCheck(true);
+      Animated.timing(iconOpacity, {
         toValue: 1,
+        duration: 140,
         useNativeDriver: true,
-        tension: 300,
-        friction: 12,
-      }),
-    ]).start();
+      }).start();
+    });
+
+    addedResetTimer.current = setTimeout(() => {
+      Animated.timing(iconOpacity, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) return;
+        setShowAddedCheck(false);
+        Animated.timing(iconOpacity, {
+          toValue: 1,
+          duration: 140,
+          useNativeDriver: true,
+        }).start();
+      });
+    }, 900);
   };
+
+  useEffect(() => () => clearTimeout(addedResetTimer.current), []);
 
   const handlePress = () => {
     if (isUnavailable) return;
@@ -79,10 +103,22 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0, variant = 'defaul
   const handleAddPress = (e) => {
     if (e?.stopPropagation) e.stopPropagation();
     if (isUnavailable) return;
-    popAddButton();
-    if (onAddToCart) onAddToCart(item);
-    else if (onItemPress) onItemPress(item);
+
+    // Required customizations must go through the modal — never bypass via "+".
+    if (itemRequiresCustomization(item)) {
+      if (onItemPress) onItemPress(item);
+      else if (onAddToCart) onAddToCart(item);
+      return;
+    }
+
+    playAddedCheck();
+    if (onAddToCart) {
+      onAddToCart(item);
+      AccessibilityInfo.announceForAccessibility?.(`${item.name} added to cart`);
+    } else if (onItemPress) onItemPress(item);
   };
+
+  const needsCustomize = itemRequiresCustomization(item);
 
   const cardTranslateY = cardShadowY.interpolate({
     inputRange: [0, 1],
@@ -115,29 +151,57 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0, variant = 'defaul
       <TouchableOpacity
         activeOpacity={isUnavailable ? 1 : 0.88}
         onPress={handlePress}
-        style={[styles.card, { minHeight: cardHeight }, isUnavailable && styles.cardUnavailable]}
-        accessibilityLabel={`${item.name}, $${Number(item.price ?? 0).toFixed(2)}${isUnavailable ? ', unavailable' : ''}`}
+        style={[
+          styles.card,
+          {
+            minHeight: cardHeight,
+            borderColor: c.border,
+            backgroundColor: c.backgroundCard || '#fff',
+          },
+          isUnavailable && styles.cardUnavailable,
+        ]}
+        accessibilityLabel={`${item.name}, $${Number(item.price ?? 0).toFixed(2)}${
+          isUnavailable ? ', unavailable' : needsCustomize ? ', options available' : ''
+        }`}
+        accessibilityHint={
+          isUnavailable
+            ? undefined
+            : needsCustomize
+              ? 'Opens customization options'
+              : 'Opens item details'
+        }
         {...webHoverProps}
       >
         {/* Left: text info */}
         <View style={styles.info}>
-          <Text style={[styles.name, isUnavailable && styles.textMuted]} numberOfLines={2}>
+          <Text
+            style={[styles.name, { color: c.textPrimary }, isUnavailable && styles.textMuted]}
+            numberOfLines={2}
+          >
             {item.name}
           </Text>
-          <Text style={[styles.price, isUnavailable && styles.textMuted]}>
+          <Text
+            style={[styles.price, { color: c.textPrimary }, isUnavailable && styles.textMuted]}
+          >
             ${Number(item.price ?? 0).toFixed(2)}
           </Text>
           {item.description ? (
             <Text
-              style={[styles.description, { color: theme.colors.brand }, isUnavailable && styles.textMuted]}
+              style={[
+                styles.description,
+                { color: c.textSecondary },
+                isUnavailable && styles.textMuted,
+              ]}
               numberOfLines={variant === 'catering' ? 4 : 3}
             >
               {item.description}
             </Text>
           ) : null}
           {isUnavailable && (
-            <View style={styles.unavailablePill}>
-              <Text style={styles.unavailablePillText}>Unavailable</Text>
+            <View style={[styles.unavailablePill, { backgroundColor: c.backgroundSunken }]}>
+              <Text style={[styles.unavailablePillText, { color: c.textSecondary }]}>
+                Unavailable
+              </Text>
             </View>
           )}
         </View>
@@ -150,30 +214,68 @@ const MenuItem = ({ item, onAddToCart, onItemPress, index = 0, variant = 'defaul
                 source={{ uri: item.image_url }}
                 style={[
                   styles.image,
-                  { minHeight: cardHeight },
+                  { minHeight: cardHeight, backgroundColor: c.backgroundSunken },
                   isUnavailable && styles.imageUnavailable,
                   { transform: [{ scale: imageScale }] },
                 ]}
                 resizeMode="cover"
+                accessibilityIgnoresInvertColors
               />
             ) : (
-              <View style={[styles.image, { minHeight: cardHeight }, styles.imagePlaceholder]}>
-                <Ionicons name="restaurant-outline" size={28} color="#cbd5e1" />
+              <View
+                style={[
+                  styles.image,
+                  { minHeight: cardHeight, backgroundColor: c.backgroundSunken },
+                  styles.imagePlaceholder,
+                ]}
+              >
+                <Ionicons name="restaurant-outline" size={28} color={c.textDisabled} />
               </View>
             )}
           </View>
 
           {!isUnavailable && (
-            <Animated.View style={[styles.addButton, { transform: [{ scale: addBtnScale }] }]}>
+            <View
+              style={[
+                styles.addButton,
+                showAddedCheck && {
+                  backgroundColor: c.brand,
+                  borderColor: c.brand,
+                },
+              ]}
+            >
               <TouchableOpacity
                 onPress={handleAddPress}
-                accessibilityLabel={`Add ${item.name} to cart`}
+                accessibilityLabel={
+                  needsCustomize
+                    ? `Choose options for ${item.name}`
+                    : `Add ${item.name} to cart`
+                }
+                accessibilityHint={
+                  needsCustomize
+                    ? 'Opens the item so you can pick required options'
+                    : 'Adds this item to your cart'
+                }
+                accessibilityRole="button"
                 activeOpacity={0.8}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                style={styles.addButtonHit}
               >
-                <Ionicons name="add" size={22} color="#1a1a1a" />
+                <Animated.View style={{ opacity: iconOpacity }}>
+                  <Ionicons
+                    name={
+                      showAddedCheck
+                        ? 'checkmark'
+                        : needsCustomize
+                          ? 'options-outline'
+                          : 'add'
+                    }
+                    size={needsCustomize && !showAddedCheck ? 18 : 22}
+                    color={showAddedCheck ? (c.brandText || '#fff') : c.textPrimary}
+                  />
+                </Animated.View>
               </TouchableOpacity>
-            </Animated.View>
+            </View>
           )}
         </View>
       </TouchableOpacity>
@@ -269,10 +371,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 12,
     right: 12,
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: 12,
     backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
     ...Platform.select({
@@ -280,6 +384,12 @@ const styles = StyleSheet.create({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5 },
       android: { elevation: 4 },
     }),
+  },
+  addButtonHit: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   textMuted: {
     color: '#aaa',

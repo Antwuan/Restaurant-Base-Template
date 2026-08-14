@@ -1,65 +1,88 @@
 /**
  * AnimatedBadge
- * A numeric badge that bounces whenever its `value` prop changes.
- * Drop-in replacement for the static badge in the cart button.
- *
- * Props:
- *   value     — number to display (hidden when 0 / falsy)
- *   style     — extra style for the badge container
- *   textStyle — extra style for the badge text
+ * Numeric badge that pops when `value` increases — cart add acknowledgment.
+ * Respects reduced motion (opacity/visibility only, no bounce).
  */
-import React, { useRef, useEffect } from 'react';
-import { Animated, Text, StyleSheet } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { AccessibilityInfo, Animated, Text, StyleSheet } from 'react-native';
 
-export default function AnimatedBadge({ value, style, textStyle }) {
+export default function AnimatedBadge({ value, style, textStyle, color }) {
   const scale = useRef(new Animated.Value(value ? 1 : 0)).current;
   const prevValue = useRef(value);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled?.().then((enabled) => {
+      if (mounted) setReduceMotion(!!enabled);
+    });
+    const sub = AccessibilityInfo.addEventListener?.(
+      'reduceMotionChanged',
+      (enabled) => setReduceMotion(!!enabled),
+    );
+    return () => {
+      mounted = false;
+      sub?.remove?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (!value) {
-      // Shrink badge out
-      Animated.spring(scale, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 300,
-        friction: 18,
-      }).start();
+      if (reduceMotion) {
+        scale.setValue(0);
+      } else {
+        Animated.timing(scale, {
+          toValue: 0,
+          duration: 120,
+          useNativeDriver: true,
+        }).start();
+      }
       prevValue.current = value;
       return;
     }
 
-    if (value !== prevValue.current) {
-      prevValue.current = value;
-      // Pop bounce
+    const increased = value > (prevValue.current || 0);
+    const appeared = !prevValue.current;
+    prevValue.current = value;
+
+    if (reduceMotion) {
+      scale.setValue(1);
+      return;
+    }
+
+    if (increased || appeared) {
+      // Ops-safe pop: short overshoot, settles under ~200ms
+      scale.setValue(appeared ? 0.6 : 1);
       Animated.sequence([
-        Animated.spring(scale, {
-          toValue: 1.45,
+        Animated.timing(scale, {
+          toValue: 1.28,
+          duration: 110,
           useNativeDriver: true,
-          tension: 400,
-          friction: 8,
         }),
-        Animated.spring(scale, {
+        Animated.timing(scale, {
           toValue: 1,
+          duration: 140,
           useNativeDriver: true,
-          tension: 300,
-          friction: 12,
         }),
       ]).start();
-    } else if (prevValue.current === undefined || prevValue.current === 0) {
-      // First appearance
-      Animated.spring(scale, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 300,
-        friction: 14,
-      }).start();
+    } else {
+      scale.setValue(1);
     }
-  }, [value, scale]);
+  }, [value, scale, reduceMotion]);
+
+  if (!value && reduceMotion) return null;
 
   return (
     <Animated.View
-      style={[styles.badge, style, { transform: [{ scale }] }]}
+      style={[
+        styles.badge,
+        color ? { backgroundColor: color } : null,
+        style,
+        { transform: [{ scale }] },
+      ]}
       pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
     >
       <Text style={[styles.text, textStyle]}>
         {value > 99 ? '99+' : value}
