@@ -431,7 +431,7 @@ export default function MenuScreen() {
 
             {/* Mobile search + horizontal category scroll */}
             {!isDesktop && (
-              <View style={[styles.mobileNav, { borderBottomColor: c.border }]}>
+              <View style={[styles.mobileNav, { borderBottomColor: c.border, backgroundColor: c.background || '#fff' }]}>
                 <View
                   style={[
                     styles.searchBox,
@@ -756,6 +756,13 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e8e8e8',
     paddingHorizontal: 16,
     paddingTop: 12,
+    ...Platform.select({
+      web: {
+        position: 'sticky',
+        top: NAVBAR_OFFSET,
+        zIndex: 20,
+      },
+    }),
   },
   mobileCategoryContent: {
     paddingBottom: 12,

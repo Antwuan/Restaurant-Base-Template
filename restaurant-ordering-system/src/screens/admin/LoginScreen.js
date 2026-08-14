@@ -17,16 +17,36 @@ import { useAuth } from '../../context/AuthContext';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { isStaffForRestaurant } from '../../services/authService';
 
+function showAlert(title, message) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n\n${message}` : title);
+    return;
+  }
+  Alert.alert(title, message);
+}
+
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn, signOut } = useAuth();
-  const { restaurant } = useRestaurantContext();
+  const { restaurant, adminLoginError, setAdminLoginError } = useRestaurantContext();
+
+  const notAdminMessage = `This account is not an admin for ${restaurant?.name || 'this restaurant'}.`;
+
+  const handleEmailChange = (value) => {
+    setEmail(value);
+    if (adminLoginError) setAdminLoginError(null);
+  };
+
+  const handlePasswordChange = (value) => {
+    setPassword(value);
+    if (adminLoginError) setAdminLoginError(null);
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter your email and password.');
+      showAlert('Error', 'Please enter your email and password.');
       return;
     }
 
@@ -37,16 +57,14 @@ export default function LoginScreen({ navigation }) {
       if (userId) {
         const staffHere = await isStaffForRestaurant(userId, restaurant?.id);
         if (!staffHere) {
+          setAdminLoginError(notAdminMessage);
           await signOut();
-          Alert.alert(
-            'Not an admin account',
-            `This account is not an admin for ${restaurant?.name || 'this restaurant'}.`,
-          );
+          showAlert('Not an admin account', notAdminMessage);
           return;
         }
       }
     } catch (error) {
-      Alert.alert(
+      showAlert(
         'Login Failed',
         error.message || 'Invalid email or password. Please try again.',
       );
@@ -62,14 +80,22 @@ export default function LoginScreen({ navigation }) {
     >
       <View style={styles.card}>
         <Text style={styles.title}>Admin Login</Text>
-        <Text style={styles.subtitle}>Sign in to manage your restaurant</Text>
+        <Text style={[styles.subtitle, adminLoginError && styles.subtitleWithBanner]}>
+          Sign in to manage your restaurant
+        </Text>
+
+        {adminLoginError ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>{adminLoginError}</Text>
+          </View>
+        ) : null}
 
         <TextInput
           style={styles.input}
           placeholder="Email"
           placeholderTextColor="#999"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={handleEmailChange}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
@@ -80,7 +106,7 @@ export default function LoginScreen({ navigation }) {
           placeholder="Password"
           placeholderTextColor="#999"
           value={password}
-          onChangeText={setPassword}
+          onChangeText={handlePasswordChange}
           secureTextEntry
         />
 
@@ -134,6 +160,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginBottom: 28,
+  },
+  subtitleWithBanner: {
+    marginBottom: 12,
+  },
+  errorBanner: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorBannerText: {
+    color: '#b91c1c',
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
   },
   input: {
     borderWidth: 1,

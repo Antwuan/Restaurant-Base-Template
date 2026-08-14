@@ -93,8 +93,8 @@ export const AuthProvider = ({ children }) => {
         .from('restaurant_staff')
         .select('id, role')
         .eq('auth_user_id', userId)
-        .maybeSingle();
-      if (error || !data) return false;
+        .limit(1);
+      if (error || !(data?.length > 0)) return false;
       return true;
     } catch {
       return false;

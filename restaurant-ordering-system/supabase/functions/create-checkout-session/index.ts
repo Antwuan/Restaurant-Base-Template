@@ -1,5 +1,6 @@
 import Stripe from 'npm:stripe@17';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { ensureConnectTransfers } from '../_shared/ensureConnectTransfers.ts';
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '');
 
@@ -65,6 +66,7 @@ Deno.serve(async (req: Request) => {
 
     // Route payment to restaurant's connected account if configured
     if (restaurant?.stripe_account_id) {
+      await ensureConnectTransfers(stripe, restaurant.stripe_account_id);
       sessionParams.payment_intent_data = {
         transfer_data: { destination: restaurant.stripe_account_id },
       };

@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Platform,
 } from 'react-native';
+import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 
 const DESTRUCTIVE_RED = '#FF3B30';
 /** Ignore reopen attempts after cancel/dismiss (click-through under modal). */
@@ -103,6 +104,7 @@ export function showConfirmModal({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function GlobalConfirmModal() {
+  const mobileSheet = useMobileBottomSheet();
   const [pending, setPending] = useState(null);
   const [visible, setVisible] = useState(false);
   const pendingRef = useRef(null);
@@ -161,24 +163,8 @@ export function GlobalConfirmModal() {
     }, FADE_OUT_MS);
   };
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={() => resolve(false)}
-      statusBarTranslucent
-    >
-      <View style={s.root}>
-        {/* Separate backdrop press target — not wrapping the card */}
-        <Pressable
-          style={s.backdrop}
-          onPress={(e) => resolve(false, e)}
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss"
-        />
-
-        <View style={s.card} pointerEvents="box-none">
+  const card = (
+        <View style={mobileSheet ? s.sheetCard : s.card} pointerEvents="box-none">
           <Text style={s.title}>{pending?.title}</Text>
 
           {pending?.message ? (
@@ -208,6 +194,32 @@ export function GlobalConfirmModal() {
             </TouchableOpacity>
           </View>
         </View>
+  );
+
+  if (mobileSheet) {
+    return (
+      <BottomSheet visible={visible} onClose={() => resolve(false)}>
+        {card}
+      </BottomSheet>
+    );
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => resolve(false)}
+      statusBarTranslucent
+    >
+      <View style={s.root}>
+        <Pressable
+          style={s.backdrop}
+          onPress={(e) => resolve(false, e)}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+        />
+        {card}
       </View>
     </Modal>
   );
@@ -238,6 +250,12 @@ const s = StyleSheet.create({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 16 },
       android: { elevation: 10 },
     }),
+  },
+  sheetCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    padding: 28,
+    paddingTop: 8,
   },
   title: {
     fontSize: 18,

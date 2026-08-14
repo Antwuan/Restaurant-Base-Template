@@ -48,6 +48,11 @@ export async function manageEmailDomain(payload) {
   return invoke('manage-email-domain', payload);
 }
 
+/** Admin: upsert opted-in customers missing resend_contact_id into Resend. */
+export async function backfillMarketingContacts(restaurantId) {
+  return invoke('backfill-marketing-contacts', { restaurantId });
+}
+
 /** Admin: list persisted promo broadcasts with webhook engagement counters. */
 export async function listEmailBroadcasts(restaurantId) {
   if (!restaurantId) return [];

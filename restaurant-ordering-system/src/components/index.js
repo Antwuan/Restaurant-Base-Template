@@ -11,6 +11,7 @@ export { default as RestaurantHeader } from './RestaurantHeader';
 export { default as MenuCarousel } from './MenuCarousel';
 export { default as CartPanel } from './CartPanel';
 export { default as CartDrawer } from './CartDrawer';
+export { default as BottomSheet, useMobileBottomSheet } from './BottomSheet';
 export { default as MenuHeaderActions } from './MenuHeaderActions';
 export { default as CustomerSignInModal } from './CustomerSignInModal';
 export { default as CustomerNavbar } from './CustomerNavbar';

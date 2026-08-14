@@ -16,6 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
 import { useAuth } from '../context/AuthContext';
+import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 
 /* ─────────────────────────────────────────────────────────
    Suggestion card — toggle on/off; does NOT immediately add to cart
@@ -66,6 +67,7 @@ export default function MenuItemModal({
 }) {
   const { theme } = useTheme();
   const { isCustomerAuthenticated } = useAuth();
+  const mobileSheet = useMobileBottomSheet();
   const [quantity, setQuantity] = useState(1);
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState(new Set());
@@ -218,71 +220,46 @@ export default function MenuItemModal({
 
   const hasSuggestions = suggestedItems.length > 0;
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+  const cardBody = (
+    <>
+      {/* Close stays pinned on the shell; image scrolls with details */}
+      <TouchableOpacity
+        style={styles.closeBtn}
+        onPress={onClose}
+        accessibilityLabel="Close"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
-        {/* Dimmed backdrop — tap to close */}
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}>
-          <Pressable style={styles.backdrop} onPress={onClose} />
-        </Animated.View>
+        <Ionicons name="close" size={20} color="#333" />
+      </TouchableOpacity>
 
-        {/* Floating card — scale + fade entrance */}
-        <Animated.View
-          style={[
-            styles.card,
-            { opacity: cardOpacity, transform: [{ scale: cardScale }] },
-          ]}
-        >
-          {/* ── Image ── */}
-          <View style={styles.imageWrap}>
-            {item.image_url ? (
-              <Image
-                source={{ uri: item.image_url }}
-                style={[styles.image, isUnavailable && styles.imageUnavailable]}
-                resizeMode="cover"
-                accessibilityLabel={item.name}
-              />
-            ) : (
-              <View style={[styles.image, styles.imagePlaceholder, { backgroundColor: theme.colors.backgroundSunken || '#f3f4f6' }]}>
-                <Text style={styles.imagePlaceholderEmoji}>🍽</Text>
-              </View>
-            )}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+        style={styles.scrollView}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.imageWrap}>
+          {item.image_url ? (
+            <Image
+              source={{ uri: item.image_url }}
+              style={[styles.image, isUnavailable && styles.imageUnavailable]}
+              resizeMode="cover"
+              accessibilityLabel={item.name}
+            />
+          ) : (
+            <View style={[styles.image, styles.imagePlaceholder, { backgroundColor: theme.colors.backgroundSunken || '#f3f4f6' }]}>
+              <Text style={styles.imagePlaceholderEmoji}>🍽</Text>
+            </View>
+          )}
 
-            {/* Unavailable overlay */}
-            {isUnavailable && (
-              <View style={styles.unavailableOverlay}>
-                <Ionicons name="alert-circle-outline" size={16} color="#fff" />
-                <Text style={styles.unavailableOverlayText}>Currently unavailable</Text>
-              </View>
-            )}
-          </View>
+          {isUnavailable && (
+            <View style={styles.unavailableOverlay}>
+              <Ionicons name="alert-circle-outline" size={16} color="#fff" />
+              <Text style={styles.unavailableOverlayText}>Currently unavailable</Text>
+            </View>
+          )}
+        </View>
 
-          {/* ── Close button — floats above image ── */}
-          <TouchableOpacity
-            style={styles.closeBtn}
-            onPress={onClose}
-            accessibilityLabel="Close"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="close" size={20} color="#333" />
-          </TouchableOpacity>
-
-          {/* ── Scrollable body ── */}
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-            style={styles.scrollView}
-            keyboardShouldPersistTaps="handled"
-          >
             {/* Name + price */}
             <View style={styles.body}>
               <Text style={styles.itemName}>{item.name}</Text>
@@ -417,7 +394,6 @@ export default function MenuItemModal({
             <View style={{ height: 8 }} />
           </ScrollView>
 
-          {/* ── Footer: qty stepper + Add to cart ── */}
           {!isUnavailable && (
             <View style={styles.footer}>
               <View style={styles.stepper}>
@@ -453,6 +429,40 @@ export default function MenuItemModal({
               </TouchableOpacity>
             </View>
           )}
+    </>
+  );
+
+  if (mobileSheet) {
+    return (
+      <BottomSheet visible={visible} onClose={onClose} expand>
+        <View style={styles.sheetInner}>{cardBody}</View>
+      </BottomSheet>
+    );
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}>
+          <Pressable style={styles.backdrop} onPress={onClose} />
+        </Animated.View>
+
+        <Animated.View
+          style={[
+            styles.card,
+            { opacity: cardOpacity, transform: [{ scale: cardScale }] },
+          ]}
+        >
+          {cardBody}
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
@@ -486,6 +496,10 @@ const styles = StyleSheet.create({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 16 },
       android: { elevation: 12 },
     }),
+  },
+  sheetInner: {
+    flex: 1,
+    minHeight: 0,
   },
 
   // Image
@@ -545,6 +559,8 @@ const styles = StyleSheet.create({
 
   // Scroll body
   scrollView: {
+    flex: 1,
+    flexGrow: 1,
     flexShrink: 1,
   },
   body: {

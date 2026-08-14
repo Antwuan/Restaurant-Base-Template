@@ -12,10 +12,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import CartPanel from './CartPanel';
+import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 
 const DRAWER_MAX_WIDTH = 420;
 
 export default function CartDrawer({ visible, onClose, onCheckout }) {
+  const mobileSheet = useMobileBottomSheet();
   const { width } = useWindowDimensions();
   const panelWidth = Math.min(DRAWER_MAX_WIDTH, width * 0.92);
 
@@ -23,6 +25,7 @@ export default function CartDrawer({ visible, onClose, onCheckout }) {
   const overlayAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    if (mobileSheet) return;
     Animated.parallel([
       Animated.timing(slideAnim, {
         toValue: visible ? 0 : panelWidth,
@@ -35,7 +38,31 @@ export default function CartDrawer({ visible, onClose, onCheckout }) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, [visible, panelWidth, slideAnim, overlayAnim]);
+  }, [visible, panelWidth, slideAnim, overlayAnim, mobileSheet]);
+
+  const header = (
+    <View style={styles.drawerHeader}>
+      <Text style={styles.drawerTitle}>Cart</Text>
+      <TouchableOpacity
+        onPress={onClose}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityLabel="Close cart"
+      >
+        <Ionicons name="close" size={26} color="#333" />
+      </TouchableOpacity>
+    </View>
+  );
+
+  if (mobileSheet) {
+    return (
+      <BottomSheet visible={visible} onClose={onClose} expand>
+        <View style={styles.sheetInner}>
+          {header}
+          <CartPanel onClose={onClose} onCheckout={onCheckout} />
+        </View>
+      </BottomSheet>
+    );
+  }
 
   return (
     <Modal
@@ -44,7 +71,6 @@ export default function CartDrawer({ visible, onClose, onCheckout }) {
       animationType="none"
       onRequestClose={onClose}
     >
-      {/* Backdrop fades in/out in sync with panel slide */}
       <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
         <Pressable style={styles.backdrop} onPress={onClose} />
       </Animated.View>
@@ -58,16 +84,7 @@ export default function CartDrawer({ visible, onClose, onCheckout }) {
           },
         ]}
       >
-        <View style={styles.drawerHeader}>
-          <Text style={styles.drawerTitle}>Cart</Text>
-          <TouchableOpacity
-            onPress={onClose}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityLabel="Close cart"
-          >
-            <Ionicons name="close" size={26} color="#333" />
-          </TouchableOpacity>
-        </View>
+        {header}
         <CartPanel onClose={onClose} onCheckout={onCheckout} />
       </Animated.View>
     </Modal>
@@ -109,5 +126,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#111',
+  },
+  sheetInner: {
+    flex: 1,
+    minHeight: 0,
   },
 });
