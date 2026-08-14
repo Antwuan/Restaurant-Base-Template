@@ -5,29 +5,33 @@ import {
   FlatList,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
   Switch,
   RefreshControl,
-  Dimensions,
 } from 'react-native';
-
-const COLUMNS = 5;
-const LIST_PADDING = 10;
-const COLUMN_GAP = 8;
-
-function getCardWidth() {
-  const { width } = Dimensions.get('window');
-  return (width - LIST_PADDING * 2 - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS;
-}
 import { useOrders } from '../../hooks/useOrders';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
 import * as restaurantService from '../../services/restaurantService';
 import OrderCard from '../../components/admin/OrderCard';
 import AdminEmptyState from '../../components/admin/AdminEmptyState';
+import AdminHoverTab from '../../components/admin/AdminHoverTab';
 
 const STATUS_TABS = ['pending', 'preparing', 'ready', 'completed'];
 const VIEW_TABS = ['Regular', 'Catering'];
+const MIN_CARD_WIDTH = 220;
+const MAX_COLUMNS = 5;
+
+function columnsForWidth(containerWidth, listPadding, columnGap) {
+  if (!containerWidth || containerWidth <= 0) return 1;
+  const inner = containerWidth - listPadding * 2;
+  const cols = Math.floor((inner + columnGap) / (MIN_CARD_WIDTH + columnGap));
+  return Math.max(1, Math.min(MAX_COLUMNS, cols || 1));
+}
+
+function cardWidthFor(containerWidth, columns, listPadding, columnGap) {
+  if (!containerWidth || columns < 1) return MIN_CARD_WIDTH;
+  return (containerWidth - listPadding * 2 - columnGap * (columns - 1)) / columns;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,10 +61,14 @@ function CateringSection({
   loading,
   onRefresh,
   onStatusUpdate,
+  columns,
   cardWidth,
+  listPadding,
+  columnGap,
   c,
   activeTab,
   onTabChange,
+  s,
 }) {
   const cateringOrders = orders
     .filter((o) => o.menu_type === 'catering' && isTodayOrFuture(o.scheduled_time))
@@ -82,40 +90,48 @@ function CateringSection({
 
   return (
     <>
-      <View style={[styles.tabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
+      <View style={[s.tabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
         {STATUS_TABS.map((tab) => {
           const count = tabCount(tab);
           const isActive = activeTab === tab;
           return (
-            <TouchableOpacity
+            <AdminHoverTab
               key={tab}
+              isActive={isActive}
+              brandLight={c.brandLight}
+              washRadius={0}
               style={[
-                styles.tab,
+                s.tab,
                 isActive && { borderBottomWidth: 2, borderBottomColor: c.brand },
               ]}
+              contentStyle={s.tabContent}
               onPress={() => onTabChange(tab)}
             >
-              <Text
-                style={[
-                  styles.tabText,
-                  { color: isActive ? c.brand : c.textSecondary },
-                  isActive && styles.activeTabText,
-                ]}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </Text>
-              {count > 0 && (
-                <View
-                  style={[
-                    styles.badge,
-                    { backgroundColor: c.textDisabled },
-                    tab === 'pending' && styles.badgeUrgent,
-                  ]}
-                >
-                  <Text style={styles.badgeText}>{count}</Text>
-                </View>
+              {({ hovered }) => (
+                <>
+                  <Text
+                    style={[
+                      s.tabText,
+                      { color: isActive || hovered ? c.brand : c.textSecondary },
+                      isActive && s.activeTabText,
+                    ]}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </Text>
+                  {count > 0 && (
+                    <View
+                      style={[
+                        s.badge,
+                        { backgroundColor: c.textDisabled },
+                        tab === 'pending' && s.badgeUrgent,
+                      ]}
+                    >
+                      <Text style={s.badgeText}>{count}</Text>
+                    </View>
+                  )}
+                </>
               )}
-            </TouchableOpacity>
+            </AdminHoverTab>
           );
         })}
       </View>
@@ -128,11 +144,17 @@ function CateringSection({
         />
       ) : (
         <ScrollView
-          contentContainerStyle={{ padding: LIST_PADDING, gap: 10 }}
+          contentContainerStyle={{
+            padding: listPadding,
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: columnGap,
+            alignItems: 'flex-start',
+          }}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} />}
         >
           {filtered.map((order) => (
-            <View key={order.id} style={{ marginBottom: 10, maxWidth: 420 }}>
+            <View key={order.id} style={{ width: cardWidth }}>
               <View style={[cat.timeBanner, { backgroundColor: c.brand + '18', borderColor: c.brand + '44' }]}>
                 <Text style={[cat.timeText, { color: c.brand }]}>
                   📅 {formatScheduled(order.scheduled_time)}
@@ -163,10 +185,16 @@ const cat = StyleSheet.create({
 export default function OrdersScreen() {
   const { theme } = useTheme();
   const c = theme.colors;
+  const sp = theme.spacing;
+  const listPadding = sp[3]; // 12
+  const columnGap = sp[2]; // 8
+  const s = React.useMemo(() => makeStyles(sp), [sp]);
+
   const { restaurant, patchRestaurant } = useRestaurantContext();
   const [viewTab, setViewTab] = useState('Regular');
   const [activeTab, setActiveTab] = useState('pending');
-  const [cardWidth, setCardWidth] = useState(getCardWidth);
+  const [columns, setColumns] = useState(1);
+  const [cardWidth, setCardWidth] = useState(MIN_CARD_WIDTH);
   const [acceptingOrders, setAcceptingOrders] = useState(
     restaurant?.is_accepting_orders ?? true,
   );
@@ -187,6 +215,13 @@ export default function OrdersScreen() {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     }
   }, [orders.length, activeTab]);
+
+  const updateLayout = (containerWidth) => {
+    const nextCols = columnsForWidth(containerWidth, listPadding, columnGap);
+    const nextWidth = cardWidthFor(containerWidth, nextCols, listPadding, columnGap);
+    setColumns(nextCols);
+    setCardWidth(nextWidth);
+  };
 
   // Regular orders only
   const regularOrders = orders.filter((o) => !o.menu_type || o.menu_type === 'regular');
@@ -243,128 +278,156 @@ export default function OrdersScreen() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: c.background }]}>
-      {/* Header */}
+    <View
+      style={[s.container, { backgroundColor: c.background }]}
+      onLayout={(e) => updateLayout(e.nativeEvent.layout.width)}
+    >
+      {/* Single toolbar: Open + Regular/Catering (shell already titles the section) */}
       <View
         style={[
-          styles.header,
+          s.toolbar,
           { backgroundColor: c.backgroundCard, borderBottomColor: c.border },
         ]}
       >
-        <View>
-          <Text style={[styles.headerTitle, { color: c.textPrimary }]}>
-            {restaurant?.name ?? 'Orders'}
-          </Text>
-          <Text style={[styles.headerSub, { color: c.textSecondary }]}>
-            {acceptingOrders ? '🟢 Accepting orders' : '🔴 Paused'}
-          </Text>
-        </View>
-        <View style={styles.toggleColumn}>
-          <View style={styles.toggleRow}>
-            <Text style={[styles.toggleLabel, { color: c.textPrimary }]}>Open</Text>
+        <View style={s.openCluster}>
+          <View
+            style={[
+              s.openPill,
+              {
+                backgroundColor: acceptingOrders ? '#D1FAE5' : '#FEE2E2',
+                borderColor: acceptingOrders ? '#6EE7B7' : '#FECACA',
+              },
+            ]}
+          >
+            <Text
+              style={[
+                s.openPillText,
+                { color: acceptingOrders ? '#065F46' : '#991B1B' },
+              ]}
+            >
+              {acceptingOrders ? 'Open' : 'Paused'}
+            </Text>
             <Switch
               value={acceptingOrders}
               onValueChange={handleToggleAccepting}
               disabled={toggling}
               trackColor={{ true: '#34C759', false: '#ccc' }}
+              style={s.openSwitch}
             />
           </View>
           {toggleError ? (
-            <Text style={styles.toggleError}>{toggleError}</Text>
+            <Text style={s.toggleError}>{toggleError}</Text>
           ) : null}
         </View>
-      </View>
 
-      {/* View tabs: Regular | Catering */}
-      <View style={[styles.viewTabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
-        {VIEW_TABS.map((vt) => {
-          const isActive = viewTab === vt;
-          const badge = vt === 'Catering' ? cateringCount : null;
-          return (
-            <TouchableOpacity
-              key={vt}
-              style={[
-                styles.viewTab,
-                isActive && { borderBottomWidth: 2.5, borderBottomColor: c.brand },
-              ]}
-              onPress={() => setViewTab(vt)}
-            >
-              <Text style={[styles.viewTabText, { color: isActive ? c.brand : c.textSecondary }, isActive && { fontWeight: '700' }]}>
-                {vt}
-              </Text>
-              {badge > 0 && (
-                <View style={[styles.badge, { backgroundColor: c.brand }]}>
-                  <Text style={styles.badgeText}>{badge}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
+        <View style={s.viewTabs}>
+          {VIEW_TABS.map((vt) => {
+            const isActive = viewTab === vt;
+            const badge = vt === 'Catering' ? cateringCount : null;
+            return (
+              <AdminHoverTab
+                key={vt}
+                isActive={isActive}
+                brandLight={c.brandLight}
+                style={[
+                  s.viewTab,
+                  isActive && {
+                    backgroundColor: c.brand + '14',
+                    borderColor: c.brand,
+                  },
+                ]}
+                contentStyle={s.viewTabContent}
+                onPress={() => setViewTab(vt)}
+              >
+                {({ hovered }) => (
+                  <>
+                    <Text
+                      style={[
+                        s.viewTabText,
+                        { color: isActive || hovered ? c.brand : c.textSecondary },
+                        isActive && { fontWeight: '700' },
+                      ]}
+                    >
+                      {vt}
+                    </Text>
+                    {badge > 0 && (
+                      <View style={[s.badge, { backgroundColor: c.brand }]}>
+                        <Text style={s.badgeText}>{badge}</Text>
+                      </View>
+                    )}
+                  </>
+                )}
+              </AdminHoverTab>
+            );
+          })}
+        </View>
       </View>
 
       {/* ── Regular orders ──────────────────────────────── */}
       {viewTab === 'Regular' && (
         <>
-          {/* Status Tabs */}
-          <View style={[styles.tabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
+          <View style={[s.tabs, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
             {STATUS_TABS.map((tab) => {
               const count = tabCount(tab);
               const isActive = activeTab === tab;
               return (
-                <TouchableOpacity
+                <AdminHoverTab
                   key={tab}
+                  isActive={isActive}
+                  brandLight={c.brandLight}
+                  washRadius={0}
                   style={[
-                    styles.tab,
+                    s.tab,
                     isActive && { borderBottomWidth: 2, borderBottomColor: c.brand },
                   ]}
+                  contentStyle={s.tabContent}
                   onPress={() => setActiveTab(tab)}
                 >
-                  <Text
-                    style={[
-                      styles.tabText,
-                      { color: isActive ? c.brand : c.textSecondary },
-                      isActive && styles.activeTabText,
-                    ]}
-                  >
-                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  </Text>
-                  {count > 0 && (
-                    <View
-                      style={[
-                        styles.badge,
-                        { backgroundColor: c.textDisabled },
-                        tab === 'pending' && styles.badgeUrgent,
-                      ]}
-                    >
-                      <Text style={styles.badgeText}>{count}</Text>
-                    </View>
+                  {({ hovered }) => (
+                    <>
+                      <Text
+                        style={[
+                          s.tabText,
+                          { color: isActive || hovered ? c.brand : c.textSecondary },
+                          isActive && s.activeTabText,
+                        ]}
+                      >
+                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                      </Text>
+                      {count > 0 && (
+                        <View
+                          style={[
+                            s.badge,
+                            { backgroundColor: c.textDisabled },
+                            tab === 'pending' && s.badgeUrgent,
+                          ]}
+                        >
+                          <Text style={s.badgeText}>{count}</Text>
+                        </View>
+                      )}
+                    </>
                   )}
-                </TouchableOpacity>
+                </AdminHoverTab>
               );
             })}
           </View>
 
-          {/* Orders Grid */}
           <FlatList
             ref={flatListRef}
             data={filteredOrders}
             keyExtractor={(item) => item.id}
-            numColumns={COLUMNS}
-            key="orders-5col"
-            columnWrapperStyle={styles.row}
-            onLayout={(e) => {
-              const containerWidth = e.nativeEvent.layout.width;
-              setCardWidth(
-                (containerWidth - LIST_PADDING * 2 - COLUMN_GAP * (COLUMNS - 1)) / COLUMNS,
-              );
-            }}
+            numColumns={columns}
+            key={`orders-${columns}col`}
+            columnWrapperStyle={columns > 1 ? [s.row, { gap: columnGap, marginBottom: columnGap }] : undefined}
             renderItem={({ item }) => (
-              <View style={[styles.cardWrapper, { width: cardWidth }]}>
+              <View style={[s.cardWrapper, { width: cardWidth, marginBottom: columns === 1 ? columnGap : 0 }]}>
                 <OrderCard order={item} onStatusUpdate={updateStatus} />
               </View>
             )}
             contentContainerStyle={
-              filteredOrders.length === 0 ? styles.emptyList : styles.listContent
+              filteredOrders.length === 0
+                ? s.emptyList
+                : [s.listContent, { padding: listPadding }]
             }
             ListEmptyComponent={renderEmpty}
             refreshControl={
@@ -381,119 +444,132 @@ export default function OrdersScreen() {
           loading={loading}
           onRefresh={refreshOrders}
           onStatusUpdate={updateStatus}
+          columns={columns}
           cardWidth={cardWidth}
+          listPadding={listPadding}
+          columnGap={columnGap}
           c={c}
           activeTab={activeTab}
           onTabChange={setActiveTab}
+          s={s}
         />
       )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  headerSub: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  toggleColumn: {
-    alignItems: 'flex-end',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  toggleLabel: {
-    fontSize: 14,
-  },
-  toggleError: {
-    fontSize: 11,
-    color: '#DC3545',
-    marginTop: 2,
-    maxWidth: 160,
-    textAlign: 'right',
-  },
-  // Top-level Regular / Catering switcher
-  viewTabs: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    paddingHorizontal: 8,
-  },
-  viewTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    gap: 6,
-  },
-  viewTabText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  // Status tabs
-  tabs: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 11,
-    gap: 4,
-  },
-  tabText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  activeTabText: {
-    fontWeight: '700',
-  },
-  badge: {
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  badgeUrgent: {
-    backgroundColor: '#FF3B30',
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  listContent: {
-    padding: 10,
-  },
-  row: {
-    gap: 8,
-    marginBottom: 8,
-    alignItems: 'flex-start',
-  },
-  cardWrapper: {
-    // width is set inline from cardWidth state
-  },
-  emptyList: {
-    flex: 1,
-  },
-});
+function makeStyles(sp) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    toolbar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: sp[2],
+      paddingHorizontal: sp[3],
+      paddingVertical: sp[2],
+      borderBottomWidth: 1,
+    },
+    openCluster: {
+      flexShrink: 0,
+    },
+    openPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: sp[2],
+      paddingLeft: sp[3],
+      paddingRight: sp[1],
+      paddingVertical: sp[1],
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    openPillText: {
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    openSwitch: {
+      transform: [{ scaleX: 0.9 }, { scaleY: 0.9 }],
+    },
+    toggleError: {
+      fontSize: 11,
+      color: '#DC3545',
+      marginTop: 2,
+      maxWidth: 200,
+    },
+    viewTabs: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: sp[1],
+      flexWrap: 'wrap',
+    },
+    viewTab: {
+      paddingVertical: sp[2],
+      paddingHorizontal: sp[3],
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: 'transparent',
+      minHeight: 40,
+    },
+    viewTabContent: {
+      gap: 6,
+      flex: 0,
+    },
+    viewTabText: {
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    tabs: {
+      flexDirection: 'row',
+      borderBottomWidth: 1,
+    },
+    tab: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: sp[2] + 2,
+      minHeight: 44,
+      borderRadius: 0,
+    },
+    tabContent: {
+      justifyContent: 'center',
+      gap: 4,
+      flex: 0,
+    },
+    tabText: {
+      fontSize: 13,
+      fontWeight: '500',
+    },
+    activeTabText: {
+      fontWeight: '700',
+    },
+    badge: {
+      borderRadius: 10,
+      minWidth: 18,
+      height: 18,
+      paddingHorizontal: 4,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    badgeUrgent: {
+      backgroundColor: '#FF3B30',
+    },
+    badgeText: {
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    listContent: {
+      flexGrow: 1,
+    },
+    row: {
+      alignItems: 'flex-start',
+    },
+    cardWrapper: {},
+    emptyList: {
+      flex: 1,
+    },
+  });
+}
