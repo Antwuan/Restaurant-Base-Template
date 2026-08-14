@@ -1,8 +1,67 @@
 import Stripe from 'npm:stripe@17';
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { ensureConnectTransfers } from '../_shared/ensureConnectTransfers.ts';
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '');
+
+const CONNECT_ONBOARDING_ERROR =
+  'Complete Stripe Connect onboarding for this restaurant';
+
+type V2AccountFields = {
+  configuration?: {
+    recipient?: {
+      capabilities?: {
+        stripe_balance?: {
+          stripe_transfers?: { status?: string | null };
+        };
+      };
+    };
+  };
+};
+
+function isTransfersActive(account: Stripe.Account): boolean {
+  const v1 = account.capabilities?.transfers;
+  const v2 = (account as Stripe.Account & V2AccountFields).configuration
+    ?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
+  return v1 === 'active' || v2 === 'active';
+}
+
+function isTransfersRequested(account: Stripe.Account): boolean {
+  const v1 = account.capabilities?.transfers;
+  if (v1 && v1 !== 'unrequested') return true;
+  const v2 = (account as Stripe.Account & V2AccountFields).configuration
+    ?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
+  if (v2 && v2 !== 'unrequested') return true;
+  return false;
+}
+
+/** Dashboard deploys do not include ../_shared — keep this helper inlined. */
+async function ensureConnectTransfers(stripeClient: Stripe, accountId: string): Promise<void> {
+  let account: Stripe.Account;
+  try {
+    account = await stripeClient.accounts.retrieve(accountId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '';
+    if (/no such account|does not exist|capability|transfers/i.test(message)) {
+      throw new Error(CONNECT_ONBOARDING_ERROR);
+    }
+    throw err;
+  }
+
+  if (isTransfersActive(account)) return;
+
+  if (!isTransfersRequested(account)) {
+    try {
+      account = await stripeClient.accounts.update(accountId, {
+        capabilities: { transfers: { requested: true } },
+      });
+    } catch {
+      // Requesting does not finish onboarding.
+    }
+    if (isTransfersActive(account)) return;
+  }
+
+  throw new Error(CONNECT_ONBOARDING_ERROR);
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
