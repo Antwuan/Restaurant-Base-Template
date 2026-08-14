@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Animated,
   TouchableOpacity,
-  Text,
   Platform,
   useWindowDimensions,
 } from 'react-native';
@@ -115,17 +114,10 @@ const styles = StyleSheet.create({
   drawerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  drawerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111',
   },
   sheetInner: {
     flex: 1,

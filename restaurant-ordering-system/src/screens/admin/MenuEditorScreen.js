@@ -1,18 +1,14 @@
-// Admin menu editor — mirrors the customer MenuScreen layout so admins see
-// exactly what customers see, with admin controls layered on top.
+// Admin menu editor — ops-first layout for editing categories and items.
 //
 // Layout (desktop):
-//   [Regular Menu] [Catering Menu]          ← tab switcher
+//   [Regular Menu] [Catering Menu]          ← tab switcher + Add Item
 //   ─────────────────────────────────────────────────────
-//   [Carousel]
-//   [Info bar]
 //   [Sidebar (sticky)]  │  [Category sections]
 //    drag to reorder     │   drag items to reorder
 //    + Add Category      │
 //
 // Mobile:
 //   [Tab switcher]
-//   [Carousel]  [Info bar]
 //   [Horizontal draggable category chips  + Add Category]
 //   [Category sections — single column]
 import React, { useState, useCallback, useRef } from 'react';
@@ -27,7 +23,6 @@ import {
   RefreshControl,
   Platform,
   useWindowDimensions,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -61,6 +56,7 @@ import {
   menuImageStoragePath,
 } from '../../services/storageService';
 import AdminCategorySection from '../../components/admin/AdminCategorySection';
+import AdminHoverTab from '../../components/admin/AdminHoverTab';
 import AdminEmptyState from '../../components/admin/AdminEmptyState';
 import MenuItemEditor from '../../components/admin/MenuItemEditor';
 import CategoryEditor from '../../components/admin/CategoryEditor';
@@ -419,49 +415,6 @@ export default function MenuEditorScreen() {
   const activeCategory = activeCategoryId || categories[0]?.id;
   const isEmpty = !loading && categorizedMenu.length === 0;
 
-  const renderInfoBar = () => (
-    <View style={[styles.infoBar, { backgroundColor: c.backgroundCard, borderBottomColor: c.border }]}>
-      <View style={styles.infoBarInner}>
-        <View style={styles.infoLeft}>
-          {restaurant?.name ? (
-            <Text style={[styles.infoName, { color: c.textPrimary }]}>{restaurant.name}</Text>
-          ) : null}
-          <View style={styles.infoMeta}>
-            {restaurant?.address ? (
-              <View style={styles.infoMetaItem}>
-                <Ionicons name="location-outline" size={13} color={c.textSecondary} />
-                <Text style={[styles.infoMetaText, { color: c.textSecondary }]} numberOfLines={1}>
-                  {restaurant.address}
-                </Text>
-              </View>
-            ) : null}
-            {restaurant?.is_accepting_orders === false ? (
-              <View style={[styles.statusPill, styles.statusPillClosed]}>
-                <Text style={styles.statusPillText}>Closed</Text>
-              </View>
-            ) : (
-              <View style={[styles.statusPill, styles.statusPillOpen]}>
-                <Text style={styles.statusPillText}>Open Now</Text>
-              </View>
-            )}
-          </View>
-        </View>
-        {restaurant?.phone ? (
-          <TouchableOpacity
-            style={[styles.phoneBtn, { borderColor: c.border }]}
-            onPress={() => Linking.openURL(`tel:${restaurant.phone}`)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="call-outline" size={14} color={c.brand} />
-            <Text style={[styles.phoneBtnText, { color: c.brand }]}>
-              {restaurant.phone}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    </View>
-  );
-
   const renderCategoryContent = () => (
     <>
       {categorizedMenu.map((category) => (
@@ -602,30 +555,37 @@ export default function MenuEditorScreen() {
         {MENU_TABS.map((tab) => {
           const isActive = tab.key === activeMenuType;
           return (
-            <TouchableOpacity
+            <AdminHoverTab
               key={tab.key}
+              isActive={isActive}
+              brandLight={c.brandLight}
+              washRadius={0}
               style={[
                 styles.tab,
                 isActive && { borderBottomColor: c.brand },
               ]}
+              contentStyle={styles.tabContent}
               onPress={() => setActiveMenuType(tab.key)}
               activeOpacity={0.75}
             >
-              <Ionicons
-                name={tab.icon}
-                size={15}
-                color={isActive ? c.brand : c.textSecondary}
-              />
-              <Text
-                style={[
-                  styles.tabLabel,
-                  { color: c.textSecondary },
-                  isActive && { color: c.brand },
-                ]}
-              >
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
+              {({ hovered }) => (
+                <>
+                  <Ionicons
+                    name={tab.icon}
+                    size={15}
+                    color={isActive || hovered ? c.brand : c.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      { color: isActive || hovered ? c.brand : c.textSecondary },
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                </>
+              )}
+            </AdminHoverTab>
           );
         })}
 
@@ -661,9 +621,6 @@ export default function MenuEditorScreen() {
           }
           showsVerticalScrollIndicator={false}
         >
-          {/* Info bar */}
-          {renderInfoBar()}
-
           {/* Content */}
           {isEmpty ? (
             <AdminEmptyState
@@ -774,14 +731,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   tab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
     marginBottom: -1,
+    borderRadius: 0,
+  },
+  tabContent: {
+    gap: 6,
+    flex: 0,
   },
   tabLabel: {
     fontSize: 14,
@@ -797,78 +756,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 10,
     borderRadius: 8,
+    minHeight: 40,
   },
   addItemBtnText: {
     fontSize: 13,
     fontWeight: '600',
   },
 
-  // ── Info bar (mirrors MenuScreen)
-  infoBar: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  infoBarInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    maxWidth: 1080,
-    alignSelf: 'center',
-  },
-  infoLeft: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  infoName: {
-    fontSize: 17,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  infoMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  infoMetaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  infoMetaText: {
-    fontSize: 12,
-  },
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 20,
-  },
-  statusPillOpen: { backgroundColor: '#D1FAE5' },
-  statusPillClosed: { backgroundColor: '#FEE2E2' },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#374151',
-  },
-  phoneBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  phoneBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-  // ── Layout (mirrors MenuScreen)
+  // ── Layout
   menuLayout: {
     flex: 1,
     flexDirection: 'column',
@@ -877,19 +774,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     width: '100%',
-    maxWidth: 1080,
+    maxWidth: 1280,
     alignSelf: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
   },
   menuItems: {
     flex: 1,
     minWidth: 0,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingHorizontal: 16,
   },
   menuItemsDesktop: {
     paddingHorizontal: 0,
-    paddingLeft: 24,
+    paddingLeft: 20,
   },
 
   // ── Mobile nav

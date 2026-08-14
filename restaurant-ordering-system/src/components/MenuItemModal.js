@@ -21,33 +21,51 @@ import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 /* ─────────────────────────────────────────────────────────
    Suggestion card — toggle on/off; does NOT immediately add to cart
 ───────────────────────────────────────────────────────── */
-function SuggestionCard({ suggestion, selected, onToggle }) {
+function SuggestionCard({ suggestion, selected, onToggle, disabled, brand, brandText }) {
   return (
-    <View style={sug.card}>
+    <View style={[sug.card, disabled && sug.cardDisabled]}>
       {suggestion.image_url ? (
         <Image source={{ uri: suggestion.image_url }} style={sug.image} resizeMode="cover" />
       ) : (
         <View style={[sug.image, sug.imagePlaceholder]}>
-          <Text style={{ fontSize: 22 }}>🍽</Text>
+          <Ionicons name="restaurant-outline" size={22} color="#cbd5e1" />
         </View>
       )}
       <View style={sug.info}>
         <Text style={sug.name} numberOfLines={1}>{suggestion.name}</Text>
         <Text style={sug.price}>+${Number(suggestion.price ?? 0).toFixed(2)}</Text>
-        {suggestion.description ? (
+        {disabled ? (
+          <Text style={sug.desc} numberOfLines={1}>
+            Open from the menu to choose options
+          </Text>
+        ) : suggestion.description ? (
           <Text style={sug.desc} numberOfLines={1}>{suggestion.description}</Text>
         ) : null}
       </View>
       <TouchableOpacity
-        style={[sug.toggleBtn, selected && sug.toggleBtnSelected]}
-        onPress={() => onToggle(suggestion)}
+        style={[
+          sug.toggleBtn,
+          selected && {
+            backgroundColor: brand || '#1a1a1a',
+            borderColor: brand || '#1a1a1a',
+          },
+          disabled && sug.toggleBtnDisabled,
+        ]}
+        onPress={() => !disabled && onToggle(suggestion)}
         activeOpacity={0.75}
-        accessibilityLabel={selected ? `Remove ${suggestion.name}` : `Add ${suggestion.name}`}
+        disabled={disabled}
+        accessibilityLabel={
+          disabled
+            ? `${suggestion.name} requires customization`
+            : selected
+              ? `Remove ${suggestion.name}`
+              : `Add ${suggestion.name}`
+        }
       >
         <Ionicons
           name={selected ? 'checkmark' : 'add'}
           size={20}
-          color={selected ? '#fff' : '#1a1a1a'}
+          color={disabled ? '#bbb' : selected ? (brandText || '#fff') : '#1a1a1a'}
         />
       </TouchableOpacity>
     </View>
@@ -74,6 +92,10 @@ export default function MenuItemModal({
   // { [groupId]: string[] optionIds }
   const [selectedByGroup, setSelectedByGroup] = useState({});
   const [modifierError, setModifierError] = useState('');
+  const [signInVisible, setSignInVisible] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addSuccess, setAddSuccess] = useState(false);
+  const addBtnScale = useRef(new Animated.Value(1)).current;
 
   // Entrance animation — scale + fade
   const cardScale = useRef(new Animated.Value(0.88)).current;
@@ -88,6 +110,10 @@ export default function MenuItemModal({
       setSpecialInstructions('');
       setSelectedSuggestionIds(new Set());
       setModifierError('');
+      setAdding(false);
+      setAddSuccess(false);
+      addBtnScale.setValue(1);
+      setSignInVisible(false);
 
       const defaults = {};
       for (const g of item?.modifier_groups || []) {
@@ -195,27 +221,52 @@ export default function MenuItemModal({
       const count = (selectedByGroup[g.id] || []).length;
       const min = g.is_required ? Math.max(1, g.min_select || 1) : (g.min_select || 0);
       if (count < min) {
-        return `Please choose ${g.selection_type === 'single' ? 'an option' : 'options'} for ${g.name}`;
+        if (g.selection_type === 'single' || min === 1) {
+          return `Choose one option for ${g.name} to continue.`;
+        }
+        return `Choose at least ${min} options for ${g.name} to continue.`;
       }
       if (g.max_select && count > g.max_select) {
-        return `Too many options selected for ${g.name}`;
+        return `Pick no more than ${g.max_select} options for ${g.name}.`;
       }
     }
     return '';
   };
 
   const handleAdd = () => {
-    if (isUnavailable) return;
+    if (isUnavailable || adding || addSuccess) return;
     const err = validateModifiers();
     if (err) {
       setModifierError(err);
       return;
     }
-    onAddToCart(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
-    suggestedItems
-      .filter((s) => selectedSuggestionIds.has(s.id))
-      .forEach((s) => onAddToCart(s, 1, '', menuType, [], Number(s.price ?? 0)));
-    onClose();
+    setAdding(true);
+    setAddSuccess(true);
+    setModifierError('');
+
+    Animated.sequence([
+      Animated.timing(addBtnScale, {
+        toValue: 0.96,
+        duration: 90,
+        useNativeDriver: true,
+      }),
+      Animated.timing(addBtnScale, {
+        toValue: 1,
+        duration: 140,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Brief success state on the button, then commit + close
+    setTimeout(() => {
+      onAddToCart(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
+      suggestedItems
+        .filter((s) => selectedSuggestionIds.has(s.id) && !itemRequiresCustomization(s))
+        .forEach((s) => onAddToCart(s, 1, '', menuType, [], Number(s.price ?? 0)));
+      onClose();
+      setAdding(false);
+      setAddSuccess(false);
+    }, 420);
   };
 
   const hasSuggestions = suggestedItems.length > 0;
@@ -282,12 +333,16 @@ export default function MenuItemModal({
                     <View key={group.id} style={styles.section}>
                       <Text style={styles.sectionTitle}>
                         {group.name}
-                        {group.is_required ? ' *' : ''}
+                        {group.is_required ? (
+                          <Text style={styles.requiredMark}> · Required</Text>
+                        ) : null}
                       </Text>
                       <Text style={styles.sectionSubtitle}>
                         {group.selection_type === 'single'
                           ? 'Choose one'
-                          : `Choose up to ${group.max_select || available.length}`}
+                          : group.max_select
+                            ? `Choose up to ${group.max_select}`
+                            : 'Choose any that apply'}
                       </Text>
                       {available.map((opt) => {
                         const selected = selectedIds.includes(opt.id);
@@ -295,7 +350,13 @@ export default function MenuItemModal({
                         return (
                           <TouchableOpacity
                             key={opt.id}
-                            style={[styles.modOptionRow, selected && styles.modOptionSelected]}
+                            style={[
+                              styles.modOptionRow,
+                              selected && {
+                                borderColor: theme.colors.brand,
+                                backgroundColor: theme.colors.brandLight,
+                              },
+                            ]}
                             onPress={() =>
                               group.selection_type === 'single'
                                 ? selectSingle(group.id, opt.id)
@@ -306,17 +367,35 @@ export default function MenuItemModal({
                             <View style={[
                               styles.modRadio,
                               group.selection_type === 'multi' && styles.modCheck,
-                              selected && styles.modRadioSelected,
+                              selected && {
+                                backgroundColor: theme.colors.brand,
+                                borderColor: theme.colors.brand,
+                              },
                             ]}>
                               {selected ? (
-                                <Ionicons name="checkmark" size={12} color="#fff" />
+                                <Ionicons
+                                  name="checkmark"
+                                  size={12}
+                                  color={theme.colors.brandText || '#fff'}
+                                />
                               ) : null}
                             </View>
-                            <Text style={styles.modOptionName}>{opt.name}</Text>
+                            <Text
+                              style={[
+                                styles.modOptionName,
+                                selected && { color: theme.colors.brandDark || theme.colors.brand },
+                              ]}
+                            >
+                              {opt.name}
+                            </Text>
                             {delta > 0 ? (
-                              <Text style={styles.modOptionPrice}>+${delta.toFixed(2)}</Text>
+                              <Text style={[styles.modOptionPrice, selected && { color: theme.colors.brand }]}>
+                                +${delta.toFixed(2)}
+                              </Text>
                             ) : delta < 0 ? (
-                              <Text style={styles.modOptionPrice}>-${Math.abs(delta).toFixed(2)}</Text>
+                              <Text style={[styles.modOptionPrice, selected && { color: theme.colors.brand }]}>
+                                -${Math.abs(delta).toFixed(2)}
+                              </Text>
                             ) : null}
                           </TouchableOpacity>
                         );
@@ -325,7 +404,13 @@ export default function MenuItemModal({
                   );
                 })}
                 {modifierError ? (
-                  <Text style={styles.modError}>{modifierError}</Text>
+                  <Text
+                    style={styles.modError}
+                    accessibilityRole="alert"
+                    accessibilityLiveRegion="polite"
+                  >
+                    {modifierError}
+                  </Text>
                 ) : null}
                 <View style={styles.divider} />
               </>
@@ -336,18 +421,26 @@ export default function MenuItemModal({
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Special requests</Text>
                 <Text style={styles.sectionSubtitle}>
-                  We'll try our best to accommodate requests, but can't make changes that affect pricing.
+                  Optional notes for the kitchen (allergies, prep preferences). Requests that change the price aren’t available here.
                 </Text>
                 <TextInput
-                  style={styles.instructionsInput}
-                  placeholder="Add special request"
-                  placeholderTextColor="#aaa"
+                  style={[
+                    styles.instructionsInput,
+                    {
+                      borderColor: theme.colors.border,
+                      color: theme.colors.textPrimary,
+                      backgroundColor: theme.colors.backgroundSunken,
+                    },
+                  ]}
+                  placeholder="Example: no onions, sauce on the side"
+                  placeholderTextColor={theme.colors.textDisabled || '#aaa'}
                   value={specialInstructions}
                   onChangeText={setSpecialInstructions}
                   multiline
                   numberOfLines={3}
                   maxLength={200}
                   textAlignVertical="top"
+                  accessibilityLabel="Special requests"
                 />
               </View>
             )}
@@ -359,7 +452,7 @@ export default function MenuItemModal({
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Goes well with</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Select any extras to add them to your order.
+                    Optional add-ons. Items that need their own options stay off until you open them from the menu.
                   </Text>
                   {suggestedItems.map((s) => (
                     <SuggestionCard
@@ -367,6 +460,9 @@ export default function MenuItemModal({
                       suggestion={s}
                       selected={selectedSuggestionIds.has(s.id)}
                       onToggle={handleToggleSuggestion}
+                      disabled={itemRequiresCustomization(s)}
+                      brand={theme.colors.brand}
+                      brandText={theme.colors.brandText}
                     />
                   ))}
                 </View>
@@ -380,12 +476,19 @@ export default function MenuItemModal({
                 <Text style={styles.sectionTitle}>Pay with points</Text>
                 {isCustomerAuthenticated ? (
                   <Text style={styles.pointsBody}>
-                    You can redeem your loyalty points at checkout.
+                    Redeem loyalty points at checkout — not on this screen.
                   </Text>
                 ) : (
                   <Text style={styles.pointsBody}>
-                    <Text style={styles.pointsLink}>Sign in</Text>
-                    {' to pay with points'}
+                    <Text
+                      style={[styles.pointsLink, { color: theme.colors.brand }]}
+                      onPress={() => setSignInVisible(true)}
+                      accessibilityRole="link"
+                      accessibilityLabel="Sign in to use loyalty points"
+                    >
+                      Sign in
+                    </Text>
+                    {' to redeem points at checkout.'}
                   </Text>
                 )}
               </View>
@@ -401,32 +504,71 @@ export default function MenuItemModal({
                   style={[styles.stepperBtn, quantity <= 1 && styles.stepperBtnDisabled]}
                   onPress={handleDecrease}
                   accessibilityLabel="Decrease quantity"
+                  accessibilityRole="button"
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
                   <Ionicons name="remove" size={20} color={quantity <= 1 ? '#ccc' : '#333'} />
                 </TouchableOpacity>
-                <Text style={styles.stepperCount}>{quantity}</Text>
+                <Text style={styles.stepperCount} accessibilityLabel={`Quantity ${quantity}`}>
+                  {quantity}
+                </Text>
                 <TouchableOpacity
                   style={styles.stepperBtn}
                   onPress={handleIncrease}
                   accessibilityLabel="Increase quantity"
+                  accessibilityRole="button"
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
                   <Ionicons name="add" size={20} color="#333" />
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity
-                style={[styles.addBtn, { backgroundColor: theme.colors.brand }]}
-                onPress={handleAdd}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.addBtnText}>Add item</Text>
-                <View style={styles.addBtnPricePill}>
-                  <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
-                    ${totalPrice}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={14} color={theme.colors.brand} />
-                </View>
-              </TouchableOpacity>
+              <Animated.View style={{ flex: 1, transform: [{ scale: addBtnScale }] }}>
+                <TouchableOpacity
+                  style={[
+                    styles.addBtn,
+                    {
+                      backgroundColor: addSuccess
+                        ? (theme.colors.brandDark || theme.colors.brand)
+                        : theme.colors.brand,
+                    },
+                    (adding || addSuccess) && styles.addBtnDisabled,
+                  ]}
+                  onPress={handleAdd}
+                  activeOpacity={0.85}
+                  disabled={adding || addSuccess}
+                >
+                  {addSuccess ? (
+                    <>
+                      <View style={styles.addBtnSuccessRow}>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={20}
+                          color={theme.colors.brandText || '#fff'}
+                        />
+                        <Text style={styles.addBtnText}>Added to cart</Text>
+                      </View>
+                      <View style={styles.addBtnPricePill}>
+                        <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
+                          ${totalPrice}
+                        </Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.addBtnText}>
+                        {adding ? 'Adding…' : 'Add to cart'}
+                      </Text>
+                      <View style={styles.addBtnPricePill}>
+                        <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
+                          ${totalPrice}
+                        </Text>
+                        <Ionicons name="chevron-forward" size={14} color={theme.colors.brand} />
+                      </View>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </Animated.View>
             </View>
           )}
     </>
@@ -465,6 +607,11 @@ export default function MenuItemModal({
           {cardBody}
         </Animated.View>
       </KeyboardAvoidingView>
+
+      <CustomerSignInModal
+        visible={signInVisible}
+        onClose={() => setSignInVisible(false)}
+      />
     </Modal>
   );
 }
@@ -519,9 +666,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  imagePlaceholderEmoji: {
-    fontSize: 56,
-  },
   unavailableOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -546,9 +690,9 @@ const styles = StyleSheet.create({
     top: 12,
     right: 12,
     zIndex: 10,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.92)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -599,6 +743,11 @@ const styles = StyleSheet.create({
     color: '#111',
     marginBottom: 6,
   },
+  requiredMark: {
+    color: '#92400e',
+    fontWeight: '700',
+    fontSize: 14,
+  },
   sectionSubtitle: {
     fontSize: 13,
     color: '#777',
@@ -608,7 +757,7 @@ const styles = StyleSheet.create({
 
   // Special request input
   instructionsInput: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#e0e0e0',
     borderRadius: 10,
     padding: 12,
@@ -616,7 +765,6 @@ const styles = StyleSheet.create({
     color: '#111',
     minHeight: 80,
     backgroundColor: '#fafafa',
-    ...Platform.select({ web: { outlineStyle: 'none' } }),
   },
   modOptionRow: {
     flexDirection: 'row',
@@ -678,7 +826,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   pointsLink: {
-    color: '#111',
     fontWeight: '700',
     textDecorationLine: 'underline',
   },
@@ -728,10 +875,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderRadius: 12,
   },
+  addBtnDisabled: {
+    opacity: 0.65,
+  },
   addBtnText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  addBtnSuccessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   addBtnPricePill: {
     flexDirection: 'row',
@@ -759,6 +914,9 @@ const sug = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#f0f0f0',
     gap: 12,
+  },
+  cardDisabled: {
+    opacity: 0.72,
   },
   image: {
     width: 64,
@@ -805,5 +963,9 @@ const sug = StyleSheet.create({
   toggleBtnSelected: {
     backgroundColor: '#1a1a1a',
     borderColor: '#1a1a1a',
+  },
+  toggleBtnDisabled: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#e5e7eb',
   },
 });
