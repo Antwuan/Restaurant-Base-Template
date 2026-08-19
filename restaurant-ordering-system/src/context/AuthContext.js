@@ -139,10 +139,13 @@ export const AuthProvider = ({ children }) => {
 
   /** @param {string} email @param {string} password @param {{ restaurantId?: string }} [options] */
   const signUp = async (email, password, options = {}) => {
+    const emailRedirectTo =
+      typeof window !== 'undefined' ? window.location.origin : undefined;
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo,
         data: options.restaurantId
           ? { restaurant_id: options.restaurantId }
           : undefined,
@@ -197,6 +200,7 @@ export const AuthProvider = ({ children }) => {
       userId,
     );
     if (existing) {
+      await customerService.attachGuestOrdersToCustomer(restaurantId);
       setCustomerProfile(existing);
       return existing;
     }
@@ -211,6 +215,7 @@ export const AuthProvider = ({ children }) => {
         phone,
         marketingOptIn,
       });
+      await customerService.attachGuestOrdersToCustomer(restaurantId);
       setCustomerProfile(created);
       return created;
     } catch {
@@ -224,7 +229,10 @@ export const AuthProvider = ({ children }) => {
         phone,
         marketingOptIn,
       });
-      if (ensured) setCustomerProfile(ensured);
+      if (ensured) {
+        await customerService.attachGuestOrdersToCustomer(restaurantId);
+        setCustomerProfile(ensured);
+      }
       return ensured;
     }
   }, [user?.id, user?.email]);

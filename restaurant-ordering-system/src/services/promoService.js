@@ -1,6 +1,8 @@
 import { supabase } from '../config/supabase';
+import { DEFAULT_TAX_RATE } from '../config/constants';
 
-export const PROMO_TAX_RATE = 0.08;
+/** @deprecated Pass taxRate into applyPromoToTotals; this is the DB default only. */
+export const PROMO_TAX_RATE = DEFAULT_TAX_RATE;
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -138,10 +140,11 @@ export function computePromoDiscount(subtotal, items, promo) {
 }
 
 /** Apply promo: discount on subtotal, then tax on discounted subtotal. */
-export function applyPromoToTotals(subtotal, items, promo) {
+export function applyPromoToTotals(subtotal, items, promo, taxRate = DEFAULT_TAX_RATE) {
+  const rate = Number.isFinite(Number(taxRate)) ? Number(taxRate) : DEFAULT_TAX_RATE;
   const discountAmount = computePromoDiscount(subtotal, items, promo);
   const discountedSubtotal = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
-  const tax = Math.round(discountedSubtotal * PROMO_TAX_RATE * 100) / 100;
+  const tax = Math.round(discountedSubtotal * rate * 100) / 100;
   const total = Math.round((discountedSubtotal + tax) * 100) / 100;
   return { discountAmount, discountedSubtotal, tax, total };
 }

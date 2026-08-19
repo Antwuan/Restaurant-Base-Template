@@ -1,0 +1,7 @@
+# Per-function JWT settings. Stripe and Resend cannot send a user JWT.
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.resend-webhook]
+verify_jwt = false

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRestaurantContext } from '../context/RestaurantContext';
+import { resolveTaxRate } from '../config/constants';
 
 const LEGACY_CART_KEY = 'restaurant_cart';
 const REGULAR_CART_KEY = 'restaurant_cart_regular';
 const CATERING_CART_KEY = 'restaurant_cart_catering';
-const TAX_RATE = 0.08; // 8% — make this configurable per restaurant later
 
 const normalizeMenuType = (menuType) =>
   menuType === 'catering' ? 'catering' : 'regular';
@@ -77,7 +78,8 @@ function loadInitialCarts() {
   };
 }
 
-function computeTotals(items) {
+function computeTotals(items, taxRate) {
+  const rate = Number.isFinite(Number(taxRate)) ? Number(taxRate) : resolveTaxRate();
   const safeItems = Array.isArray(items) ? items : [];
   const itemCount = safeItems.reduce((sum, i) => {
     const q = Number(i.quantity);
@@ -89,12 +91,15 @@ function computeTotals(items) {
     if (!Number.isFinite(q) || !Number.isFinite(p) || q <= 0) return sum;
     return sum + p * q;
   }, 0);
-  const tax = subtotal * TAX_RATE;
-  const total = subtotal + tax;
+  const tax = Math.round(subtotal * rate * 100) / 100;
+  const total = Math.round((subtotal + tax) * 100) / 100;
   return { itemCount, subtotal, tax, total };
 }
 
 export const useCart = (restaurantId) => {
+  const { restaurant } = useRestaurantContext();
+  const taxRate = resolveTaxRate(restaurant);
+
   const initial = useRef(null);
   if (!initial.current) initial.current = loadInitialCarts();
 
@@ -254,14 +259,14 @@ export const useCart = (restaurantId) => {
       return {
         items,
         menuType: type,
-        ...computeTotals(items),
+        ...computeTotals(items, taxRate),
       };
     },
-    [regularItems, cateringItems]
+    [regularItems, cateringItems, taxRate]
   );
 
-  const regularTotals = computeTotals(regularItems);
-  const cateringTotals = computeTotals(cateringItems);
+  const regularTotals = computeTotals(regularItems, taxRate);
+  const cateringTotals = computeTotals(cateringItems, taxRate);
 
   const hydrateImages = useCallback((imageById) => {
     if (!imageById || typeof imageById !== 'object') return;

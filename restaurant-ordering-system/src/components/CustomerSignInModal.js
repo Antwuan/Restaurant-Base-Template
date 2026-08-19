@@ -233,8 +233,22 @@ export default function CustomerSignInModal({ visible, onClose }) {
       }
 
       if (!profile) {
-        await signOut();
-        showCardError('No customer account exists for this restaurant. Create an account first.');
+        try {
+          profile = await customerService.ensureCustomerProfile({
+            restaurantId: restaurant.id,
+            userId: signedInUser.id,
+            email: email.trim(),
+          });
+        } catch (ensureError) {
+          showCardError(
+            ensureError.message || 'Could not create your customer profile.',
+          );
+          return;
+        }
+      }
+
+      if (!profile) {
+        showCardError('Could not load your customer profile. Please try again.');
         return;
       }
 
@@ -327,8 +341,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
           phone: trimmedPhone,
           marketingOptIn,
         });
-      } catch {
-        // Fallback when a session exists (RLS insert)
+      } catch (ensureError) {
         if (result.session) {
           try {
             profile = await linkCustomer(restaurant.id, email.trim(), signedInUser, {
@@ -338,27 +351,31 @@ export default function CustomerSignInModal({ visible, onClose }) {
               marketingOptIn,
             });
           } catch {
-            // handled below
+            showCardError(
+              ensureError.message || 'Could not create your customer profile.',
+            );
+            return;
           }
+        } else {
+          showCardError(
+            ensureError.message || 'Could not create your customer profile.',
+          );
+          return;
         }
       }
 
-      if (!result.session) {
-        const confirmText = profile
-          ? 'We created your account. Confirm the link we emailed you, then sign in.'
-          : 'We created your login. Confirm the email link, then sign in to finish setting up your customer profile.';
-        switchMode('signin', { keepMessage: true });
-        showCardInfo(confirmText);
-        return;
-      }
-
-      if (!profile) {
+      if (!profile && result.session) {
         profile = await refreshCustomerProfile(restaurant.id);
       }
 
       if (!profile) {
-        await signOut();
-        showCardError('Could not create your customer profile. Please try signing in after a moment.');
+        showCardError('Could not create your customer profile. Please try again.');
+        return;
+      }
+
+      if (!result.session) {
+        switchMode('signin', { keepMessage: true });
+        showCardInfo('We created your account. Confirm the link we emailed you, then sign in.');
         return;
       }
 

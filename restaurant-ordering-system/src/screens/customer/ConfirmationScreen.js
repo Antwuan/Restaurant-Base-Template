@@ -5,7 +5,7 @@
  * right “Your Order” summary with product images. Mobile: stacked.
  * Navigation: expects `order` (and optional `pointsEarned`) from checkout.
  */
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useAuth } from '../../context/AuthContext';
 import { useMenu } from '../../hooks/useMenu';
+import CustomerSignInModal from '../../components/CustomerSignInModal';
 import {
   enrichItemsWithMenuImages,
   formatPaymentLabel,
@@ -60,9 +62,11 @@ export default function ConfirmationScreen({ route, navigation }) {
   const { order, pointsEarned = 0 } = resolved;
   const { theme } = useTheme();
   const { restaurant } = useRestaurantContext();
+  const { isCustomerAuthenticated } = useAuth();
   const { allItems } = useMenu(restaurant?.id, order?.menu_type || null);
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BP;
+  const [signInVisible, setSignInVisible] = useState(false);
 
   const checkScale = useRef(new Animated.Value(0)).current;
 
@@ -269,6 +273,25 @@ export default function ConfirmationScreen({ route, navigation }) {
         </Text>
       </View>
 
+      {!isCustomerAuthenticated ? (
+        <Text style={styles.guestNudge}>
+          Sign in to track all open orders in one place.{' '}
+          <Text
+            onPress={() => setSignInVisible(true)}
+            style={[styles.guestNudgeLink, { color: brand }]}
+          >
+            Sign in
+          </Text>
+          {' · '}
+          <Text
+            onPress={() => navigation.navigate('OrderTracker')}
+            style={[styles.guestNudgeLink, { color: brand }]}
+          >
+            View orders
+          </Text>
+        </Text>
+      ) : null}
+
       {mapEmbedUrl ? (
         <View style={styles.mapWrap}>
           {Platform.OS === 'web' ? (
@@ -370,6 +393,10 @@ export default function ConfirmationScreen({ route, navigation }) {
           {orderSummary}
         </>
       )}
+      <CustomerSignInModal
+        visible={signInVisible}
+        onClose={() => setSignInVisible(false)}
+      />
     </ScrollView>
   );
 }
@@ -504,6 +531,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#555',
     lineHeight: 20,
+  },
+  guestNudge: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  guestNudgeLink: {
+    fontWeight: '700',
   },
 
   mapWrap: {
