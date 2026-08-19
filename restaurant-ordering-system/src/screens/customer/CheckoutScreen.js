@@ -29,7 +29,18 @@ import PickupLocationPicker, {
   isPickupLocationReady,
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
-import { createPaymentIntent, getPaymentMethodSummary } from '../../services/stripeApi';
+import CustomerSignInModal from '../../components/CustomerSignInModal';
+import {
+  createPaymentIntent,
+  getPaymentMethodSummary,
+  getOrCreateIdempotencyKey,
+  writeCheckoutAttempt,
+  readCheckoutAttempt,
+  clearCheckoutAttempt,
+  retrievePaymentIntent,
+  getPaymentReturnUrl,
+  serializeCheckoutItems,
+} from '../../services/stripeApi';
 import { createOrder } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
@@ -40,6 +51,7 @@ import {
 } from '../../utils/confirmationPayload';
 import { applyPromoToTotals } from '../../services/promoService';
 import { toPersistablePickupLocationId } from '../../services/locationsService';
+import { resolveTaxRate } from '../../config/constants';
 import { usePickupLocation } from '../../context/PickupLocationContext';
 import {
   canOrderAsap,
@@ -57,6 +69,16 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLOT_INTERVAL = 15;
 const CALENDAR_SPAN_DAYS = 14;
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function resolveCheckoutScheduledTimeIso({ readyOption, allowAsap, scheduledSlot, readyOptions }) {
+  if (readyOption === 'ASAP' && allowAsap) return null;
+  if (scheduledSlot) return new Date(scheduledSlot).toISOString();
+  const opt = readyOptions?.find((o) => o.key === readyOption);
+  if (opt && opt.minutesFromNow > 0) {
+    return new Date(Date.now() + opt.minutesFromNow * 60 * 1000).toISOString();
+  }
+  return null;
+}
 
 function buildPickupCalendarCells(hours_of_operation) {
   const hours = resolveHours(hours_of_operation);
@@ -270,17 +292,22 @@ function CheckoutForm({
   summaryOpen,
   setSummaryOpen,
   paymentReady = true,
+  chargeTotal,
+  onGuestSignIn,
+  piSucceeded = false,
 }) {
   const stripe = useStripe();
   const elements = useElements();
   const { items, clearCart } = useCartContext();
   const { user, isCustomerAuthenticated, refreshCustomerProfile } = useAuth();
   const { cartSubtotal, tax, total, discountAmount } = pricing;
+  const payTotal = Number.isFinite(Number(chargeTotal)) ? Number(chargeTotal) : total;
 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [scheduleVisible, setScheduleVisible] = useState(false);
   const [locationError, setLocationError] = useState(null);
+  const submittingRef = useRef(false);
 
   const allowAsap = useMemo(
     () => canOrderAsap(restaurant?.hours_of_operation),
@@ -316,15 +343,14 @@ function CheckoutForm({
     return opt?.label || null;
   }, [readyOption, allowAsap, scheduledSlot, readyOptions]);
 
-  const resolveScheduledTimeIso = useCallback(() => {
-    if (readyOption === 'ASAP' && allowAsap) return null;
-    if (scheduledSlot) return new Date(scheduledSlot).toISOString();
-    const opt = readyOptions.find((o) => o.key === readyOption);
-    if (opt && opt.minutesFromNow > 0) {
-      return new Date(Date.now() + opt.minutesFromNow * 60 * 1000).toISOString();
-    }
-    return null;
-  }, [readyOption, allowAsap, scheduledSlot, readyOptions]);
+  const resolveScheduledTimeIso = useCallback(() => (
+    resolveCheckoutScheduledTimeIso({
+      readyOption,
+      allowAsap,
+      scheduledSlot,
+      readyOptions,
+    })
+  ), [readyOption, allowAsap, scheduledSlot, readyOptions]);
 
   const validateContact = () => {
     if (isSignedIn) return true;
@@ -339,7 +365,8 @@ function CheckoutForm({
 
   const handleSubmit = async () => {
     if (!stripe || !elements) return;
-    if (!paymentReady) return;
+    if (!paymentReady || piSucceeded) return;
+    if (submittingRef.current || loading) return;
     if (!validateContact()) return;
 
     if (!allowAsap && !scheduledSlot) {
@@ -366,9 +393,27 @@ function CheckoutForm({
     const marketingOptIn = contact.marketingOptIn;
     const scheduledTimeIso = resolveScheduledTimeIso();
 
+    submittingRef.current = true;
     setLoading(true);
 
     try {
+      const idempotencyKey = getOrCreateIdempotencyKey(restaurant.id, 'checkout');
+      await createPaymentIntent({
+        restaurantId: restaurant.id,
+        items,
+        promo: appliedPromo,
+        idempotencyKey,
+        email,
+        customerEmail: email,
+        customerName: name,
+        customerPhone: phone,
+        orderType: 'pickup',
+        menuType: 'regular',
+        scheduledTime: scheduledTimeIso || undefined,
+        notes: notes || undefined,
+        pickupLocationId: toPersistablePickupLocationId(selectedLocation) || undefined,
+      });
+
       const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
@@ -379,17 +424,13 @@ function CheckoutForm({
               email: email || undefined,
             },
           },
-          return_url:
-            typeof window !== 'undefined'
-              ? window.location.href
-              : 'https://localhost:19006/confirmation',
+          return_url: getPaymentReturnUrl(),
         },
         redirect: 'if_required',
       });
 
       if (confirmError) {
         Alert.alert('Payment Failed', confirmError.message);
-        setLoading(false);
         return;
       }
 
@@ -443,6 +484,7 @@ function CheckoutForm({
       }
 
       clearCart();
+      if (restaurant?.id) clearCheckoutAttempt(restaurant.id, 'checkout');
       const paymentFromIntent = extractPaymentDetailsFromIntent(paymentIntent);
       const paymentFromApi = paymentIntent?.id && paymentIntent?.client_secret
         ? await getPaymentMethodSummary(paymentIntent.id, {
@@ -471,6 +513,7 @@ function CheckoutForm({
     } catch (err) {
       Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };
@@ -501,6 +544,14 @@ function CheckoutForm({
         {!isSignedIn ? (
           <Text style={{ fontSize: 13, color: '#697386', marginBottom: 16, lineHeight: 18 }}>
             Email is required for your receipt and order updates.
+            {' '}
+            <Text
+              onPress={onGuestSignIn}
+              style={{ color: theme.colors.brand, fontWeight: '600' }}
+            >
+              Sign in
+            </Text>
+            {' '}to track all open orders in one place.
           </Text>
         ) : null}
 
@@ -726,11 +777,15 @@ function CheckoutForm({
       {/* ── Payment ──────────────────────────────── */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>Payment</Text>
-        {!paymentReady ? (
+        {!paymentReady && !piSucceeded ? (
           <View style={{ paddingVertical: 20, alignItems: 'center', gap: 10 }}>
             <ActivityIndicator color={theme.colors.brand} />
             <Text style={{ fontSize: 13, color: '#697386' }}>Updating payment for new total…</Text>
           </View>
+        ) : piSucceeded ? (
+          <Text style={{ fontSize: 14, color: '#0a2540', lineHeight: 20, marginBottom: 8 }}>
+            This payment was already completed. Check confirmation or sign in to track your orders.
+          </Text>
         ) : (
           <View style={s.paymentElementWrap}>
             <PaymentElement
@@ -752,15 +807,15 @@ function CheckoutForm({
           style={[
             s.submitBtn,
             { backgroundColor: theme.colors.brand },
-            (loading || !stripe || !paymentReady) && { opacity: 0.6 },
+            (loading || !stripe || !paymentReady || piSucceeded) && { opacity: 0.6 },
           ]}
           onPress={handleSubmit}
-          disabled={loading || !stripe || !paymentReady}
+          disabled={loading || !stripe || !paymentReady || piSucceeded}
         >
           {loading || !paymentReady ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={s.submitText}>Pay ${total.toFixed(2)} · Place Order</Text>
+            <Text style={s.submitText}>Pay ${payTotal.toFixed(2)} · Place Order</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -784,7 +839,7 @@ function CheckoutForm({
             <Text style={s.summaryToggleText}>
               {summaryOpen ? '▲' : '▼'}{'  '}Order Summary
             </Text>
-            <Text style={[s.summaryToggleText, { fontWeight: '700' }]}>${total.toFixed(2)}</Text>
+            <Text style={[s.summaryToggleText, { fontWeight: '700' }]}>${payTotal.toFixed(2)}</Text>
           </TouchableOpacity>
           {summaryOpen && summaryPanel}
           {formPanel}
@@ -828,11 +883,24 @@ export default function CheckoutScreen({ navigation }) {
   const [piError, setPiError] = useState(null);
   const [piLoading, setPiLoading] = useState(true);
   const [appliedPromo, setAppliedPromo] = useState(null);
-  const piAmountRef = useRef(null);
+  const [chargeAmountCents, setChargeAmountCents] = useState(null);
+  const [piSucceeded, setPiSucceeded] = useState(false);
+  const [signInVisible, setSignInVisible] = useState(false);
+  const cartFingerprintRef = useRef(null);
+
+  const selectedPickupLocation = useMemo(
+    () => resolvePickupLocation(locations, selectedLocationId),
+    [locations, selectedLocationId],
+  );
+  const taxRate = useMemo(
+    () => resolveTaxRate(restaurant, selectedPickupLocation),
+    [restaurant, selectedPickupLocation],
+  );
+  const pickupLocationId = toPersistablePickupLocationId(selectedPickupLocation);
 
   const pricing = useMemo(() => {
     try {
-      const result = applyPromoToTotals(cartSubtotal, items, appliedPromo);
+      const result = applyPromoToTotals(cartSubtotal, items, appliedPromo, taxRate);
       return {
         cartSubtotal,
         subtotal: result.discountedSubtotal,
@@ -841,17 +909,28 @@ export default function CheckoutScreen({ navigation }) {
         discountAmount: result.discountAmount,
       };
     } catch {
+      const tax = Math.round(cartSubtotal * taxRate * 100) / 100;
       return {
         cartSubtotal,
         subtotal: cartSubtotal,
-        tax: Math.round(cartSubtotal * 0.08 * 100) / 100,
-        total: Math.round((cartSubtotal + cartSubtotal * 0.08) * 100) / 100,
+        tax,
+        total: Math.round((cartSubtotal + tax) * 100) / 100,
         discountAmount: 0,
       };
     }
-  }, [cartSubtotal, items, appliedPromo]);
+  }, [cartSubtotal, items, appliedPromo, taxRate]);
 
   const { total } = pricing;
+  const chargeTotal = chargeAmountCents != null ? chargeAmountCents / 100 : total;
+
+  const cartFingerprint = useMemo(
+    () => JSON.stringify({
+      items: serializeCheckoutItems(items),
+      promo: appliedPromo?.id || appliedPromo?.code || null,
+      pickupLocationId: pickupLocationId || null,
+    }),
+    [items, appliedPromo, pickupLocationId],
+  );
 
   // Drop item-based promos if the required item leaves the cart (or qty drops)
   useEffect(() => {
@@ -905,31 +984,79 @@ export default function CheckoutScreen({ navigation }) {
     return loadStripe(pk);
   }, []);
 
-  // Create / refresh PaymentIntent when checkout total changes (promo, cart)
+  // Create / resume PaymentIntent. Same idempotencyKey updates the PI when the cart changes.
+  // Do not mint a new PI after succeeded. Do not recreate on email keystrokes.
   useEffect(() => {
     let cancelled = false;
     async function initPi() {
-      if (!restaurant?.id || !hasConnectAccount || !total) {
+      if (!restaurant?.id || !hasConnectAccount || !items.length) {
         setPiLoading(false);
         return;
       }
-      if (piAmountRef.current === total && clientSecret) {
+
+      const stored = readCheckoutAttempt(restaurant.id, 'checkout');
+      if (stored?.clientSecret) {
+        const pi = await retrievePaymentIntent(stored.clientSecret);
+        if (cancelled) return;
+        if (pi?.status === 'succeeded' || pi?.status === 'processing') {
+          setClientSecret(stored.clientSecret);
+          setPiSucceeded(pi.status === 'succeeded');
+          if (pi.amount != null) setChargeAmountCents(pi.amount);
+          setPiLoading(false);
+          return;
+        }
+        if (pi && (pi.status === 'canceled' || pi.status === 'cancelled')) {
+          clearCheckoutAttempt(restaurant.id, 'checkout');
+        }
+      }
+
+      if (cartFingerprintRef.current === cartFingerprint && clientSecret && !piSucceeded) {
         setPiLoading(false);
         return;
       }
+
       setPiLoading(true);
       setPiError(null);
       try {
         const email =
+          contact.email.trim() ||
           customerProfile?.email ||
           (isCustomerAuthenticated ? user?.email : undefined) ||
-          contact.email.trim() ||
           undefined;
-        const secret = await createPaymentIntent(total, restaurant.id, { email });
-        if (!cancelled) {
-          setClientSecret(secret);
-          piAmountRef.current = total;
-        }
+        const allowAsapInit = canOrderAsap(restaurant?.hours_of_operation);
+        const readyOptionsInit = getAsapReadyOptions(restaurant?.hours_of_operation);
+        const scheduledTimeIso = resolveCheckoutScheduledTimeIso({
+          readyOption,
+          allowAsap: allowAsapInit,
+          scheduledSlot,
+          readyOptions: readyOptionsInit,
+        });
+        const idempotencyKey = getOrCreateIdempotencyKey(restaurant.id, 'checkout');
+        const result = await createPaymentIntent({
+          restaurantId: restaurant.id,
+          items,
+          promo: appliedPromo,
+          idempotencyKey,
+          email,
+          customerEmail: email,
+          customerName: contact.name.trim() || undefined,
+          customerPhone: contact.phone.trim() || undefined,
+          orderType: 'pickup',
+          menuType: 'regular',
+          scheduledTime: scheduledTimeIso || undefined,
+          notes: notes || undefined,
+          pickupLocationId: pickupLocationId || undefined,
+        });
+        if (cancelled) return;
+        writeCheckoutAttempt(restaurant.id, {
+          idempotencyKey,
+          clientSecret: result.clientSecret,
+          paymentIntentId: result.paymentIntentId,
+        }, 'checkout');
+        setClientSecret(result.clientSecret);
+        setChargeAmountCents(result.amountCents);
+        setPiSucceeded(false);
+        cartFingerprintRef.current = cartFingerprint;
       } catch (e) {
         if (!cancelled) setPiError(e.message);
       } finally {
@@ -938,13 +1065,10 @@ export default function CheckoutScreen({ navigation }) {
     }
     initPi();
     return () => { cancelled = true; };
-    // Intentionally once per restaurant/total — don't recreate PI on every keystroke
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restaurant?.id, hasConnectAccount, total]);
+  }, [restaurant?.id, hasConnectAccount, cartFingerprint]);
 
-  const paymentReady = Boolean(
-    clientSecret && !piLoading && piAmountRef.current === total,
-  );
+  const paymentReady = Boolean(clientSecret && !piLoading && !piSucceeded);
 
   const appearance = {
     theme: 'stripe',
@@ -1027,9 +1151,17 @@ export default function CheckoutScreen({ navigation }) {
             summaryOpen={summaryOpen}
             setSummaryOpen={setSummaryOpen}
             paymentReady={paymentReady}
+            chargeTotal={chargeTotal}
+            onGuestSignIn={() => setSignInVisible(true)}
+            piSucceeded={piSucceeded}
           />
         </Elements>
       ) : null}
+
+      <CustomerSignInModal
+        visible={signInVisible}
+        onClose={() => setSignInVisible(false)}
+      />
     </ScrollView>
   );
 }

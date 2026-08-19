@@ -109,5 +109,33 @@ export async function ensureCustomerProfile({
   if (data?.error) {
     throw new Error(data.error);
   }
-  return data?.profile || null;
+  const profile = data?.profile || null;
+  if (profile && restaurantId) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData?.session) {
+      await attachGuestOrdersToCustomer(restaurantId);
+    }
+  }
+  return profile;
+}
+
+/**
+ * Best-effort: attach unmatched guest orders (same email + restaurant, last 30 days)
+ * to the signed-in customer. Requires an authenticated session; no-ops otherwise.
+ */
+export async function attachGuestOrdersToCustomer(restaurantId) {
+  if (!restaurantId) return 0;
+  try {
+    const { data, error } = await supabase.rpc('attach_guest_orders_to_customer', {
+      p_restaurant_id: restaurantId,
+    });
+    if (error) {
+      console.warn('[orders] attach guest orders failed:', error.message);
+      return 0;
+    }
+    return typeof data === 'number' ? data : 0;
+  } catch (err) {
+    console.warn('[orders] attach guest orders failed:', err?.message || err);
+    return 0;
+  }
 }

@@ -130,13 +130,24 @@ export function subscribeToOrders(restaurantId, callback) {
   return () => supabase.removeChannel(channel);
 }
 
-export async function getOrdersByPhone(restaurantId, phone) {
-  const { data, error } = await supabase.functions.invoke('get-orders-by-phone', {
-    body: { restaurantId, phone },
-  });
+const OPEN_ORDER_STATUSES = ['pending', 'accepted', 'preparing', 'ready'];
+
+/**
+ * Open orders for the signed-in customer at this restaurant.
+ * Relies on RLS (orders_select_own) — no phone lookup.
+ */
+export async function getOpenOrdersForCustomer(restaurantId) {
+  if (!restaurantId) return [];
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .in('status', OPEN_ORDER_STATUSES)
+    .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return data?.data || [];
+  return data || [];
 }
 
 export function subscribeToOrder(orderId, callback) {

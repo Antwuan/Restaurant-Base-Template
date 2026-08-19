@@ -147,6 +147,11 @@ export default function SettingsScreen() {
   const [hours, setHours] = useState(() => resolveHours(restaurant?.hours_of_operation));
   const [saving, setSaving] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [taxRateInput, setTaxRateInput] = useState(() => {
+    const n = Number(restaurant?.tax_rate);
+    if (!Number.isFinite(n)) return '8';
+    return String(Number((n * 100).toFixed(4)));
+  });
 
   // Email domain onboarding
   const [sendDomain, setSendDomain] = useState('');
@@ -170,6 +175,12 @@ export default function SettingsScreen() {
     setDomainStatus(restaurant?.email_domain_status ?? 'pending');
     setFromEmailDisplay(restaurant?.resend_from_email ?? '');
   }, [restaurant?.email_domain_status, restaurant?.resend_from_email]);
+
+  useEffect(() => {
+    const n = Number(restaurant?.tax_rate);
+    if (!Number.isFinite(n)) return;
+    setTaxRateInput(String(Number((n * 100).toFixed(4))));
+  }, [restaurant?.tax_rate]);
 
   const loadLocations = async () => {
     if (!restaurant?.id) return;
@@ -198,6 +209,12 @@ export default function SettingsScreen() {
 
   const handleSave = async () => {
     if (!restaurant?.id) return;
+    const parsedPercent = Number(String(taxRateInput).replace('%', '').trim());
+    if (!Number.isFinite(parsedPercent) || parsedPercent < 0 || parsedPercent > 100) {
+      Alert.alert('Invalid tax rate', 'Enter a tax rate between 0 and 100 percent.');
+      return;
+    }
+    const taxRate = Math.round(parsedPercent * 10000) / 1000000;
     setSaving(true);
     try {
       await restaurantService.updateRestaurant(restaurant.id, {
@@ -206,6 +223,7 @@ export default function SettingsScreen() {
         address,
         is_accepting_orders: acceptingOrders,
         hours_of_operation: hours,
+        tax_rate: taxRate,
       });
       // Main store is always offered from restaurants.address at checkout —
       // do not auto-seed it into restaurant_locations (avoids duplicates).
@@ -441,6 +459,20 @@ export default function SettingsScreen() {
             onValueChange={setAcceptingOrders}
             trackColor={{ true: '#34C759', false: '#ccc' }}
           />
+        </View>
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: c.textSecondary }]}>Sales tax rate (%)</Text>
+          <TextInput
+            style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+            value={taxRateInput}
+            onChangeText={setTaxRateInput}
+            placeholder="8"
+            placeholderTextColor={c.textDisabled}
+            keyboardType="decimal-pad"
+          />
+          <Text style={[styles.rowSub, { color: c.textSecondary, marginTop: 4 }]}>
+            Applied to checkout and catering totals. Location overrides apply when set.
+          </Text>
         </View>
       </View>
 

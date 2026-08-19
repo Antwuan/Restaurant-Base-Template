@@ -1,6 +1,7 @@
 /**
  * Per-restaurant Resend domain onboarding.
  * Actions: create | verify | status | save_settings
+ * Auth: Bearer JWT of restaurant_staff for restaurantId (admin).
  *
  * create: { restaurantId, domain, fromLocalPart? }
  * verify: { restaurantId }
@@ -20,6 +21,42 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+/** Bearer user JWT + restaurant_staff row for restaurantId. Inlined (Dashboard deploys often cannot import ../_shared). */
+async function requireRestaurantStaff(req: Request, restaurantId: string): Promise<Response | null> {
+  const authHeader = req.headers.get('Authorization') || '';
+  const bearer = authHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
+  if (!bearer) {
+    return json({ error: 'Authorization required' }, 401);
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${bearer}` } },
+  });
+  const { data: authData, error: authErr } = await userClient.auth.getUser();
+  if (authErr || !authData?.user) {
+    return json({ error: 'Invalid authorization' }, 401);
+  }
+
+  const supabase = createClient(
+    supabaseUrl,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  );
+  const { data: staff } = await supabase
+    .from('restaurant_staff')
+    .select('id')
+    .eq('auth_user_id', authData.user.id)
+    .eq('restaurant_id', restaurantId)
+    .maybeSingle();
+
+  if (!staff) {
+    return json({ error: 'Admin access required' }, 403);
+  }
+
+  return null;
 }
 
 const BACKFILL_LIMIT = 25;
@@ -116,14 +153,17 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const apiKey = Deno.env.get('RESEND_API_KEY');
-    if (!apiKey) return json({ error: 'RESEND_API_KEY is not configured' }, 500);
-
     const body = await req.json();
     const { action, restaurantId } = body;
     if (!restaurantId || !action) {
       return json({ error: 'restaurantId and action are required' }, 400);
     }
+
+    const staffErr = await requireRestaurantStaff(req, String(restaurantId).trim());
+    if (staffErr) return staffErr;
+
+    const apiKey = Deno.env.get('RESEND_API_KEY');
+    if (!apiKey) return json({ error: 'RESEND_API_KEY is not configured' }, 500);
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',

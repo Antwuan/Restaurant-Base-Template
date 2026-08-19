@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   StyleSheet,
@@ -13,10 +12,13 @@ import {
   Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../theme';
 import CustomerNavbar from '../../components/CustomerNavbar';
-import { getOrdersByPhone, subscribeToOrder } from '../../services/orderService';
+import CustomerSignInModal from '../../components/CustomerSignInModal';
+import { getOpenOrdersForCustomer, subscribeToOrder } from '../../services/orderService';
 
 // ─── Status helpers ────────────────────────────────────────────────────────────
 
@@ -197,7 +199,7 @@ function ProgressBar({ stepIndex }) {
   );
 }
 
-function OrderCard({ order, brandColor, onReset }) {
+function OrderCard({ order, brandColor }) {
   const [liveOrder, setLiveOrder] = useState(order);
   const stepIndex = getTrackerStep(liveOrder.status);
   const isCancelled = liveOrder.status === 'cancelled';
@@ -287,94 +289,42 @@ function OrderCard({ order, brandColor, onReset }) {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.resetBtn} onPress={onReset} activeOpacity={0.7}>
-        <Ionicons name="search-outline" size={15} color="#6b7280" style={{ marginRight: 6 }} />
-        <Text style={styles.resetBtnText}>Track a different order</Text>
+    </View>
+  );
+}
+
+function SignInPrompt({ brandColor, onSignIn }) {
+  return (
+    <View style={styles.formCard}>
+      <View style={[styles.formIconWrap, { backgroundColor: brandColor + '18' }]}>
+        <Ionicons name="lock-closed-outline" size={32} color={brandColor} />
+      </View>
+      <Text style={styles.formTitle}>Sign in to track orders</Text>
+      <Text style={styles.formSubtitle}>
+        Sign in to see all of your open orders in one place, with live status updates.
+      </Text>
+      <TouchableOpacity
+        style={[styles.submitBtn, { backgroundColor: brandColor }]}
+        onPress={onSignIn}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="log-in-outline" size={16} color="#fff" style={{ marginRight: 8 }} />
+        <Text style={styles.submitBtnText}>Sign in</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-// ─── Phone lookup form ─────────────────────────────────────────────────────────
-
-function PhoneLookupForm({ onFound, brandColor }) {
-  const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const { restaurant } = useRestaurantContext();
-
-  const handleSubmit = useCallback(async () => {
-    const trimmed = phone.trim();
-    if (!trimmed) {
-      setError('Please enter your phone number.');
-      return;
-    }
-    if (!restaurant?.id) {
-      setError('Restaurant not found. Please try again.');
-      return;
-    }
-    setError('');
-    setLoading(true);
-    try {
-      const orders = await getOrdersByPhone(restaurant.id, trimmed);
-      if (!orders || orders.length === 0) {
-        setError('No recent orders found for this phone number. Make sure you enter the number used at checkout.');
-      } else {
-        onFound(orders[0]);
-      }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [phone, restaurant, onFound]);
-
+function EmptyOrders({ brandColor }) {
   return (
     <View style={styles.formCard}>
       <View style={[styles.formIconWrap, { backgroundColor: brandColor + '18' }]}>
-        <Ionicons name="location-outline" size={32} color={brandColor} />
+        <Ionicons name="receipt-outline" size={32} color={brandColor} />
       </View>
-      <Text style={styles.formTitle}>Track Your Order</Text>
+      <Text style={styles.formTitle}>No open orders</Text>
       <Text style={styles.formSubtitle}>
-        Enter the phone number you used when placing your order to see its current status.
+        When you place an order, you can follow it here until it is completed.
       </Text>
-
-      <Text style={styles.inputLabel}>Phone Number</Text>
-      <TextInput
-        style={[styles.input, error ? styles.inputError : null]}
-        value={phone}
-        onChangeText={(v) => { setPhone(v); setError(''); }}
-        placeholder="e.g. (555) 123-4567"
-        placeholderTextColor="#9ca3af"
-        keyboardType="phone-pad"
-        autoComplete="tel"
-        returnKeyType="search"
-        onSubmitEditing={handleSubmit}
-        editable={!loading}
-      />
-
-      {!!error && (
-        <View style={styles.errorBox}>
-          <Ionicons name="alert-circle-outline" size={15} color="#ef4444" style={{ marginRight: 6 }} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      <TouchableOpacity
-        style={[styles.submitBtn, { backgroundColor: brandColor }, loading && styles.submitBtnDisabled]}
-        onPress={handleSubmit}
-        activeOpacity={0.85}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <>
-            <Ionicons name="search" size={16} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.submitBtnText}>Track My Order</Text>
-          </>
-        )}
-      </TouchableOpacity>
     </View>
   );
 }
@@ -384,10 +334,113 @@ function PhoneLookupForm({ onFound, brandColor }) {
 export default function TrackerScreen({ navigation }) {
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
+  const { restaurant } = useRestaurantContext();
+  const {
+    isCustomerAuthenticated,
+    customerProfile,
+    loading: authLoading,
+    roleLoading,
+  } = useAuth();
   const brandColor = theme.colors.brand;
   const isWide = width >= 768;
 
-  const [foundOrder, setFoundOrder] = useState(null);
+  const [signInVisible, setSignInVisible] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [error, setError] = useState('');
+  const autoOpenedRef = useRef(false);
+
+  const authReady = !authLoading && !roleLoading;
+  const signedIn = authReady && isCustomerAuthenticated;
+  const profileReady =
+    !!customerProfile && customerProfile.restaurant_id === restaurant?.id;
+
+  const loadOrders = useCallback(async () => {
+    if (!restaurant?.id || !isCustomerAuthenticated || !profileReady) {
+      if (!isCustomerAuthenticated) {
+        setOrders([]);
+        setError('');
+      }
+      setLoadingOrders(false);
+      return;
+    }
+
+    setLoadingOrders(true);
+    setError('');
+    try {
+      const data = await getOpenOrdersForCustomer(restaurant.id);
+      setOrders(data);
+    } catch (err) {
+      setError('Could not load your orders. Please try again.');
+      setOrders([]);
+    } finally {
+      setLoadingOrders(false);
+    }
+  }, [restaurant?.id, isCustomerAuthenticated, profileReady]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadOrders();
+    }, [loadOrders]),
+  );
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!isCustomerAuthenticated && !autoOpenedRef.current) {
+      autoOpenedRef.current = true;
+      setSignInVisible(true);
+    }
+    if (isCustomerAuthenticated) {
+      autoOpenedRef.current = false;
+    }
+  }, [authReady, isCustomerAuthenticated]);
+
+  const handleModalClose = () => {
+    setSignInVisible(false);
+  };
+
+  let body;
+  if (!authReady) {
+    body = (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator size="large" color={brandColor} />
+      </View>
+    );
+  } else if (!signedIn) {
+    body = <SignInPrompt brandColor={brandColor} onSignIn={() => setSignInVisible(true)} />;
+  } else if (!profileReady || (loadingOrders && orders.length === 0)) {
+    body = (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator size="large" color={brandColor} />
+      </View>
+    );
+  } else if (error) {
+    body = (
+      <View style={styles.formCard}>
+        <View style={styles.errorBox}>
+          <Ionicons name="alert-circle-outline" size={15} color="#ef4444" style={{ marginRight: 6 }} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.submitBtn, { backgroundColor: brandColor }]}
+          onPress={loadOrders}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.submitBtnText}>Try again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  } else if (orders.length === 0) {
+    body = <EmptyOrders brandColor={brandColor} />;
+  } else {
+    body = (
+      <View style={styles.ordersStack}>
+        {orders.map((order) => (
+          <OrderCard key={order.id} order={order} brandColor={brandColor} />
+        ))}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -400,21 +453,17 @@ export default function TrackerScreen({ navigation }) {
         <View style={[styles.pageHeader, { backgroundColor: brandColor }]}>
           <Ionicons name="navigate-circle-outline" size={36} color="#fff" style={{ marginBottom: 10 }} />
           <Text style={styles.pageTitle}>Order Tracker</Text>
-          <Text style={styles.pageSubtitle}>Real-time updates on your order status</Text>
+          <Text style={styles.pageSubtitle}>
+            {signedIn
+              ? 'Live updates on all of your open orders'
+              : 'Sign in to see live updates on your orders'}
+          </Text>
         </View>
 
-        <View style={styles.contentWrap}>
-          {foundOrder ? (
-            <OrderCard
-              order={foundOrder}
-              brandColor={brandColor}
-              onReset={() => setFoundOrder(null)}
-            />
-          ) : (
-            <PhoneLookupForm onFound={setFoundOrder} brandColor={brandColor} />
-          )}
-        </View>
+        <View style={styles.contentWrap}>{body}</View>
       </ScrollView>
+
+      <CustomerSignInModal visible={signInVisible} onClose={handleModalClose} />
     </View>
   );
 }
@@ -460,8 +509,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 28,
   },
+  ordersStack: {
+    gap: 20,
+  },
+  loadingWrap: {
+    paddingVertical: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-  // ── Phone lookup form card
+  // ── Prompt / empty card
   formCard: {
     backgroundColor: '#fff',
     borderRadius: 20,
@@ -495,27 +552,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 24,
   },
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 6,
-  },
-  input: {
-    height: 48,
-    borderWidth: 1.5,
-    borderColor: '#d1d5db',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontSize: 15,
-    color: '#111',
-    backgroundColor: '#fafafa',
-    marginBottom: 12,
-    ...Platform.select({ web: { outlineStyle: 'none' } }),
-  },
-  inputError: {
-    borderColor: '#ef4444',
-  },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -537,9 +573,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     marginTop: 4,
-  },
-  submitBtnDisabled: {
-    opacity: 0.6,
   },
   submitBtnText: {
     color: '#fff',
@@ -777,18 +810,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: '#111',
-  },
-
-  // ── Reset button
-  resetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  resetBtnText: {
-    fontSize: 13,
-    color: '#6b7280',
-    fontWeight: '600',
   },
 });

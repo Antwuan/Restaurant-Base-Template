@@ -7,6 +7,9 @@
  *   3. EXPO_PUBLIC_RESTAURANT_SLUG on localhost / *.vercel.app
  *   4. First URL path segment (not a reserved app route)
  *   5. Hostname → restaurants.domain (custom domains only; not *.vercel.app)
+ *
+ * After load, if restaurants.domain is set, www vs apex is redirected to that
+ * canonical host so Auth localStorage (JWT) stays on one origin.
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
@@ -95,6 +98,38 @@ function persistSlug(slug) {
   }
 }
 
+/** Hostname from restaurants.domain (may include protocol or path). */
+function parseCanonicalHostname(domain) {
+  if (!domain || typeof domain !== 'string') return null;
+  let host = domain.trim().toLowerCase();
+  host = host.replace(/^https?:\/\//, '');
+  host = host.replace(/\/.*$/, '');
+  host = host.replace(/:\d+$/, '');
+  return host || null;
+}
+
+/**
+ * Auth JWT lives in localStorage keyed by origin. www vs apex are different
+ * origins, so bounce the non-canonical host to restaurants.domain.
+ * Only www ↔ apex of the same host; never localhost / *.vercel.app.
+ */
+function redirectToCanonicalHost(canonicalDomain) {
+  if (typeof window === 'undefined') return false;
+  const canonical = parseCanonicalHostname(canonicalDomain);
+  const current = window.location.hostname.toLowerCase();
+  if (!canonical || current === canonical) return false;
+  if (isLocalhost(current) || isVercelHost(current)) return false;
+
+  const currentApex = current.replace(/^www\./, '');
+  const canonicalApex = canonical.replace(/^www\./, '');
+  if (currentApex !== canonicalApex) return false;
+
+  const next = new URL(window.location.href);
+  next.hostname = canonical;
+  window.location.replace(next.toString());
+  return true;
+}
+
 function isAdminPath() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
 }
@@ -137,6 +172,10 @@ export function RestaurantProvider({ children }) {
       if (!data) {
         setError(`Restaurant not found (${identifier.type}: ${identifier.value})`);
         setRestaurant(null);
+        return;
+      }
+
+      if (data.domain && redirectToCanonicalHost(data.domain)) {
         return;
       }
 

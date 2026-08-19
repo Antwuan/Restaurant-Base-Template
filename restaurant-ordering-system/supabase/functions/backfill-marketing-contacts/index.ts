@@ -22,6 +22,42 @@ function json(body: unknown, status = 200) {
   });
 }
 
+/** Bearer user JWT + restaurant_staff row for restaurantId. Inlined (Dashboard deploys often cannot import ../_shared). */
+async function requireRestaurantStaff(req: Request, restaurantId: string): Promise<Response | null> {
+  const authHeader = req.headers.get('Authorization') || '';
+  const bearer = authHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
+  if (!bearer) {
+    return json({ error: 'Authorization required' }, 401);
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${bearer}` } },
+  });
+  const { data: authData, error: authErr } = await userClient.auth.getUser();
+  if (authErr || !authData?.user) {
+    return json({ error: 'Invalid authorization' }, 401);
+  }
+
+  const supabase = createClient(
+    supabaseUrl,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  );
+  const { data: staff } = await supabase
+    .from('restaurant_staff')
+    .select('id')
+    .eq('auth_user_id', authData.user.id)
+    .eq('restaurant_id', restaurantId)
+    .maybeSingle();
+
+  if (!staff) {
+    return json({ error: 'Admin access required' }, 403);
+  }
+
+  return null;
+}
+
 async function invokeSyncMarketingContact(opts: {
   restaurantId: string;
   email: string;
@@ -61,35 +97,17 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization') || '';
-    const bearer = authHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
-    if (!bearer) return json({ error: 'Authorization required' }, 401);
-
     const body = await req.json();
     const restaurantId = typeof body?.restaurantId === 'string' ? body.restaurantId.trim() : '';
     if (!restaurantId) return json({ error: 'restaurantId is required' }, 400);
 
+    const staffErr = await requireRestaurantStaff(req, restaurantId);
+    if (staffErr) return staffErr;
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: `Bearer ${bearer}` } },
-    });
-    const { data: authData, error: authErr } = await userClient.auth.getUser();
-    if (authErr || !authData?.user) {
-      return json({ error: 'Invalid authorization' }, 401);
-    }
-
     const supabase = createClient(supabaseUrl, serviceRoleKey);
-    const { data: staff } = await supabase
-      .from('restaurant_staff')
-      .select('id')
-      .eq('auth_user_id', authData.user.id)
-      .eq('restaurant_id', restaurantId)
-      .maybeSingle();
-
-    if (!staff) return json({ error: 'Admin access required' }, 403);
 
     const { data: restaurant } = await supabase
       .from('restaurants')

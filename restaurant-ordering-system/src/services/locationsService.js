@@ -126,7 +126,7 @@ export async function listActiveLocations(restaurantId) {
   if (!restaurantId) return [];
   const { data, error } = await supabase
     .from('restaurant_locations')
-    .select('id, restaurant_id, name, address, sort_order, is_active')
+    .select('id, restaurant_id, name, address, sort_order, is_active, tax_rate')
     .eq('restaurant_id', restaurantId)
     .eq('is_active', true)
     .order('sort_order', { ascending: true })
