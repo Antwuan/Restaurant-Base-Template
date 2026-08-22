@@ -1,6 +1,7 @@
 /**
  * Create or reuse a Stripe PaymentIntent for checkout.
- * Server-reprices the cart (quote_customer_order). Does not trust client amount.
+ * Server-reprices the cart (quote_customer_order). Does not trust client amount
+ * or client currency — Stripe is always charged in usd (restaurant dollars).
  *
  * POST JSON:
  *   restaurantId, items[], idempotencyKey,
@@ -22,6 +23,8 @@ const CONNECT_ONBOARDING_ERROR =
 const RATE_LIMIT_MAX = 25;
 const RATE_WINDOW_MS = 60_000;
 const MIN_AMOUNT_CENTS = 50;
+/** Menu totals are restaurant dollars; never take currency from the client. */
+const QUOTE_CURRENCY = 'usd';
 const rateHits = new Map<string, number[]>();
 
 type V2AccountFields = {
@@ -257,7 +260,7 @@ function successBody(pi: Stripe.PaymentIntent, quote: QuoteResult, reused: boole
     clientSecret: pi.client_secret,
     paymentIntentId: pi.id,
     amountCents: reused ? pi.amount : quote.amount_cents,
-    currency: pi.currency || 'usd',
+    currency: pi.currency || QUOTE_CURRENCY,
     subtotal: quote.subtotal,
     tax: quote.tax,
     discountAmount: quote.discount_amount,
@@ -303,6 +306,14 @@ function piIsOpen(status: Stripe.PaymentIntent.Status): boolean {
   return status === 'requires_payment_method' || status === 'requires_confirmation';
 }
 
+function piCurrency(pi: Stripe.PaymentIntent): string {
+  return (pi.currency || '').trim().toLowerCase();
+}
+
+function chargeMatchesQuote(pi: Stripe.PaymentIntent, quote: QuoteResult): boolean {
+  return pi.amount === quote.amount_cents && piCurrency(pi) === QUOTE_CURRENCY;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -325,7 +336,6 @@ Deno.serve(async (req: Request) => {
     const promoCodeId = str(body.promoCodeId || body.promo_code_id);
     const email = str(body.email || body.customerEmail || body.customer_email);
     const pickupLocationId = str(body.pickupLocationId || body.pickup_location_id);
-    const currency = (str(body.currency) || 'usd').toLowerCase();
     const customerName = str(body.customerName || body.customer_name);
     const customerPhone = str(body.customerPhone || body.customer_phone);
     const orderType = str(body.orderType || body.order_type);
@@ -385,7 +395,7 @@ Deno.serve(async (req: Request) => {
       menu_type: menuType || 'regular',
       scheduled_time: scheduledTime || null,
       notes: notes || null,
-      currency,
+      currency: QUOTE_CURRENCY,
       quote,
     };
 
@@ -397,13 +407,16 @@ Deno.serve(async (req: Request) => {
 
     if (ledger?.status === 'succeeded' && ledger.stripe_payment_intent_id) {
       const pi = await stripe.paymentIntents.retrieve(ledger.stripe_payment_intent_id);
+      if (!chargeMatchesQuote(pi, quote)) {
+        return jsonResponse({ error: 'Existing payment does not match quoted total' }, 409);
+      }
       return jsonResponse(successBody(pi, quote, true));
     }
 
     const buildCreateParams = async (): Promise<Stripe.PaymentIntentCreateParams> => {
       const piParams: Stripe.PaymentIntentCreateParams = {
         amount: quote.amount_cents,
-        currency,
+        currency: QUOTE_CURRENCY,
         automatic_payment_methods: { enabled: true },
         metadata: {
           restaurant_id: restaurantId,
@@ -423,10 +436,13 @@ Deno.serve(async (req: Request) => {
       pi: Stripe.PaymentIntent,
       updateSnapshot: boolean,
     ) => {
+      if (!chargeMatchesQuote(pi, quote)) {
+        throw new Error('Payment currency or amount does not match quote');
+      }
       const patch: Record<string, unknown> = {
         stripe_payment_intent_id: pi.id,
         amount_cents: pi.amount,
-        currency,
+        currency: QUOTE_CURRENCY,
         status: ledgerStatusFromPi(pi.status),
       };
       if (updateSnapshot) patch.cart_snapshot = cartSnapshot;
@@ -447,11 +463,14 @@ Deno.serve(async (req: Request) => {
 
       if (pi && pi.status !== 'canceled') {
         if (pi.status === 'succeeded' || pi.status === 'processing') {
+          if (!chargeMatchesQuote(pi, quote)) {
+            return jsonResponse({ error: 'Existing payment does not match quoted total' }, 409);
+          }
           await persistPi(ledger.id, pi, false);
           return jsonResponse(successBody(pi, quote, true));
         }
 
-        if (ledger.amount_cents === quote.amount_cents) {
+        if (chargeMatchesQuote(pi, quote)) {
           if (email && pi.receipt_email !== email) {
             try {
               pi = await stripe.paymentIntents.update(pi.id, { receipt_email: email });
@@ -463,7 +482,8 @@ Deno.serve(async (req: Request) => {
           return jsonResponse(successBody(pi, quote, true));
         }
 
-        if (piIsOpen(pi.status)) {
+        // Stripe cannot change PaymentIntent currency after create.
+        if (piIsOpen(pi.status) && piCurrency(pi) === QUOTE_CURRENCY) {
           pi = await stripe.paymentIntents.update(
             pi.id,
             {
@@ -496,14 +516,16 @@ Deno.serve(async (req: Request) => {
         restaurant_id: restaurantId,
         idempotency_key: idempotencyKey,
         amount_cents: quote.amount_cents,
-        currency,
+        currency: QUOTE_CURRENCY,
         status: 'created',
         cart_snapshot: cartSnapshot,
       }, idempotencyKey);
 
-      if (ledger.stripe_payment_intent_id && ledger.amount_cents === quote.amount_cents) {
+      if (ledger.stripe_payment_intent_id) {
         const pi = await stripe.paymentIntents.retrieve(ledger.stripe_payment_intent_id);
-        return jsonResponse(successBody(pi, quote, true));
+        if (chargeMatchesQuote(pi, quote)) {
+          return jsonResponse(successBody(pi, quote, true));
+        }
       }
     }
 
@@ -513,12 +535,30 @@ Deno.serve(async (req: Request) => {
 
     const createParams = await buildCreateParams();
     const stripeIdempotencyKey = ledger.stripe_payment_intent_id
-      ? `${idempotencyKey}:cents:${quote.amount_cents}`
-      : idempotencyKey;
+      ? `${idempotencyKey}:ccy:${QUOTE_CURRENCY}:cents:${quote.amount_cents}`
+      : `${idempotencyKey}:ccy:${QUOTE_CURRENCY}`;
 
-    const paymentIntent = await stripe.paymentIntents.create(createParams, {
+    let paymentIntent = await stripe.paymentIntents.create(createParams, {
       idempotencyKey: stripeIdempotencyKey,
     });
+
+    if (!chargeMatchesQuote(paymentIntent, quote)) {
+      if (piIsOpen(paymentIntent.status)) {
+        try {
+          await stripe.paymentIntents.cancel(paymentIntent.id);
+        } catch {
+          return jsonResponse(
+            { error: 'Payment already in progress. Refresh checkout to continue.' },
+            409,
+          );
+        }
+      } else {
+        return jsonResponse({ error: 'Existing payment does not match quoted total' }, 409);
+      }
+      paymentIntent = await stripe.paymentIntents.create(createParams, {
+        idempotencyKey: `${idempotencyKey}:ccy:${QUOTE_CURRENCY}:cents:${quote.amount_cents}:retry`,
+      });
+    }
 
     await persistPi(ledger.id, paymentIntent, true);
     return jsonResponse(successBody(paymentIntent, quote, false));

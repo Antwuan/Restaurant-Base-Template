@@ -3,16 +3,17 @@
  *
  * Priority:
  *   1. ?restaurant=<slug>
- *   2. sessionStorage restaurant_slug (survives /menu navigation)
+ *   2. sessionStorage restaurant_slug (localhost / *.vercel.app only)
  *   3. EXPO_PUBLIC_RESTAURANT_SLUG on localhost / *.vercel.app
  *   4. First URL path segment (not a reserved app route)
  *   5. Hostname → restaurants.domain (custom domains only; not *.vercel.app)
  *
- * After load, if restaurants.domain is set, www vs apex is redirected to that
- * canonical host so Auth localStorage (JWT) stays on one origin.
+ * Custom-domain lookup matches www and apex. If the restaurant already
+ * resolved on the current hostname, we do not JS-redirect (CDN owns that).
+ * A sessionStorage loop guard still blocks a JWT-origin bounce from looping.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { restaurantService } from '../services/restaurantService';
 import { useAuth } from './AuthContext';
 import { isStaffForRestaurant } from '../services/authService';
@@ -20,6 +21,7 @@ import { isStaffForRestaurant } from '../services/authService';
 const RestaurantContext = createContext(null);
 
 const SESSION_SLUG_KEY = 'restaurant_slug';
+const CANONICAL_REDIRECT_GUARD_KEY = 'canonical_host_redirect';
 
 const RESERVED_PATH_SEGMENTS = new Set([
   'home',
@@ -62,18 +64,22 @@ function getRestaurantIdentifierFromURL() {
     return { type: 'slug', value: slugParam };
   }
 
-  try {
-    const stored = sessionStorage.getItem(SESSION_SLUG_KEY);
-    if (stored) {
-      return { type: 'slug', value: stored };
+  // sessionStorage / env slugs are preview-only. On a custom host, domain
+  // lookup must win so a leftover slug cannot override restaurants.domain.
+  if (isLocalhost(hostname) || isVercelHost(hostname)) {
+    try {
+      const stored = sessionStorage.getItem(SESSION_SLUG_KEY);
+      if (stored) {
+        return { type: 'slug', value: stored };
+      }
+    } catch {
+      // sessionStorage unavailable
     }
-  } catch {
-    // sessionStorage unavailable
-  }
 
-  const envSlug = process.env.EXPO_PUBLIC_RESTAURANT_SLUG;
-  if ((isLocalhost(hostname) || isVercelHost(hostname)) && envSlug) {
-    return { type: 'slug', value: envSlug };
+    const envSlug = process.env.EXPO_PUBLIC_RESTAURANT_SLUG;
+    if (envSlug) {
+      return { type: 'slug', value: envSlug };
+    }
   }
 
   const pathSegments = window.location.pathname.split('/').filter(Boolean);
@@ -84,7 +90,7 @@ function getRestaurantIdentifierFromURL() {
 
   // Custom domains only — *.vercel.app is not stored in restaurants.domain
   if (!isLocalhost(hostname) && !isVercelHost(hostname)) {
-    return { type: 'domain', value: hostname.replace(/^www\./, '') };
+    return { type: 'domain', value: hostname };
   }
 
   return null;
@@ -110,8 +116,10 @@ function parseCanonicalHostname(domain) {
 
 /**
  * Auth JWT lives in localStorage keyed by origin. www vs apex are different
- * origins, so bounce the non-canonical host to restaurants.domain.
+ * origins, so a slug-based load may still bounce to restaurants.domain.
  * Only www ↔ apex of the same host; never localhost / *.vercel.app.
+ * Guarded: if this origin already redirected once, stay put (CDN may own
+ * the opposite www/apex hop and would otherwise loop).
  */
 function redirectToCanonicalHost(canonicalDomain) {
   if (typeof window === 'undefined') return false;
@@ -123,6 +131,16 @@ function redirectToCanonicalHost(canonicalDomain) {
   const currentApex = current.replace(/^www\./, '');
   const canonicalApex = canonical.replace(/^www\./, '');
   if (currentApex !== canonicalApex) return false;
+
+  try {
+    if (sessionStorage.getItem(CANONICAL_REDIRECT_GUARD_KEY)) {
+      return false;
+    }
+    sessionStorage.setItem(CANONICAL_REDIRECT_GUARD_KEY, currentApex);
+  } catch {
+    // Cannot persist a loop guard — skip the bounce rather than risk a reload loop.
+    return false;
+  }
 
   const next = new URL(window.location.href);
   next.hostname = canonical;
@@ -140,9 +158,15 @@ export function RestaurantProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [adminLoginError, setAdminLoginError] = useState(null);
+  const restaurantRef = useRef(restaurant);
+  restaurantRef.current = restaurant;
 
   const loadRestaurant = useCallback(async () => {
-    setLoading(true);
+    // Keep the storefront mounted after first paint; a refetch must not
+    // flip loading back to true and remount RootNavigator.
+    if (!restaurantRef.current) {
+      setLoading(true);
+    }
     setError(null);
 
     try {
@@ -175,7 +199,10 @@ export function RestaurantProvider({ children }) {
         return;
       }
 
-      if (data.domain && redirectToCanonicalHost(data.domain)) {
+      // Domain lookup already succeeded on this hostname (www or apex). Do not
+      // JS-redirect — hosting/CDN owns www ↔ apex. Slug loads may still bounce
+      // for JWT origin, with a sessionStorage loop guard.
+      if (identifier.type !== 'domain' && data.domain && redirectToCanonicalHost(data.domain)) {
         return;
       }
 

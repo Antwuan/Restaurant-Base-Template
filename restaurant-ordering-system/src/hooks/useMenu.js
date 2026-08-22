@@ -11,7 +11,7 @@ export const useMenu = (restaurantId, menuType = null) => {
 
   const loadMenu = useCallback(async () => {
     if (!restaurantId) {
-      setLoading(false);
+      setLoading(true);
       setError(null);
       setCategories([]);
       setMenuByCategory({});

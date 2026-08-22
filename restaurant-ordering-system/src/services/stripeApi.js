@@ -1,6 +1,11 @@
 import { loadStripe } from '@stripe/stripe-js';
 import { supabase } from '../config/supabase';
 
+export function loadStripeForCheckout(publishableKey) {
+  if (!publishableKey) return null;
+  return loadStripe(publishableKey);
+}
+
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -177,9 +182,11 @@ export function getPaymentReturnUrl() {
 export function serializeCheckoutItems(items) {
   return (Array.isArray(items) ? items : []).map((item) => ({
     id: item.id,
+    name: item.name || null,
     quantity: item.quantity,
     selectedModifiers: item.selectedModifiers || item.selected_modifiers || [],
     specialInstructions: item.specialInstructions || item.special_instructions || '',
+    image_url: item.image_url || null,
   }));
 }
 
@@ -200,7 +207,7 @@ function serializePromo(promo) {
  * Creates or resumes a server-priced PaymentIntent.
  * Does not send a client amount — the Edge Function reprices from menu + tax_rate.
  * Snapshot fields (name, phone, email, notes, schedule, …) are stored on
- * payment_ledger.cart_snapshot for stripe-webhook place_customer_order.
+ * payment_ledger.cart_snapshot for stripe-webhook / fulfill-order.
  * Expects { clientSecret, paymentIntentId?, amountCents? } and ignores extra fields.
  */
 export async function createPaymentIntent({
@@ -297,7 +304,7 @@ export async function retrievePaymentIntent(clientSecret) {
   const pk = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   if (!pk || !clientSecret) return null;
   try {
-    const stripe = await loadStripe(pk);
+    const stripe = await loadStripeForCheckout(pk);
     if (!stripe) return null;
     const { paymentIntent, error } = await stripe.retrievePaymentIntent(clientSecret);
     if (error || !paymentIntent) return null;
@@ -305,6 +312,43 @@ export async function retrievePaymentIntent(clientSecret) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Places the kitchen order after a succeeded PaymentIntent.
+ * Proof of possession is the client_secret; the server uses payment_ledger.cart_snapshot
+ * (client cart/totals are ignored).
+ */
+export async function fulfillPaidOrder({ restaurantId, paymentIntentId, clientSecret } = {}) {
+  if (!BACKEND_URL) {
+    throw new Error(
+      'Payment backend URL is not configured. Set EXPO_PUBLIC_BACKEND_URL or EXPO_PUBLIC_SUPABASE_URL in .env',
+    );
+  }
+  if (!restaurantId || !paymentIntentId || !clientSecret) {
+    throw new Error('Payment is required to place this order.');
+  }
+
+  const response = await fetch(`${BACKEND_URL}/fulfill-order`, {
+    method: 'POST',
+    headers: await getFunctionHeaders(),
+    body: JSON.stringify({ restaurantId, paymentIntentId, clientSecret }),
+  });
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.message || payload.error || 'Could not place order.');
+  }
+  if (!payload?.id) {
+    throw new Error('Could not place order.');
+  }
+  return payload;
 }
 
 /**

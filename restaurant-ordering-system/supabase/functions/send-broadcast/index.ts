@@ -4,6 +4,7 @@
  * Auth: Bearer JWT of restaurant_staff for restaurantId (admin).
  * Requires {{{RESEND_UNSUBSCRIBE_URL}}} in html.
  * promoCodeId is optional; when set it must belong to restaurantId.
+ * Backfills opted-in customers missing resend_contact_id before sending.
  */
 import { Resend } from 'npm:resend';
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -54,6 +55,165 @@ async function requireRestaurantStaff(req: Request, restaurantId: string): Promi
   }
 
   return null;
+}
+
+/** Inlined: Dashboard deploys cannot import ../_shared. */
+const BACKFILL_LIMIT = 200;
+const NO_MARKETING_CONTACTS_ERROR = 'No marketing contacts in Resend yet';
+const BACKFILL_MAX_BATCHES = 5;
+
+type BackfillResult = {
+  processed: number;
+  skipped: number;
+  failed: number;
+  total: number;
+  hasMore: boolean;
+  error?: string;
+};
+
+async function invokeSyncMarketingContact(opts: {
+  restaurantId: string;
+  email: string;
+  fullName?: string;
+  phone?: string | null;
+}) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const res = await fetch(`${supabaseUrl}/functions/v1/sync-marketing-contact`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: serviceRoleKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      restaurantId: opts.restaurantId,
+      email: opts.email,
+      fullName: opts.fullName || undefined,
+      phone: opts.phone || undefined,
+      marketingOptIn: true,
+    }),
+  });
+  let payload: { ok?: boolean; skipped?: boolean; error?: string } = {};
+  try {
+    payload = await res.json();
+  } catch {
+    payload = { error: `sync-marketing-contact returned ${res.status}` };
+  }
+  if (!res.ok && !payload.error) payload.error = `sync-marketing-contact returned ${res.status}`;
+  return payload;
+}
+
+async function backfillMissingResendContacts(
+  supabase: ReturnType<typeof createClient>,
+  restaurantId: string,
+): Promise<BackfillResult> {
+  const { data: pending, error: queryErr } = await supabase
+    .from('restaurant_customers')
+    .select('id, email, first_name, last_name, phone')
+    .eq('restaurant_id', restaurantId)
+    .eq('marketing_opt_in', true)
+    .is('resend_contact_id', null)
+    .limit(BACKFILL_LIMIT);
+
+  if (queryErr) {
+    return {
+      processed: 0,
+      skipped: 0,
+      failed: 0,
+      total: 0,
+      hasMore: false,
+      error: queryErr.message,
+    };
+  }
+
+  const rows = pending || [];
+  let processed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const row of rows) {
+    const email = typeof row.email === 'string' ? row.email.trim() : '';
+    if (!email) {
+      failed += 1;
+      continue;
+    }
+    try {
+      const result = await invokeSyncMarketingContact({
+        restaurantId,
+        email,
+        fullName: [row.first_name, row.last_name].filter(Boolean).join(' '),
+        phone: row.phone,
+      });
+      if (result.error) failed += 1;
+      else if (result.skipped) skipped += 1;
+      else processed += 1;
+    } catch (err) {
+      console.error('send-broadcast backfill contact error:', err);
+      failed += 1;
+    }
+  }
+
+  return {
+    processed,
+    skipped,
+    failed,
+    total: rows.length,
+    hasMore: rows.length === BACKFILL_LIMIT,
+  };
+}
+
+async function backfillMissingResendContactsUntilDone(
+  supabase: ReturnType<typeof createClient>,
+  restaurantId: string,
+): Promise<BackfillResult> {
+  const acc: BackfillResult = {
+    processed: 0,
+    skipped: 0,
+    failed: 0,
+    total: 0,
+    hasMore: false,
+  };
+
+  for (let i = 0; i < BACKFILL_MAX_BATCHES; i++) {
+    const batch = await backfillMissingResendContacts(supabase, restaurantId);
+    acc.processed += batch.processed;
+    acc.skipped += batch.skipped;
+    acc.failed += batch.failed;
+    acc.total += batch.total;
+    acc.hasMore = batch.hasMore;
+    if (batch.error) {
+      acc.error = batch.error;
+      break;
+    }
+    if (!batch.hasMore || batch.processed === 0) break;
+  }
+
+  return acc;
+}
+
+async function countSyncedMarketingContacts(
+  supabase: ReturnType<typeof createClient>,
+  restaurantId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('restaurant_customers')
+    .select('id', { count: 'exact', head: true })
+    .eq('restaurant_id', restaurantId)
+    .eq('marketing_opt_in', true)
+    .not('resend_contact_id', 'is', null);
+
+  if (error) {
+    console.error('countSyncedMarketingContacts error:', error);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+function isEmptyResendAudienceError(message: string): boolean {
+  const m = message.toLowerCase();
+  return /audience has no contacts|no contacts in (this )?audience|segment has no contacts|audience does not have any contacts/
+    .test(m);
 }
 
 Deno.serve(async (req: Request) => {
@@ -133,6 +293,21 @@ Deno.serve(async (req: Request) => {
     const resend = new Resend(apiKey);
     const broadcastName = name?.trim() || `${restaurant.name} — ${new Date().toISOString().slice(0, 10)}`;
 
+    const backfill = await backfillMissingResendContactsUntilDone(supabase, String(restaurantId).trim());
+    if (backfill.error) {
+      console.error('send-broadcast backfill error:', backfill.error);
+    }
+
+    const syncedCount = await countSyncedMarketingContacts(supabase, String(restaurantId).trim());
+    if (syncedCount < 1) {
+      const detail = backfill.failed > 0
+        ? ' Opted-in customers could not be synced to Resend. Use Sync marketing contacts in Settings and check function logs.'
+        : backfill.skipped > 0
+          ? ' Opted-in customers were skipped (domain or segment not ready).'
+          : ' Opt in a customer (signup, checkout, or Profile), then use Sync marketing contacts in Settings.';
+      return json({ error: `${NO_MARKETING_CONTACTS_ERROR}.${detail}` }, 400);
+    }
+
     const { data, error } = await resend.broadcasts.create({
       name: broadcastName,
       from: restaurant.resend_from_email,
@@ -146,7 +321,11 @@ Deno.serve(async (req: Request) => {
 
     if (error) {
       console.error('Broadcast error:', error);
-      return json({ error: error.message || 'Failed to send broadcast' }, 502);
+      const message = error.message || 'Failed to send broadcast';
+      if (isEmptyResendAudienceError(message)) {
+        return json({ error: NO_MARKETING_CONTACTS_ERROR }, 400);
+      }
+      return json({ error: message }, 502);
     }
 
     const resendBroadcastId = data?.id ? String(data.id) : null;

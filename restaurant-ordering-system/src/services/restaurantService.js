@@ -8,15 +8,37 @@ function notFoundError(kind, value) {
   );
 }
 
+/** Strip protocol, path, and port so lookup is hostname-only. */
+function normalizeHostname(domain) {
+  if (!domain || typeof domain !== 'string') return '';
+  let host = domain.trim().toLowerCase();
+  host = host.replace(/^https?:\/\//, '');
+  host = host.replace(/\/.*$/, '');
+  host = host.replace(/:\d+$/, '');
+  return host;
+}
+
+/** Both apex and www so either DNS target matches restaurants.domain. */
+function wwwAndApexHosts(domain) {
+  const host = normalizeHostname(domain);
+  if (!host) return [];
+  const apex = host.replace(/^www\./, '');
+  return [...new Set([apex, `www.${apex}`])];
+}
+
 export async function getRestaurantByDomain(domain) {
+  const candidates = wwwAndApexHosts(domain);
+  if (!candidates.length) throw notFoundError('domain', domain);
+
   const { data, error } = await supabase
     .from('restaurants')
     .select('*')
-    .eq('domain', domain)
-    .maybeSingle();
+    .in('domain', candidates)
+    .limit(1);
   if (error) throw error;
-  if (!data) throw notFoundError('domain', domain);
-  return data;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw notFoundError('domain', domain);
+  return row;
 }
 
 export async function getRestaurantBySlug(slug) {

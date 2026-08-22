@@ -14,6 +14,9 @@ const cryptoProvider = typeof Stripe.createSubtleCryptoProvider === 'function'
   ? Stripe.createSubtleCryptoProvider()
   : undefined;
 
+/** Must match create-payment-intent: quotes are restaurant dollars. */
+const QUOTE_CURRENCY = 'usd';
+
 type LedgerRow = {
   id: string;
   restaurant_id: string;
@@ -73,50 +76,6 @@ async function findLedger(
   return (byKey as LedgerRow | null) ?? null;
 }
 
-function orderPayloadFromSnapshot(
-  snapshot: Record<string, unknown> | null,
-  pi: Stripe.PaymentIntent,
-  restaurantId: string,
-): Record<string, unknown> {
-  const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
-  const quote = snapshot?.quote && typeof snapshot.quote === 'object'
-    ? snapshot.quote as Record<string, unknown>
-    : {};
-
-  const payload: Record<string, unknown> = {
-    restaurant_id: restaurantId,
-    items,
-    stripe_payment_intent_id: pi.id,
-    status: 'pending',
-    order_type: snapshotStr(snapshot, 'order_type') || 'pickup',
-    menu_type: snapshotStr(snapshot, 'menu_type') || 'regular',
-  };
-
-  const promoCodeId = snapshotStr(snapshot, 'promo_code_id') || String(quote.promo_code_id || '');
-  const promoCode = snapshotStr(snapshot, 'promo_code') || String(quote.promo_code || '');
-  const pickupLocationId = snapshotStr(snapshot, 'pickup_location_id')
-    || String(quote.pickup_location_id || '');
-  const customerId = snapshotStr(snapshot, 'customer_id') || String(quote.customer_id || '');
-  const email = snapshotStr(snapshot, 'customer_email')
-    || (typeof pi.receipt_email === 'string' ? pi.receipt_email : '');
-  const name = snapshotStr(snapshot, 'customer_name');
-  const phone = snapshotStr(snapshot, 'customer_phone');
-  const scheduled = snapshotStr(snapshot, 'scheduled_time');
-  const notes = snapshotStr(snapshot, 'notes');
-
-  if (promoCodeId && promoCodeId !== 'null') payload.promo_code_id = promoCodeId;
-  if (promoCode && promoCode !== 'null') payload.promo_code = promoCode;
-  if (pickupLocationId && pickupLocationId !== 'null') payload.pickup_location_id = pickupLocationId;
-  if (customerId && customerId !== 'null') payload.customer_id = customerId;
-  if (email) payload.customer_email = email;
-  if (name) payload.customer_name = name;
-  if (phone) payload.customer_phone = phone;
-  if (scheduled) payload.scheduled_time = scheduled;
-  if (notes) payload.notes = notes;
-
-  return payload;
-}
-
 async function handleSucceeded(
   supabase: SupabaseClient,
   pi: Stripe.PaymentIntent,
@@ -137,12 +96,29 @@ async function handleSucceeded(
     return jsonResponse({ received: true, duplicate: true, orderId: ledger.order_id });
   }
 
+  const chargedCurrency = (pi.currency || '').trim().toLowerCase();
+  if (chargedCurrency !== QUOTE_CURRENCY) {
+    console.error('stripe-webhook: refusing fulfillment for currency mismatch', {
+      paymentIntentId: pi.id,
+      chargedCurrency,
+      expectedCurrency: QUOTE_CURRENCY,
+      amount: pi.amount,
+    });
+    return jsonResponse({ received: true, ignored: true, reason: 'currency_mismatch' });
+  }
+
+  if (ledger.amount_cents !== pi.amount) {
+    console.error('stripe-webhook amount mismatch for', pi.id, ledger.amount_cents, pi.amount);
+    return jsonResponse({ error: 'Order total does not match paid amount' }, 409);
+  }
+
   const { error: statusErr } = await supabase
     .from('payment_ledger')
     .update({
       status: 'succeeded',
       stripe_payment_intent_id: pi.id,
       amount_cents: pi.amount,
+      currency: QUOTE_CURRENCY,
     })
     .eq('id', ledger.id);
   if (statusErr) {
@@ -163,9 +139,11 @@ async function handleSucceeded(
     return jsonResponse({ error: 'Missing restaurant_id' }, 500);
   }
 
-  const payload = orderPayloadFromSnapshot(ledger.cart_snapshot, pi, restaurantId);
   const { data: order, error: orderErr } = await supabase.rpc('place_customer_order', {
-    p: payload,
+    p: {
+      restaurant_id: restaurantId,
+      stripe_payment_intent_id: pi.id,
+    },
   });
 
   if (orderErr) {
