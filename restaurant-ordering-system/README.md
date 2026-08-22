@@ -5,7 +5,7 @@ Web-only Expo app for restaurant ordering with Supabase and Stripe Connect.
 ## Prerequisites
 
 - Node.js 18+
-- Supabase project with `restaurants`, menu tables, and Edge Functions **`create-payment-intent`** + **`stripe-webhook`** deployed
+- Supabase project with `restaurants`, menu tables, and Edge Functions **`create-payment-intent`**, **`fulfill-order`**, and **`stripe-webhook`** deployed
 - Stripe Connect: each restaurant needs `stripe_account_id` (`acct_...`) in Supabase
 
 ## Quick start
@@ -82,9 +82,10 @@ Apply these after the carousel/customer migration:
 # Files:
 #   supabase/migrations/20260819200000_checkout_hardening_ledger.sql
 #   supabase/migrations/20260819201000_quote_customer_order.sql
+#   supabase/migrations/20260819231102_place_customer_order_require_paid_ledger.sql
 ```
 
-Adds `payment_ledger`, tax rates, `orders.customer_id`, tracker RLS, and `quote_customer_order` (server-side cart pricing).
+Adds `payment_ledger`, tax rates, `orders.customer_id`, tracker RLS, and `quote_customer_order` (server-side cart pricing). `place_customer_order` is **service_role only**: it requires a succeeded `payment_ledger` row whose `amount_cents` matches the server quote of `cart_snapshot`. Guests cannot insert kitchen orders with the anon key.
 
 ## Stripe / Edge Function
 
@@ -114,11 +115,15 @@ Point Stripe → `https://<project>.supabase.co/functions/v1/stripe-webhook` and
 
 Store the signing secret as `STRIPE_WEBHOOK_SECRET`. In `supabase/config.toml`, `[functions.stripe-webhook] verify_jwt = false` (Stripe cannot send a user JWT).
 
+After `confirmPayment`, the web app calls **`fulfill-order`** with `{ restaurantId, paymentIntentId, clientSecret }`. That function verifies the PaymentIntent succeeded in Stripe, then `place_customer_order` inserts from `payment_ledger.cart_snapshot`. The webhook does the same so a closed tab still produces a kitchen ticket.
+
 ### Functions to deploy (checkout hardening)
 
 ```bash
 supabase functions deploy create-payment-intent
 supabase functions deploy stripe-webhook
+supabase functions deploy fulfill-order
+supabase functions deploy payment-method-summary
 supabase functions deploy ensure-customer-profile
 supabase functions deploy send-broadcast
 supabase functions deploy manage-email-domain

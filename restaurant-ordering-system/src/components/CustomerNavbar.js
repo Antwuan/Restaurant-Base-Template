@@ -198,6 +198,23 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
 
   const menuAnim = useRef(new Animated.Value(0)).current;
   const collapseHeight = useRef(new Animated.Value(60)).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [collapseAnimating, setCollapseAnimating] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled?.().then((enabled) => {
+      if (mounted) setReduceMotion(!!enabled);
+    });
+    const sub = AccessibilityInfo.addEventListener?.(
+      'reduceMotionChanged',
+      (enabled) => setReduceMotion(!!enabled),
+    );
+    return () => {
+      mounted = false;
+      sub?.remove?.();
+    };
+  }, []);
 
   const animateMenu = (open) => {
     setMobileMenuOpen(open);
@@ -226,18 +243,34 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
   }, [isMobile, mobileMenuOpen, menuMounted, menuAnim]);
 
   useEffect(() => {
+    let cancelled = false;
     if (!isMobile) {
+      collapseHeight.stopAnimation();
       collapseHeight.setValue(60);
-      return;
+      setCollapseAnimating(false);
+      return undefined;
     }
     if (collapsed) closeMobileMenu();
+    const target = collapsed ? 0 : 60;
+    if (reduceMotion) {
+      collapseHeight.stopAnimation();
+      collapseHeight.setValue(target);
+      setCollapseAnimating(false);
+      return undefined;
+    }
+    setCollapseAnimating(true);
     Animated.timing(collapseHeight, {
-      toValue: collapsed ? 0 : 60,
+      toValue: target,
       duration: 200,
       useNativeDriver: false,
-    }).start();
+    }).start(({ finished }) => {
+      if (finished && !cancelled) setCollapseAnimating(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsed, isMobile, collapseHeight]);
+  }, [collapsed, isMobile, collapseHeight, reduceMotion]);
 
   const isSignedIn = isCustomerAuthenticated;
   const points = customerProfile?.points_balance ?? 0;
@@ -360,10 +393,9 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
         style={[
           styles.navbarShell,
           isMobile && {
-            height: collapsed ? 0 : 60,
-            maxHeight: collapsed ? 0 : undefined,
+            height: collapseHeight,
             minHeight: 0,
-            overflow: collapsed ? 'hidden' : 'visible',
+            overflow: collapsed || collapseAnimating ? 'hidden' : 'visible',
           },
         ]}
         pointerEvents={isMobile && collapsed ? 'none' : 'auto'}

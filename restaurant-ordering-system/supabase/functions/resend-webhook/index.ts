@@ -54,6 +54,13 @@ Deno.serve(async (req: Request) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     const apiKey = Deno.env.get('RESEND_API_KEY');
     const webhookSecret = Deno.env.get('RESEND_WEBHOOK_SECRET');
@@ -70,11 +77,11 @@ Deno.serve(async (req: Request) => {
     const event = resend.webhooks.verify({
       payload,
       headers: {
-        'svix-id': req.headers.get('svix-id') ?? '',
-        'svix-timestamp': req.headers.get('svix-timestamp') ?? '',
-        'svix-signature': req.headers.get('svix-signature') ?? '',
+        id: req.headers.get('svix-id') ?? '',
+        timestamp: req.headers.get('svix-timestamp') ?? '',
+        signature: req.headers.get('svix-signature') ?? '',
       },
-      secret: webhookSecret,
+      webhookSecret,
     });
 
     const supabase = createClient(

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { View, ActivityIndicator, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 
 import { RestaurantProvider, useRestaurantContext } from './src/context/RestaurantContext';
 import { AuthProvider } from './src/context/AuthContext';
@@ -17,15 +17,7 @@ const AppContent = () => {
   const { theme } = useTheme();
   const paperTheme = buildPaperTheme(theme);
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
-    );
-  }
-
-  if (error || !restaurant) {
+  if (!loading && (error || !restaurant)) {
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>

@@ -22,7 +22,7 @@ import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
 import * as restaurantService from '../../services/restaurantService';
 import * as locationsService from '../../services/locationsService';
-import { manageEmailDomain } from '../../services/emailApi';
+import { manageEmailDomain, backfillMarketingContacts } from '../../services/emailApi';
 import { confirmAsync } from '../../utils/confirm';
 import {
   DAY_KEYS,
@@ -158,6 +158,7 @@ export default function SettingsScreen() {
   const [fromLocal, setFromLocal] = useState('hello');
   const [dnsRecords, setDnsRecords] = useState([]);
   const [domainBusy, setDomainBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [domainStatus, setDomainStatus] = useState(restaurant?.email_domain_status ?? 'pending');
   const [fromEmailDisplay, setFromEmailDisplay] = useState(restaurant?.resend_from_email ?? '');
 
@@ -419,6 +420,48 @@ export default function SettingsScreen() {
       Alert.alert('Error', e.message || 'Could not refresh domain status.');
     } finally {
       setDomainBusy(false);
+    }
+  };
+
+  const handleSyncMarketingContacts = async () => {
+    if (!restaurant?.id) return;
+    if (domainStatus !== 'verified' || !restaurant?.resend_segment_id) {
+      Alert.alert(
+        'Email not ready',
+        'Verify your sending domain in this section before syncing contacts.',
+      );
+      return;
+    }
+    setSyncBusy(true);
+    try {
+      const result = await backfillMarketingContacts(restaurant.id);
+      const processed = result?.processed ?? 0;
+      const skipped = result?.skipped ?? 0;
+      const failed = result?.failed ?? 0;
+      const total = result?.total ?? 0;
+      if (result?.reason) {
+        Alert.alert('Sync skipped', result.reason);
+        return;
+      }
+      if (total === 0) {
+        Alert.alert(
+          'Nothing to sync',
+          'No opted-in customers are missing a Resend contact. Turn on marketing emails on a customer profile, then sync again.',
+        );
+        return;
+      }
+      Alert.alert(
+        'Sync finished',
+        `Added or updated ${processed} contact${processed === 1 ? '' : 's'}`
+          + (skipped ? `, skipped ${skipped}` : '')
+          + (failed ? `, failed ${failed}` : '')
+          + '.'
+          + (result?.hasMore ? ' More remain — run Sync again.' : ''),
+      );
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not sync marketing contacts.');
+    } finally {
+      setSyncBusy(false);
     }
   };
 
@@ -812,6 +855,17 @@ export default function SettingsScreen() {
             >
               <Text style={[styles.saveBtnText, { color: c.textPrimary }]}>Refresh status</Text>
             </TouchableOpacity>
+            {domainStatus === 'verified' ? (
+              <TouchableOpacity
+                style={[styles.saveBtn, { backgroundColor: c.backgroundSunken, borderWidth: 1, borderColor: c.border }, syncBusy && styles.saveBtnDisabled]}
+                onPress={handleSyncMarketingContacts}
+                disabled={syncBusy}
+              >
+                {syncBusy
+                  ? <ActivityIndicator color={c.textPrimary} size="small" />
+                  : <Text style={[styles.saveBtnText, { color: c.textPrimary }]}>Sync marketing contacts</Text>}
+              </TouchableOpacity>
+            ) : null}
           </View>
         )}
 

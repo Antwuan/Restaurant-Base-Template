@@ -24,7 +24,6 @@ import {
   Linking,
   useWindowDimensions,
 } from 'react-native';
-import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
@@ -41,7 +40,7 @@ import PickupLocationPicker, {
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
 import BottomSheet, { useMobileBottomSheet } from '../../components/BottomSheet';
-import { createPaymentIntent, getPaymentMethodSummary, getOrCreateIdempotencyKey, writeCheckoutAttempt, readCheckoutAttempt, clearCheckoutAttempt, retrievePaymentIntent, getPaymentReturnUrl, serializeCheckoutItems } from '../../services/stripeApi';
+import { createPaymentIntent, getPaymentMethodSummary, getOrCreateIdempotencyKey, writeCheckoutAttempt, readCheckoutAttempt, clearCheckoutAttempt, retrievePaymentIntent, getPaymentReturnUrl, serializeCheckoutItems, loadStripeForCheckout } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
@@ -345,6 +344,7 @@ function CateringCheckoutForm({
   setNotes,
   paymentReady = true,
   chargeTotal,
+  clientSecret,
   piSucceeded = false,
 }) {
   const stripe = useStripe();
@@ -383,7 +383,7 @@ function CateringCheckoutForm({
         pickupLocationId: toPersistablePickupLocationId(pickupLocation) || undefined,
       });
 
-      const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
+      let { error: confirmError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
           payment_method_data: { billing_details: { name, phone, email } },
@@ -392,34 +392,26 @@ function CateringCheckoutForm({
         redirect: 'if_required',
       });
 
+      if (confirmError?.code === 'payment_intent_unexpected_state' && clientSecret) {
+        const retrieved = await stripe.retrievePaymentIntent(clientSecret);
+        if (retrieved.paymentIntent?.status === 'succeeded') {
+          confirmError = undefined;
+          paymentIntent = retrieved.paymentIntent;
+        }
+      }
+
       if (confirmError) {
-        Alert.alert('Payment Failed', confirmError.message);
+        Alert.alert(
+          'Payment Failed',
+          confirmError.message,
+        );
         return;
       }
 
       const order = await createOrder({
         restaurantId: restaurant.id,
-        customerName: name,
-        customerPhone: phone,
-        customerEmail: email,
-        items: items.map(({ id, name: n, price, quantity, specialInstructions, selectedModifiers, image_url }) => ({
-          id, name: n, price, quantity,
-          special_instructions: specialInstructions || '',
-          selected_modifiers: selectedModifiers || [],
-          image_url: image_url || null,
-        })),
-        subtotal: cartSubtotal,
-        tax,
-        total,
-        orderType: 'pickup',
-        menuType: 'catering',
-        scheduledTime: scheduledSlot ? scheduledSlot.toISOString() : null,
-        notes: notes || null,
         paymentIntentId: paymentIntent?.id,
-        promoCodeId: appliedPromo?.id || null,
-        promoCode: appliedPromo?.code || null,
-        discountAmount: discountAmount || 0,
-        pickupLocationId: toPersistablePickupLocationId(pickupLocation),
+        clientSecret: paymentIntent?.client_secret || clientSecret,
       });
 
       let pointsEarned = 0;
@@ -472,7 +464,10 @@ function CateringCheckoutForm({
       saveConfirmationPayload(confirmationPayload);
       navigation.replace('Confirmation', confirmationPayload);
     } catch (err) {
-      Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
+      Alert.alert(
+        'Error',
+        err.message || 'Something went wrong. Please try again.',
+      );
     } finally {
       submittingRef.current = false;
       setLoading(false);
@@ -994,7 +989,7 @@ export default function CateringScreen({ navigation }) {
   const stripePromise = useMemo(() => {
     const pk = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     if (!pk) return null;
-    return loadStripe(pk);
+    return loadStripeForCheckout(pk);
   }, []);
 
   const handleItemPress = useCallback((item) => {
@@ -1224,6 +1219,7 @@ export default function CateringScreen({ navigation }) {
           setNotes={setCheckoutNotes}
           paymentReady={paymentReady}
           chargeTotal={chargeTotal}
+          clientSecret={clientSecret}
           piSucceeded={piSucceeded}
         />
       </Elements>

@@ -74,10 +74,6 @@ Deno.serve(async (req: Request) => {
       ];
     }
 
-    if (phone) {
-      createParams.properties = { phone: String(phone) };
-    }
-
     let contactId: string | undefined;
 
     const { data: created, error: createError } = await resend.contacts.create(
@@ -85,6 +81,14 @@ Deno.serve(async (req: Request) => {
     );
 
     if (createError) {
+      const alreadyExists = /already exists|already been taken|duplicate/i.test(
+        createError.message || '',
+      );
+      if (!alreadyExists) {
+        console.error('Resend contacts.create failed:', createError);
+        return json({ error: createError.message || 'Failed to create contact' }, 502);
+      }
+
       // Contact may already exist — update + add to segment
       const { data: existing, error: getErr } = await resend.contacts.get({ email: trimmedEmail });
       if (getErr || !existing?.id) {

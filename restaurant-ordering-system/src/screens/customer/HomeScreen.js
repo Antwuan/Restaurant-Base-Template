@@ -314,7 +314,7 @@ function HeroContent({ restaurantName, description, brandColor, onOrderNow }) {
 }
 
 export default function HomeScreen({ navigation }) {
-  const { restaurant } = useRestaurantContext();
+  const { restaurant, loading: restaurantLoading } = useRestaurantContext();
   const { slides, loading: carouselLoading } = useCarousel(restaurant?.id);
   const { images: galleryImages } = useGallery(restaurant?.id);
   const { theme } = useTheme();
@@ -357,7 +357,8 @@ export default function HomeScreen({ navigation }) {
   const heroHeight = isWide ? HERO_HEIGHT_DESKTOP : HERO_HEIGHT_MOBILE;
   const galleryLayout =
     restaurant?.gallery_layout === 'grid_3' ? 'grid_3' : 'grid_2';
-  const pageLoading = carouselLoading || !heroMediaReady;
+  const pageLoading =
+    restaurantLoading || !restaurant?.id || carouselLoading || !heroMediaReady;
 
   return (
     <View style={styles.root}>

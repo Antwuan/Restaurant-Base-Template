@@ -1,6 +1,6 @@
 import { supabase } from '../config/supabase';
 import { sendOrderEmail } from './emailApi';
-import { toPersistablePickupLocationId } from './locationsService';
+import { fulfillPaidOrder } from './stripeApi';
 
 export function validateOrderData(orderData) {
   const errors = [];
@@ -21,32 +21,11 @@ function triggerOrderEmail(orderId, type) {
 }
 
 export async function createOrder(orderData) {
-  // SECURITY DEFINER RPC — guests cannot SELECT orders under RLS, so
-  // insert().select() fails even when INSERT is allowed.
-  const { data, error } = await supabase.rpc('place_customer_order', {
-    p: {
-      restaurant_id: orderData.restaurantId,
-      customer_name: orderData.customerName,
-      customer_phone: orderData.customerPhone,
-      customer_email: orderData.customerEmail || null,
-      items: orderData.items,
-      subtotal: orderData.subtotal,
-      tax: orderData.tax,
-      total: orderData.total,
-      status: 'pending',
-      order_type: orderData.orderType,
-      menu_type: orderData.menuType || 'regular',
-      scheduled_time: orderData.scheduledTime || null,
-      stripe_payment_intent_id: orderData.paymentIntentId || null,
-      notes: orderData.notes || null,
-      promo_code_id: orderData.promoCodeId || null,
-      promo_code: orderData.promoCode || null,
-      discount_amount: orderData.discountAmount != null ? orderData.discountAmount : 0,
-      pickup_location_id: toPersistablePickupLocationId(orderData.pickupLocationId),
-    },
+  const data = await fulfillPaidOrder({
+    restaurantId: orderData.restaurantId,
+    paymentIntentId: orderData.paymentIntentId,
+    clientSecret: orderData.clientSecret,
   });
-
-  if (error) throw error;
 
   // Fallback if Database Webhook is not configured yet
   if (data?.customer_email) {

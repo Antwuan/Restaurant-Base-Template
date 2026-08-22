@@ -120,12 +120,17 @@ export async function ensureCustomerProfile({
 }
 
 /**
- * Best-effort: attach unmatched guest orders (same email + restaurant, last 30 days)
- * to the signed-in customer. Requires an authenticated session; no-ops otherwise.
+ * Best-effort: attach unmatched guest orders (same confirmed auth email +
+ * restaurant, last 30 days) to the signed-in customer. Requires an
+ * authenticated session with a confirmed email; no-ops otherwise.
  */
 export async function attachGuestOrdersToCustomer(restaurantId) {
   if (!restaurantId) return 0;
   try {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData?.user?.email_confirmed_at) {
+      return 0;
+    }
     const { data, error } = await supabase.rpc('attach_guest_orders_to_customer', {
       p_restaurant_id: restaurantId,
     });

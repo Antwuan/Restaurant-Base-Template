@@ -9,7 +9,7 @@ export const useCarousel = (restaurantId, { admin = false } = {}) => {
   const loadSlides = useCallback(async () => {
     if (!restaurantId) {
       setSlides([]);
-      setLoading(false);
+      setLoading(true);
       return;
     }
 

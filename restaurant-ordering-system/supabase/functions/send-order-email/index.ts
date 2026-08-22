@@ -114,6 +114,17 @@ Deno.serve(async (req: Request) => {
     if (!apiKey) return json({ error: 'RESEND_API_KEY is not configured' }, 500);
 
     const payload = await req.json();
+
+    // Resend webhooks belong on /functions/v1/resend-webhook. If this URL is
+    // subscribed to email.delivered (etc.), do not 400 — that fails the webhook.
+    const incomingType = String(payload.type || payload.emailType || payload.event || '');
+    if (/^(email|contact|domain)\./i.test(incomingType)) {
+      return json({
+        skipped: true,
+        reason: 'Resend events must POST to /functions/v1/resend-webhook',
+      });
+    }
+
     let orderId = payload.orderId || payload.order_id;
     let emailType: EmailType | null = payload.type || payload.emailType || null;
 

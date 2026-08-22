@@ -17,7 +17,6 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
@@ -40,6 +39,7 @@ import {
   retrievePaymentIntent,
   getPaymentReturnUrl,
   serializeCheckoutItems,
+  loadStripeForCheckout,
 } from '../../services/stripeApi';
 import { createOrder } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
@@ -69,6 +69,12 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLOT_INTERVAL = 15;
 const CALENDAR_SPAN_DAYS = 14;
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function isPickupTimeMissing({ allowAsap, readyOption, scheduledSlot }) {
+  if (scheduledSlot) return false;
+  if (!allowAsap) return true;
+  return readyOption === 'schedule';
+}
 
 function resolveCheckoutScheduledTimeIso({ readyOption, allowAsap, scheduledSlot, readyOptions }) {
   if (readyOption === 'ASAP' && allowAsap) return null;
@@ -293,6 +299,7 @@ function CheckoutForm({
   setSummaryOpen,
   paymentReady = true,
   chargeTotal,
+  clientSecret,
   onGuestSignIn,
   piSucceeded = false,
 }) {
@@ -352,31 +359,30 @@ function CheckoutForm({
     })
   ), [readyOption, allowAsap, scheduledSlot, readyOptions]);
 
-  const validateContact = () => {
-    if (isSignedIn) return true;
+  const validateFields = () => {
     const errs = {};
-    if (!contact.name.trim()) errs.name = 'Name is required';
-    if (!contact.phone.trim()) errs.phone = 'Phone number is required';
-    if (!contact.email.trim()) errs.email = 'Email is required';
-    else if (!EMAIL_RE.test(contact.email.trim())) errs.email = 'Enter a valid email';
+    if (!isSignedIn) {
+      if (!contact.name.trim()) errs.name = 'Name is required';
+      if (!contact.phone.trim()) errs.phone = 'Phone number is required';
+      if (!contact.email.trim()) errs.email = 'Email is required';
+      else if (!EMAIL_RE.test(contact.email.trim())) errs.email = 'Enter a valid email';
+    }
+    if (isPickupTimeMissing({ allowAsap, readyOption, scheduledSlot })) {
+      errs.pickupTime = 'Please choose a pickup date and time.';
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
+  };
+
+  const clearFieldError = (key) => {
+    setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
   };
 
   const handleSubmit = async () => {
     if (!stripe || !elements) return;
     if (!paymentReady || piSucceeded) return;
     if (submittingRef.current || loading) return;
-    if (!validateContact()) return;
-
-    if (!allowAsap && !scheduledSlot) {
-      Alert.alert('Pickup time required', 'Please choose a pickup date and time.');
-      return;
-    }
-    if (readyOption === 'schedule' && !scheduledSlot) {
-      Alert.alert('Pickup time required', 'Please choose a pickup date and time.');
-      return;
-    }
+    if (!validateFields()) return;
     if (!isPickupLocationReady(locations, selectedLocationId)) {
       setLocationError('Please choose which store location you want to pick up from.');
       Alert.alert(
@@ -414,7 +420,7 @@ function CheckoutForm({
         pickupLocationId: toPersistablePickupLocationId(selectedLocation) || undefined,
       });
 
-      const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
+      let { error: confirmError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
           payment_method_data: {
@@ -429,36 +435,26 @@ function CheckoutForm({
         redirect: 'if_required',
       });
 
+      if (confirmError?.code === 'payment_intent_unexpected_state' && clientSecret) {
+        const retrieved = await stripe.retrievePaymentIntent(clientSecret);
+        if (retrieved.paymentIntent?.status === 'succeeded') {
+          confirmError = undefined;
+          paymentIntent = retrieved.paymentIntent;
+        }
+      }
+
       if (confirmError) {
-        Alert.alert('Payment Failed', confirmError.message);
+        Alert.alert(
+          'Payment Failed',
+          confirmError.message,
+        );
         return;
       }
 
       const order = await createOrder({
         restaurantId: restaurant.id,
-        customerName: name,
-        customerPhone: phone,
-        customerEmail: email,
-        items: items.map(({ id, name: itemName, price, quantity, specialInstructions, selectedModifiers, image_url }) => ({
-          id,
-          name: itemName,
-          price,
-          quantity,
-          special_instructions: specialInstructions || '',
-          selected_modifiers: selectedModifiers || [],
-          image_url: image_url || null,
-        })),
-        subtotal: cartSubtotal,
-        tax,
-        total,
-        orderType: 'pickup',
-        scheduledTime: scheduledTimeIso,
-        notes: notes || null,
         paymentIntentId: paymentIntent?.id,
-        promoCodeId: appliedPromo?.id || null,
-        promoCode: appliedPromo?.code || null,
-        discountAmount: discountAmount || 0,
-        pickupLocationId: toPersistablePickupLocationId(selectedLocation),
+        clientSecret: paymentIntent?.client_secret || clientSecret,
       });
 
       let pointsEarned = 0;
@@ -511,7 +507,10 @@ function CheckoutForm({
       saveConfirmationPayload(confirmationPayload);
       navigation.replace('Confirmation', confirmationPayload);
     } catch (err) {
-      Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
+      Alert.alert(
+        'Error',
+        err.message || 'Something went wrong. Please try again.',
+      );
     } finally {
       submittingRef.current = false;
       setLoading(false);
@@ -566,7 +565,7 @@ function CheckoutForm({
               value={contact.name}
               onChangeText={(name) => {
                 setContact((c) => ({ ...c, name }));
-                if (errors.name) setErrors((e) => ({ ...e, name: undefined }));
+                if (errors.name) clearFieldError('name');
               }}
               autoCapitalize="words"
             />
@@ -582,7 +581,7 @@ function CheckoutForm({
               value={contact.phone}
               onChangeText={(phone) => {
                 setContact((c) => ({ ...c, phone }));
-                if (errors.phone) setErrors((e) => ({ ...e, phone: undefined }));
+                if (errors.phone) clearFieldError('phone');
               }}
               keyboardType="phone-pad"
             />
@@ -599,7 +598,7 @@ function CheckoutForm({
           value={contact.email}
           onChangeText={(email) => {
             setContact((c) => ({ ...c, email }));
-            if (errors.email) setErrors((e) => ({ ...e, email: undefined }));
+            if (errors.email) clearFieldError('email');
           }}
           keyboardType="email-address"
           autoCapitalize="none"
@@ -660,6 +659,7 @@ function CheckoutForm({
                     onPress={() => {
                       setScheduledSlot(null);
                       setReadyOption(opt.key);
+                      clearFieldError('pickupTime');
                     }}
                   >
                     <Text style={[s.timeChipText, selected && { color: '#fff' }]}>{opt.label}</Text>
@@ -673,6 +673,7 @@ function CheckoutForm({
                     backgroundColor: theme.colors.brand,
                     borderColor: theme.colors.brand,
                   },
+                  errors.pickupTime && s.inputError,
                 ]}
                 onPress={() => {
                   setReadyOption('schedule');
@@ -695,6 +696,7 @@ function CheckoutForm({
             style={[
               s.scheduleBtn,
               scheduledSlot && { borderColor: theme.colors.brand },
+              errors.pickupTime && s.inputError,
             ]}
             onPress={() => setScheduleVisible(true)}
           >
@@ -706,6 +708,7 @@ function CheckoutForm({
             </Text>
           </TouchableOpacity>
         )}
+        {errors.pickupTime ? <Text style={s.errorText}>{errors.pickupTime}</Text> : null}
 
         <View style={{ marginTop: 20 }}>
           <PickupLocationPicker
@@ -739,6 +742,7 @@ function CheckoutForm({
         onSelect={(slot) => {
           setScheduledSlot(slot);
           setReadyOption('schedule');
+          clearFieldError('pickupTime');
         }}
       />
 
@@ -981,7 +985,7 @@ export default function CheckoutScreen({ navigation }) {
   const stripePromise = useMemo(() => {
     const pk = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     if (!pk) return null;
-    return loadStripe(pk);
+    return loadStripeForCheckout(pk);
   }, []);
 
   // Create / resume PaymentIntent. Same idempotencyKey updates the PI when the cart changes.
@@ -1152,6 +1156,7 @@ export default function CheckoutScreen({ navigation }) {
             setSummaryOpen={setSummaryOpen}
             paymentReady={paymentReady}
             chargeTotal={chargeTotal}
+            clientSecret={clientSecret}
             onGuestSignIn={() => setSignInVisible(true)}
             piSucceeded={piSucceeded}
           />
