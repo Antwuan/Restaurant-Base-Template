@@ -8,6 +8,7 @@
  */
 
 export { ThemeProvider, useTheme } from './themeProvider';
+export { readBrandCache, writeBrandCache, NEUTRAL_THEME_COLOR } from './brandCache';
 export {
   generateTheme,
   generateScale,

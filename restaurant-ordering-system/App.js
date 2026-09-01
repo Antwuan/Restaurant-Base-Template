@@ -1,13 +1,13 @@
 import React from 'react';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 
 import { RestaurantProvider, useRestaurantContext } from './src/context/RestaurantContext';
 import { AuthProvider } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
 import { PickupLocationProvider } from './src/context/PickupLocationContext';
-import { ThemeProvider, useTheme, buildPaperTheme } from './src/theme';
+import { ThemeProvider, useTheme, buildPaperTheme, readBrandCache, NEUTRAL_THEME_COLOR } from './src/theme';
 import RootNavigator from './src/navigation/RootNavigator';
 import { GlobalConfirmModal } from './src/components/ConfirmModal';
 
@@ -28,6 +28,16 @@ const AppContent = () => {
             ? 'Your admin account must be linked in the restaurant_staff table. See supabase/migrations/20260612_admin_rls.sql.'
             : 'Please check the URL or contact support.'}
         </Text>
+      </View>
+    );
+  }
+
+  // First visit (no hostname cache): keep chrome unmounted so navbar/hero
+  // cannot paint the default blue before the restaurant fetch finishes.
+  if (loading && !restaurant && !readBrandCache()) {
+    return (
+      <View style={[styles.center, styles.neutralLoader]}>
+        <ActivityIndicator size="large" color="#9ca3af" />
       </View>
     );
   }
@@ -82,6 +92,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#fff',
     padding: 20,
+  },
+  neutralLoader: {
+    backgroundColor: NEUTRAL_THEME_COLOR,
   },
   errorText: {
     fontSize: 20,

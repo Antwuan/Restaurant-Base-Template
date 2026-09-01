@@ -36,6 +36,7 @@ import {
   writeCheckoutAttempt,
   readCheckoutAttempt,
   clearCheckoutAttempt,
+  isConnectOnboardingError,
   retrievePaymentIntent,
   getPaymentReturnUrl,
   serializeCheckoutItems,
@@ -507,6 +508,9 @@ function CheckoutForm({
       saveConfirmationPayload(confirmationPayload);
       navigation.replace('Confirmation', confirmationPayload);
     } catch (err) {
+      if (isConnectOnboardingError(err.message) && restaurant?.id) {
+        clearCheckoutAttempt(restaurant.id, 'checkout');
+      }
       Alert.alert(
         'Error',
         err.message || 'Something went wrong. Please try again.',
@@ -1062,7 +1066,12 @@ export default function CheckoutScreen({ navigation }) {
         setPiSucceeded(false);
         cartFingerprintRef.current = cartFingerprint;
       } catch (e) {
-        if (!cancelled) setPiError(e.message);
+        if (!cancelled) {
+          if (isConnectOnboardingError(e.message) && restaurant?.id) {
+            clearCheckoutAttempt(restaurant.id, 'checkout');
+          }
+          setPiError(e.message);
+        }
       } finally {
         if (!cancelled) setPiLoading(false);
       }

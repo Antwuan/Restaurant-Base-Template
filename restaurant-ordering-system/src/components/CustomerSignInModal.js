@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../theme';
 import { syncMarketingContact } from '../services/emailApi';
 import * as customerService from '../services/customerService';
 import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
@@ -26,6 +27,7 @@ const STAFF_WARNING =
 
 export default function CustomerSignInModal({ visible, onClose }) {
   const { restaurant } = useRestaurantContext();
+  const { theme } = useTheme();
   const {
     user,
     customerProfile,
@@ -420,7 +422,8 @@ export default function CustomerSignInModal({ visible, onClose }) {
   };
 
   const signedInAsCustomer = isCustomerAuthenticated && !roleLoading;
-  const brandColor = restaurant?.brand_color || '#007AFF';
+  const brandColor = theme.colors.brand;
+  const brandLight = theme.colors.brandLight;
   const displayEmail = customerProfile?.email || user?.email || '';
 
   const cardInner = (
@@ -532,26 +535,36 @@ export default function CustomerSignInModal({ visible, onClose }) {
               <>
                 <View style={styles.tabs}>
                   <TouchableOpacity
-                    style={[styles.tab, mode === 'signin' && styles.tabActive]}
+                    style={[
+                      styles.tab,
+                      mode === 'signin' && styles.tabActive,
+                      mode === 'signin' && { backgroundColor: brandLight },
+                    ]}
                     onPress={() => switchMode('signin')}
                   >
                     <Text
                       style={[
                         styles.tabText,
                         mode === 'signin' && styles.tabTextActive,
+                        mode === 'signin' && { color: brandColor },
                       ]}
                     >
                       Sign in
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.tab, mode === 'signup' && styles.tabActive]}
+                    style={[
+                      styles.tab,
+                      mode === 'signup' && styles.tabActive,
+                      mode === 'signup' && { backgroundColor: brandLight },
+                    ]}
                     onPress={() => switchMode('signup')}
                   >
                     <Text
                       style={[
                         styles.tabText,
                         mode === 'signup' && styles.tabTextActive,
+                        mode === 'signup' && { color: brandColor },
                       ]}
                     >
                       Create account
@@ -685,7 +698,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
                   disabled={loading}
                 >
                   {loading ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={theme.colors.brandText || '#fff'} />
                   ) : (
                     <Text style={styles.buttonText}>
                       {mode === 'signin' ? 'Sign in' : 'Create account'}
@@ -701,6 +714,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
   if (mobileSheet) {
     return (
       <BottomSheet visible={visible} onClose={onClose} keyboard>
+        <View style={[styles.brandStripe, { backgroundColor: brandColor }]} />
         <View style={styles.sheetCard}>{cardInner}</View>
       </BottomSheet>
     );
@@ -719,7 +733,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={styles.card}>{cardInner}</View>
+        <View style={[styles.card, { borderTopColor: brandColor }]}>{cardInner}</View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -744,15 +758,21 @@ const styles = StyleSheet.create({
     maxWidth: 460,
     width: '100%',
     maxHeight: '90%',
+    borderTopWidth: 4,
     ...Platform.select({
       web: { boxShadow: '0 8px 40px rgba(0,0,0,0.22)' },
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 16 },
       android: { elevation: 12 },
     }),
   },
+  brandStripe: {
+    height: 4,
+    width: '100%',
+  },
   sheetCard: {
     padding: 28,
     paddingTop: 12,
+    position: 'relative',
   },
   closeBtn: {
     position: 'absolute',

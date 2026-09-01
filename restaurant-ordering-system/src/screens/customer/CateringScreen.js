@@ -33,6 +33,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../theme';
 import MenuItemModal from '../../components/MenuItemModal';
 import MenuItem from '../../components/MenuItem';
+import { QuantityStepper } from '../../components/motion';
 import OrderSummary from '../../components/OrderSummary';
 import PromoCodeInput from '../../components/PromoCodeInput';
 import PickupLocationPicker, {
@@ -40,7 +41,7 @@ import PickupLocationPicker, {
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
 import BottomSheet, { useMobileBottomSheet } from '../../components/BottomSheet';
-import { createPaymentIntent, getPaymentMethodSummary, getOrCreateIdempotencyKey, writeCheckoutAttempt, readCheckoutAttempt, clearCheckoutAttempt, retrievePaymentIntent, getPaymentReturnUrl, serializeCheckoutItems, loadStripeForCheckout } from '../../services/stripeApi';
+import { createPaymentIntent, getPaymentMethodSummary, getOrCreateIdempotencyKey, writeCheckoutAttempt, readCheckoutAttempt, clearCheckoutAttempt, isConnectOnboardingError, retrievePaymentIntent, getPaymentReturnUrl, serializeCheckoutItems, loadStripeForCheckout } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
@@ -464,6 +465,9 @@ function CateringCheckoutForm({
       saveConfirmationPayload(confirmationPayload);
       navigation.replace('Confirmation', confirmationPayload);
     } catch (err) {
+      if (isConnectOnboardingError(err.message) && restaurant?.id) {
+        clearCheckoutAttempt(restaurant.id, 'catering');
+      }
       Alert.alert(
         'Error',
         err.message || 'Something went wrong. Please try again.',
@@ -1095,6 +1099,9 @@ export default function CateringScreen({ navigation }) {
     try {
       await ensureCateringPaymentIntent();
     } catch (e) {
+      if (isConnectOnboardingError(e.message) && restaurant?.id) {
+        clearCheckoutAttempt(restaurant.id, 'catering');
+      }
       setPiError(e.message);
     } finally {
       setPiLoading(false);
@@ -1115,7 +1122,12 @@ export default function CateringScreen({ navigation }) {
       try {
         await ensureCateringPaymentIntent();
       } catch (e) {
-        if (!cancelled) setPiError(e.message);
+        if (!cancelled) {
+          if (isConnectOnboardingError(e.message) && restaurant?.id) {
+            clearCheckoutAttempt(restaurant.id, 'catering');
+          }
+          setPiError(e.message);
+        }
       } finally {
         if (!cancelled) setPiLoading(false);
       }
@@ -1374,27 +1386,14 @@ export default function CateringScreen({ navigation }) {
                           </View>
                         )}
                       </View>
-                      <View style={s.qtyControls}>
-                        <TouchableOpacity
-                          style={s.qtyBtn}
-                          onPress={() => updateQuantity(item.id, item.quantity - 1, item.specialInstructions, 'catering', item.selectedModifiers)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Decrease quantity of ${item.name}`}
-                        >
-                          <Ionicons name="remove" size={14} color="#555" />
-                        </TouchableOpacity>
-                        <Text style={s.qtyText}>{item.quantity}</Text>
-                        <TouchableOpacity
-                          style={s.qtyBtn}
-                          onPress={() => updateQuantity(item.id, item.quantity + 1, item.specialInstructions, 'catering', item.selectedModifiers)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Increase quantity of ${item.name}`}
-                        >
-                          <Ionicons name="add" size={14} color="#555" />
-                        </TouchableOpacity>
-                      </View>
+                      <QuantityStepper
+                        variant="compact"
+                        value={item.quantity}
+                        onDecrease={() => updateQuantity(item.id, item.quantity - 1, item.specialInstructions, 'catering', item.selectedModifiers)}
+                        onIncrease={() => updateQuantity(item.id, item.quantity + 1, item.specialInstructions, 'catering', item.selectedModifiers)}
+                        decreaseLabel={`Decrease quantity of ${item.name}`}
+                        increaseLabel={`Increase quantity of ${item.name}`}
+                      />
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={s.cartItemName} numberOfLines={2}>{item.name}</Text>
                         {Array.isArray(item.selectedModifiers) && item.selectedModifiers.length > 0 ? (
@@ -1595,17 +1594,6 @@ const s = StyleSheet.create({
   },
   cartThumb: { width: '100%', height: '100%' },
   cartThumbPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6' },
-  qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
-  qtyBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  qtyText: { fontSize: 13, fontWeight: '700', color: '#111', minWidth: 18, textAlign: 'center' },
   cartItemName: { fontSize: 13, color: '#333', fontWeight: '500' },
   cartItemMods: { fontSize: 11, color: '#888', marginTop: 2 },
   cartItemPrice: { fontSize: 13, fontWeight: '600', color: '#111', flexShrink: 0 },
