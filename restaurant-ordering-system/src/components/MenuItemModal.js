@@ -18,7 +18,29 @@ import { useTheme } from '../theme';
 import { useAuth } from '../context/AuthContext';
 import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 import CustomerSignInModal from './CustomerSignInModal';
+import { QuantityStepper } from './motion';
 import { itemRequiresCustomization } from '../utils/menuCustomization';
+
+function RequiredChip({ complete }) {
+  return (
+    <View
+      style={[
+        chip.pill,
+        complete ? chip.pillComplete : chip.pillIncomplete,
+      ]}
+      accessibilityLabel={complete ? 'Required, complete' : 'Required'}
+    >
+      {complete ? (
+        <View style={chip.checkCircle} accessibilityElementsHidden>
+          <Ionicons name="checkmark" size={9} color="#F0FDF4" />
+        </View>
+      ) : null}
+      <Text style={[chip.label, complete ? chip.labelComplete : chip.labelIncomplete]}>
+        Required
+      </Text>
+    </View>
+  );
+}
 
 /* ─────────────────────────────────────────────────────────
    Suggestion card — toggle on/off; does NOT immediately add to cart
@@ -97,7 +119,6 @@ export default function MenuItemModal({
   const [signInVisible, setSignInVisible] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addSuccess, setAddSuccess] = useState(false);
-  const addBtnScale = useRef(new Animated.Value(1)).current;
 
   // Entrance animation — scale + fade
   const cardScale = useRef(new Animated.Value(0.88)).current;
@@ -114,7 +135,6 @@ export default function MenuItemModal({
       setModifierError('');
       setAdding(false);
       setAddSuccess(false);
-      addBtnScale.setValue(1);
       setSignInVisible(false);
 
       const defaults = {};
@@ -122,9 +142,7 @@ export default function MenuItemModal({
         const available = (g.options || []).filter((o) => o.is_available !== false);
         const defaultOpts = available.filter((o) => o.is_default).map((o) => o.id);
         if (g.selection_type === 'single') {
-          defaults[g.id] = defaultOpts.length
-            ? [defaultOpts[0]]
-            : (g.is_required && available[0] ? [available[0].id] : []);
+          defaults[g.id] = defaultOpts.length ? [defaultOpts[0]] : [];
         } else {
           defaults[g.id] = defaultOpts;
         }
@@ -246,19 +264,6 @@ export default function MenuItemModal({
     setAddSuccess(true);
     setModifierError('');
 
-    Animated.sequence([
-      Animated.timing(addBtnScale, {
-        toValue: 0.96,
-        duration: 90,
-        useNativeDriver: true,
-      }),
-      Animated.timing(addBtnScale, {
-        toValue: 1,
-        duration: 140,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
     // Brief success state on the button, then commit + close
     setTimeout(() => {
       onAddToCart(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
@@ -331,14 +336,16 @@ export default function MenuItemModal({
                 {modifierGroups.map((group) => {
                   const selectedIds = selectedByGroup[group.id] || [];
                   const available = (group.options || []).filter((o) => o.is_available !== false);
+                  const requiredMin = Math.max(1, group.min_select || 1);
+                  const requiredComplete = selectedIds.length >= requiredMin;
                   return (
                     <View key={group.id} style={styles.section}>
-                      <Text style={styles.sectionTitle}>
-                        {group.name}
+                      <View style={styles.sectionTitleRow}>
+                        <Text style={[styles.sectionTitle, styles.sectionTitleInRow]}>{group.name}</Text>
                         {group.is_required ? (
-                          <Text style={styles.requiredMark}> · Required</Text>
+                          <RequiredChip complete={requiredComplete} />
                         ) : null}
-                      </Text>
+                      </View>
                       <Text style={styles.sectionSubtitle}>
                         {group.selection_type === 'single'
                           ? 'Choose one'
@@ -501,76 +508,58 @@ export default function MenuItemModal({
 
           {!isUnavailable && (
             <View style={styles.footer}>
-              <View style={styles.stepper}>
-                <TouchableOpacity
-                  style={[styles.stepperBtn, quantity <= 1 && styles.stepperBtnDisabled]}
-                  onPress={handleDecrease}
-                  accessibilityLabel="Decrease quantity"
-                  accessibilityRole="button"
-                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                >
-                  <Ionicons name="remove" size={20} color={quantity <= 1 ? '#ccc' : '#333'} />
-                </TouchableOpacity>
-                <Text style={styles.stepperCount} accessibilityLabel={`Quantity ${quantity}`}>
-                  {quantity}
-                </Text>
-                <TouchableOpacity
-                  style={styles.stepperBtn}
-                  onPress={handleIncrease}
-                  accessibilityLabel="Increase quantity"
-                  accessibilityRole="button"
-                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                >
-                  <Ionicons name="add" size={20} color="#333" />
-                </TouchableOpacity>
-              </View>
+              <QuantityStepper
+                variant="modal"
+                value={quantity}
+                onDecrease={handleDecrease}
+                onIncrease={handleIncrease}
+                min={1}
+              />
 
-              <Animated.View style={{ flex: 1, transform: [{ scale: addBtnScale }] }}>
-                <TouchableOpacity
-                  style={[
-                    styles.addBtn,
-                    {
-                      backgroundColor: addSuccess
-                        ? (theme.colors.brandDark || theme.colors.brand)
-                        : theme.colors.brand,
-                    },
-                    (adding || addSuccess) && styles.addBtnDisabled,
-                  ]}
-                  onPress={handleAdd}
-                  activeOpacity={0.85}
-                  disabled={adding || addSuccess}
-                >
-                  {addSuccess ? (
-                    <>
-                      <View style={styles.addBtnSuccessRow}>
-                        <Ionicons
-                          name="checkmark-circle"
-                          size={20}
-                          color={theme.colors.brandText || '#fff'}
-                        />
-                        <Text style={styles.addBtnText}>Added to cart</Text>
-                      </View>
-                      <View style={styles.addBtnPricePill}>
-                        <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
-                          ${totalPrice}
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.addBtnText}>
-                        {adding ? 'Adding…' : 'Add to cart'}
+              <TouchableOpacity
+                style={[
+                  styles.addBtn,
+                  {
+                    backgroundColor: addSuccess
+                      ? (theme.colors.brandDark || theme.colors.brand)
+                      : theme.colors.brand,
+                  },
+                  (adding || addSuccess) && styles.addBtnDisabled,
+                ]}
+                onPress={handleAdd}
+                activeOpacity={0.85}
+                disabled={adding || addSuccess}
+              >
+                {addSuccess ? (
+                  <>
+                    <View style={styles.addBtnSuccessRow}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color={theme.colors.brandText || '#fff'}
+                      />
+                      <Text style={styles.addBtnText}>Added to cart</Text>
+                    </View>
+                    <View style={styles.addBtnPricePill}>
+                      <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
+                        ${totalPrice}
                       </Text>
-                      <View style={styles.addBtnPricePill}>
-                        <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
-                          ${totalPrice}
-                        </Text>
-                        <Ionicons name="chevron-forward" size={14} color={theme.colors.brand} />
-                      </View>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </Animated.View>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.addBtnText}>
+                      {adding ? 'Adding…' : 'Add to cart'}
+                    </Text>
+                    <View style={styles.addBtnPricePill}>
+                      <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
+                        ${totalPrice}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={14} color={theme.colors.brand} />
+                    </View>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           )}
     </>
@@ -748,16 +737,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 6,
+  },
   sectionTitle: {
     fontSize: 17,
     fontWeight: '700',
     color: '#111',
     marginBottom: 6,
   },
-  requiredMark: {
-    color: '#92400e',
-    fontWeight: '700',
-    fontSize: 14,
+  sectionTitleInRow: {
+    marginBottom: 0,
   },
   sectionSubtitle: {
     fontSize: 13,
@@ -852,31 +846,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#e5e7eb',
     backgroundColor: '#fff',
-  },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  stepperBtn: {
-    width: 40,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-  },
-  stepperBtnDisabled: {
-    backgroundColor: '#fafafa',
-  },
-  stepperCount: {
-    width: 36,
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111',
   },
   addBtn: {
     flex: 1,
@@ -979,5 +948,43 @@ const sug = StyleSheet.create({
   toggleBtnDisabled: {
     backgroundColor: '#f3f4f6',
     borderColor: '#e5e7eb',
+  },
+});
+
+const chip = StyleSheet.create({
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    flexShrink: 0,
+    minHeight: 20,
+  },
+  pillIncomplete: {
+    backgroundColor: '#E5E7EB',
+  },
+  pillComplete: {
+    backgroundColor: '#F0FDF4',
+  },
+  checkCircle: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#166534',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  labelIncomplete: {
+    color: '#4B5563',
+  },
+  labelComplete: {
+    color: '#166534',
   },
 });

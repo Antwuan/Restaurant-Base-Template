@@ -17,6 +17,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import { restaurantService } from '../services/restaurantService';
 import { useAuth } from './AuthContext';
 import { isStaffForRestaurant } from '../services/authService';
+import { writeBrandCache } from '../theme/brandCache';
 
 const RestaurantContext = createContext(null);
 
@@ -209,6 +210,10 @@ export function RestaurantProvider({ children }) {
       setRestaurant(data);
       if (identifier.type === 'slug') {
         persistSlug(identifier.value);
+      }
+
+      if (data.primary_color) {
+        writeBrandCache({ primary: data.primary_color, name: data.name });
       }
 
       const themeColorMeta = document.querySelector('meta[name="theme-color"]');

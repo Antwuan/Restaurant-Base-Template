@@ -302,16 +302,6 @@ export default function CartPanel({ onClose, onCheckout }) {
 
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={styles.continueSmall}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Add more items"
-        >
-          <Text style={[styles.continueSmallText, { color: theme.colors.brand }]}>
-            + Add More
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           style={[
             styles.checkoutBtn,
             {
@@ -513,16 +503,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
     gap: 10,
-  },
-  continueSmall: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  continueSmallText: {
-    fontSize: 15,
-    fontWeight: '600',
   },
   checkoutBtn: {
     flex: 1,

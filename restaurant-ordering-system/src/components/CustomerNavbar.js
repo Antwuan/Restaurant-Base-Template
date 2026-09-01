@@ -415,12 +415,12 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
             ) : (
               <View style={styles.logoPlaceholder}>
                 <Text style={styles.logoInitial}>
-                  {restaurant?.name?.charAt(0).toUpperCase() || 'R'}
+                  {(restaurant?.name || theme.restaurant?.name)?.charAt(0).toUpperCase() || 'R'}
                 </Text>
               </View>
             )}
             <Text style={styles.restaurantName} numberOfLines={1}>
-              {restaurant?.name || 'Restaurant'}
+              {restaurant?.name || theme.restaurant?.name || 'Restaurant'}
             </Text>
           </TouchableOpacity>
 

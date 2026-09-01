@@ -13,7 +13,7 @@ import {
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '../theme';
+import { QuantityStepper } from './motion';
 
 const MAX_QTY = 99;
 const THUMB = 64;
@@ -25,8 +25,6 @@ function formatMoney(value) {
 }
 
 const CartItem = ({ item, onIncrease, onDecrease, onRemove }) => {
-  const { theme } = useTheme();
-  const primary = theme.colors.brand;
   const qty = Math.max(0, Math.min(MAX_QTY, Number(item.quantity) || 0));
   const unit = Number(item.price);
   const lineTotal = Number.isFinite(unit) ? unit * qty : 0;
@@ -88,48 +86,19 @@ const CartItem = ({ item, onIncrease, onDecrease, onRemove }) => {
           <Text style={styles.removeText}>Remove</Text>
         </TouchableOpacity>
 
-        <View style={styles.qtyControls}>
-          <TouchableOpacity
-            onPress={onDecrease}
-            style={[styles.qtyButton, { borderColor: primary }]}
-            accessibilityRole="button"
-            accessibilityLabel={atMin ? `Remove ${name}` : `Decrease quantity of ${name}`}
-            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-          >
-            <Text style={[styles.qtyButtonText, { color: primary }]}>−</Text>
-          </TouchableOpacity>
-
-          <Text
-            style={styles.qtyText}
-            accessibilityLabel={`Quantity ${qty}`}
-          >
-            {qty}
-          </Text>
-
-          <TouchableOpacity
-            onPress={onIncrease}
-            disabled={atMax}
-            style={[
-              styles.qtyButton,
-              {
-                backgroundColor: atMax ? '#e5e7eb' : primary,
-                borderColor: atMax ? '#e5e7eb' : primary,
-              },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={
-              atMax
-                ? `Maximum quantity of ${MAX_QTY} reached`
-                : `Increase quantity of ${name}`
-            }
-            accessibilityState={{ disabled: atMax }}
-            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-          >
-            <Text style={[styles.qtyButtonText, { color: atMax ? '#9ca3af' : '#fff' }]}>
-              +
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <QuantityStepper
+          variant="modal"
+          value={qty}
+          onDecrease={onDecrease}
+          onIncrease={onIncrease}
+          max={MAX_QTY}
+          decreaseLabel={atMin ? `Remove ${name}` : `Decrease quantity of ${name}`}
+          increaseLabel={
+            atMax
+              ? `Maximum quantity of ${MAX_QTY} reached`
+              : `Increase quantity of ${name}`
+          }
+        />
       </View>
     </View>
   );
@@ -222,31 +191,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#b91c1c',
     fontWeight: '600',
-  },
-  qtyControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  qtyButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  qtyButtonText: {
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 20,
-  },
-  qtyText: {
-    fontSize: 16,
-    fontWeight: '700',
-    minWidth: 28,
-    textAlign: 'center',
-    color: '#1a1a1a',
   },
 });
 

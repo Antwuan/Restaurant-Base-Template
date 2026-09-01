@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useMemo, useState, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
-import { generateTheme } from './colors';
+import { generateTheme, DEFAULT_PRIMARY, DEFAULT_SECONDARY } from './colors';
+import { readBrandCache } from './brandCache';
 
 const ThemeContext = createContext(null);
 
@@ -57,10 +58,11 @@ export const ThemeProvider = ({ restaurant, children }) => {
 
   const theme = useMemo(() => {
     const darkAllowed = isAdminArea();
+    const cached = restaurant ? null : readBrandCache();
     return generateTheme({
-      primaryColor: restaurant?.primary_color || '#007AFF',
-      secondaryColor: restaurant?.secondary_color || '#5856D6',
-      restaurantName: restaurant?.name || 'Restaurant',
+      primaryColor: restaurant?.primary_color || cached?.primary || DEFAULT_PRIMARY,
+      secondaryColor: restaurant?.secondary_color || DEFAULT_SECONDARY,
+      restaurantName: restaurant?.name || cached?.name || 'Restaurant',
       logoUrl: restaurant?.logo_url || null,
       mode: isDarkMode && darkAllowed ? 'dark' : 'light',
     });

@@ -51,7 +51,7 @@ const AdminNavigator = () => {
           backgroundColor: theme.colors.background,
         }}
       >
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color={theme.colors.brand} />
       </View>
     );
   }

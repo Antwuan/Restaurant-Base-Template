@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useTheme } from '../../theme';
 import { isStaffForRestaurant } from '../../services/authService';
 
 function showAlert(title, message) {
@@ -31,6 +32,8 @@ export default function LoginScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const { signIn, signOut } = useAuth();
   const { restaurant, adminLoginError, setAdminLoginError } = useRestaurantContext();
+  const { theme } = useTheme();
+  const brandColor = theme.colors.brand;
 
   const notAdminMessage = `This account is not an admin for ${restaurant?.name || 'this restaurant'}.`;
 
@@ -78,7 +81,7 @@ export default function LoginScreen({ navigation }) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.card}>
+      <View style={[styles.card, { borderTopColor: brandColor }]}>
         <Text style={styles.title}>Admin Login</Text>
         <Text style={[styles.subtitle, adminLoginError && styles.subtitleWithBanner]}>
           Sign in to manage your restaurant
@@ -111,19 +114,19 @@ export default function LoginScreen({ navigation }) {
         />
 
         <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
+          style={[styles.button, { backgroundColor: brandColor }, loading && styles.buttonDisabled]}
           onPress={handleLogin}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={theme.colors.brandText || '#fff'} />
           ) : (
             <Text style={styles.buttonText}>Sign In</Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.forgotLink}>
-          <Text style={styles.forgotText}>Forgot Password?</Text>
+          <Text style={[styles.forgotText, { color: brandColor }]}>Forgot Password?</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -144,6 +147,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 32,
+    borderTopWidth: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
@@ -189,14 +193,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fafafa',
   },
   button: {
-    backgroundColor: '#007AFF',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
     marginTop: 6,
   },
   buttonDisabled: {
-    backgroundColor: '#a0c4ff',
+    opacity: 0.6,
   },
   buttonText: {
     color: '#fff',
@@ -208,7 +211,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   forgotText: {
-    color: '#007AFF',
     fontSize: 14,
   },
 });

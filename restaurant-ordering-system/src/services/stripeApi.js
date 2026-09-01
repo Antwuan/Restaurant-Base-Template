@@ -92,7 +92,11 @@ export async function createCheckoutSession({ items, restaurantId, currency = 'u
   }
 
   if (!response.ok) {
-    throw new Error(payload.message || payload.error || 'Failed to initialize checkout.');
+    const errorMessage = payload.message || payload.error || 'Failed to initialize checkout.';
+    if (isConnectOnboardingError(errorMessage) && restaurantId) {
+      clearStoredCheckoutAttempts(restaurantId);
+    }
+    throw new Error(errorMessage);
   }
 
   const { clientSecret } = payload;
@@ -110,6 +114,30 @@ function newIdempotencyKey() {
     return crypto.randomUUID();
   }
   return `ck_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+export const CONNECT_ONBOARDING_ERROR =
+  'Complete Stripe Connect onboarding for this restaurant';
+
+export function isConnectOnboardingError(message) {
+  const text = String(message || '');
+  if (!text) return false;
+  if (/complete stripe connect onboarding for this restaurant/i.test(text)) return true;
+  return (
+    /destination account needs to/i.test(text)
+    || /cannot create a destination charge/i.test(text)
+    || /does not have the [`']?transfers[`']? capability/i.test(text)
+    || /stripe_transfers/i.test(text)
+    || /receive transfers/i.test(text)
+    || /platform account as a destination/i.test(text)
+    || /destination cannot be the same/i.test(text)
+  );
+}
+
+function clearStoredCheckoutAttempts(restaurantId) {
+  if (!restaurantId) return;
+  clearCheckoutAttempt(restaurantId, 'checkout');
+  clearCheckoutAttempt(restaurantId, 'catering');
 }
 
 export function checkoutAttemptStorageKey(restaurantId, kind = 'checkout') {
@@ -273,9 +301,11 @@ export async function createPaymentIntent({
   }
 
   if (!response.ok) {
-    throw new Error(
-      payload.message || payload.error || 'Failed to initialize payment.',
-    );
+    const errorMessage = payload.message || payload.error || 'Failed to initialize payment.';
+    if (isConnectOnboardingError(errorMessage)) {
+      clearStoredCheckoutAttempts(restaurantId);
+    }
+    throw new Error(errorMessage);
   }
 
   const clientSecret = payload.clientSecret || payload.client_secret;

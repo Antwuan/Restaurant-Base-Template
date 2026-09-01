@@ -5,6 +5,7 @@ const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '');
 
 const CONNECT_ONBOARDING_ERROR =
   'Complete Stripe Connect onboarding for this restaurant';
+const V2_STRIPE_VERSION = '2025-12-15.clover';
 
 type V2AccountFields = {
   configuration?: {
@@ -18,20 +19,79 @@ type V2AccountFields = {
   };
 };
 
-function isTransfersActive(account: Stripe.Account): boolean {
-  const v1 = account.capabilities?.transfers;
-  const v2 = (account as Stripe.Account & V2AccountFields).configuration
-    ?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
-  return v1 === 'active' || v2 === 'active';
+function stripeErrorMessage(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const rec = err as { message?: unknown; raw?: { message?: unknown } };
+    if (typeof rec.message === 'string' && rec.message.trim()) return rec.message;
+    if (typeof rec.raw?.message === 'string' && rec.raw.message.trim()) return rec.raw.message;
+  }
+  return err instanceof Error ? err.message : '';
 }
 
-function isTransfersRequested(account: Stripe.Account): boolean {
-  const v1 = account.capabilities?.transfers;
-  if (v1 && v1 !== 'unrequested') return true;
-  const v2 = (account as Stripe.Account & V2AccountFields).configuration
+function isDestinationCapabilityFailure(message: string): boolean {
+  if (!message) return false;
+  if (/complete stripe connect onboarding for this restaurant/i.test(message)) return true;
+  return (
+    /destination account needs to/i.test(message)
+    || /cannot create a destination charge/i.test(message)
+    || /does not have the [`']?transfers[`']? capability/i.test(message)
+    || /stripe_transfers/i.test(message)
+    || /receive transfers/i.test(message)
+    || /platform account as a destination/i.test(message)
+    || /destination cannot be the same/i.test(message)
+  );
+}
+
+function mapCheckoutError(err: unknown): string {
+  const message = stripeErrorMessage(err);
+  if (isDestinationCapabilityFailure(message)) return CONNECT_ONBOARDING_ERROR;
+  return message || 'Internal server error';
+}
+
+function v2TransfersStatus(account: Stripe.Account, extra?: string | null): string | null {
+  const fromAccount = (account as Stripe.Account & V2AccountFields).configuration
     ?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
-  if (v2 && v2 !== 'unrequested') return true;
-  return false;
+  return fromAccount ?? extra ?? null;
+}
+
+function isTransfersActive(account: Stripe.Account, v2Status?: string | null): boolean {
+  return account.capabilities?.transfers === 'active'
+    || v2TransfersStatus(account, v2Status) === 'active';
+}
+
+async function requestV2StripeTransfers(accountId: string): Promise<string | null> {
+  const secret = Deno.env.get('STRIPE_SECRET_KEY') ?? '';
+  if (!secret) return null;
+  try {
+    const res = await fetch(
+      `https://api.stripe.com/v2/core/accounts/${encodeURIComponent(accountId)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${secret}`,
+          'Content-Type': 'application/json',
+          'Stripe-Version': V2_STRIPE_VERSION,
+        },
+        body: JSON.stringify({
+          configuration: {
+            recipient: {
+              capabilities: {
+                stripe_balance: {
+                  stripe_transfers: { requested: true },
+                },
+              },
+            },
+          },
+        }),
+      },
+    );
+    if (!res.ok) return null;
+    const json = await res.json() as V2AccountFields;
+    return json.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status
+      ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Dashboard deploys do not include ../_shared — keep this helper inlined. */
@@ -40,7 +100,7 @@ async function ensureConnectTransfers(stripeClient: Stripe, accountId: string): 
   try {
     account = await stripeClient.accounts.retrieve(accountId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : '';
+    const message = stripeErrorMessage(err);
     if (/no such account|does not exist|capability|transfers/i.test(message)) {
       throw new Error(CONNECT_ONBOARDING_ERROR);
     }
@@ -49,18 +109,37 @@ async function ensureConnectTransfers(stripeClient: Stripe, accountId: string): 
 
   if (isTransfersActive(account)) return;
 
-  if (!isTransfersRequested(account)) {
-    try {
-      account = await stripeClient.accounts.update(accountId, {
-        capabilities: { transfers: { requested: true } },
-      });
-    } catch {
-      // Requesting does not finish onboarding.
-    }
-    if (isTransfersActive(account)) return;
+  try {
+    account = await stripeClient.accounts.update(accountId, {
+      capabilities: { transfers: { requested: true } },
+    });
+  } catch {
+    // Requesting does not finish onboarding.
   }
 
+  const v2Status = await requestV2StripeTransfers(accountId);
+  if (isTransfersActive(account, v2Status)) return;
+
   throw new Error(CONNECT_ONBOARDING_ERROR);
+}
+
+/** Skip destination charges when the destination is the platform account itself. */
+async function resolveDestinationAccount(
+  stripeClient: Stripe,
+  accountId: string | null | undefined,
+): Promise<string | null> {
+  const dest = typeof accountId === 'string' ? accountId.trim() : '';
+  if (!dest) return null;
+
+  try {
+    const platform = await stripeClient.accounts.retrieve();
+    if (platform.id && platform.id === dest) return null;
+  } catch {
+    // If platform lookup fails, still attempt destination charges.
+  }
+
+  await ensureConnectTransfers(stripeClient, dest);
+  return dest;
 }
 
 const corsHeaders = {
@@ -125,10 +204,15 @@ Deno.serve(async (req: Request) => {
 
     // Route payment to restaurant's connected account if configured
     if (restaurant?.stripe_account_id) {
-      await ensureConnectTransfers(stripe, restaurant.stripe_account_id);
-      sessionParams.payment_intent_data = {
-        transfer_data: { destination: restaurant.stripe_account_id },
-      };
+      const destinationAccountId = await resolveDestinationAccount(
+        stripe,
+        restaurant.stripe_account_id,
+      );
+      if (destinationAccountId) {
+        sessionParams.payment_intent_data = {
+          transfer_data: { destination: destinationAccountId },
+        };
+      }
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
@@ -138,7 +222,7 @@ Deno.serve(async (req: Request) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
+    const message = mapCheckoutError(err);
     return new Response(JSON.stringify({ error: message }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

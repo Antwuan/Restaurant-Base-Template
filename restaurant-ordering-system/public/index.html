@@ -19,10 +19,10 @@
 
     <!--
       theme-color: Controls the browser chrome colour on mobile.
-      This default will be overridden at runtime once the restaurant's
-      primary_color is loaded from Supabase.
+      Neutral default until the hostname cache or restaurant fetch applies
+      the restaurant primary_color. Key prefix must match src/theme/brandCache.js.
     -->
-    <meta name="theme-color" content="#007AFF" />
+    <meta name="theme-color" content="#f3f4f6" />
 
     <!-- PWA: makes the site installable on Android home screens -->
     <link rel="manifest" href="/manifest.json" />
@@ -37,6 +37,19 @@
     <link rel="apple-touch-icon" href="/logo192.png" />
 
     <title>Restaurant Ordering</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('restaurant_brand:' + location.hostname);
+          if (!raw) return;
+          var data = JSON.parse(raw);
+          if (!data || !data.primary) return;
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', data.primary);
+          if (data.name) document.title = data.name + ' \u2014 Order Online';
+        } catch (e) {}
+      })();
+    </script>
 
     <!--
       Prevent a flash of unstyled content (FOUC).
