@@ -192,11 +192,22 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: '100%',
     position: 'relative',
+    ...Platform.select({
+      web: {
+        height: '100%',
+        maxHeight: '100%',
+        overflow: 'hidden',
+      },
+    }),
   },
   body: {
     flex: 1,
+    minHeight: 0,
   },
   stackContent: {
     flex: 1,
+    ...Platform.select({
+      web: { height: '100%', overflow: 'hidden' },
+    }),
   },
 });
