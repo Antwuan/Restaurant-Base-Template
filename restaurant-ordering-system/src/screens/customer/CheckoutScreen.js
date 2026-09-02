@@ -15,6 +15,7 @@ import {
   StyleSheet,
   useWindowDimensions,
   Modal,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -635,7 +636,13 @@ function CheckoutForm({
       {/* ── Order Details ────────────────────────── */}
       <View style={s.section}>
         <Text style={s.sectionLabel}>Order Details</Text>
-        <View style={[s.toggleBtn, { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand, flex: 0, paddingHorizontal: 16 }]}>
+        <View
+          style={[
+            s.toggleBtn,
+            !isDesktop && s.toggleBtnMobile,
+            { backgroundColor: theme.colors.brand, borderColor: theme.colors.brand },
+          ]}
+        >
           <Text style={[s.toggleText, { color: '#fff' }]}>Pickup</Text>
         </View>
 
@@ -649,8 +656,12 @@ function CheckoutForm({
         ) : null}
 
         {allowAsap ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-            <View style={s.timeRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={s.timeScroll}
+            contentContainerStyle={s.timeRow}
+          >
               {readyOptions.map((opt) => {
                 const selected = readyOption === opt.key && !scheduledSlot;
                 return (
@@ -693,7 +704,6 @@ function CheckoutForm({
                     : 'Schedule…'}
                 </Text>
               </TouchableOpacity>
-            </View>
           </ScrollView>
         ) : (
           <TouchableOpacity
@@ -859,7 +869,7 @@ function CheckoutForm({
 
 // ─── Outer component — creates PaymentIntent on load ──────────────────────────
 export default function CheckoutScreen({ navigation }) {
-  const { restaurant } = useRestaurantContext();
+  const { restaurant, loading: restaurantLoading } = useRestaurantContext();
   const { items, subtotal: cartSubtotal } = useCartContext();
   const { theme } = useTheme();
   const { user, customerProfile, isCustomerAuthenticated } = useAuth();
@@ -1096,6 +1106,7 @@ export default function CheckoutScreen({ navigation }) {
   };
 
   const s = makePageStyles(theme);
+  const restaurantReady = Boolean(restaurant?.id) && !restaurantLoading;
 
   if (!process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
     return (
@@ -1103,6 +1114,17 @@ export default function CheckoutScreen({ navigation }) {
         <Text style={s.errorMsg}>
           Set EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY in .env to accept payments.
         </Text>
+      </View>
+    );
+  }
+
+  if (!restaurantReady) {
+    return (
+      <View style={s.page}>
+        <View style={s.loadingWrap}>
+          <ActivityIndicator size="large" color={theme.colors.brand} />
+          <Text style={s.loadingText}>Preparing checkout…</Text>
+        </View>
       </View>
     );
   }
@@ -1118,7 +1140,10 @@ export default function CheckoutScreen({ navigation }) {
   }
 
   return (
-    <ScrollView style={s.page} contentContainerStyle={s.pageContent}>
+    <ScrollView
+      style={s.page}
+      contentContainerStyle={s.pageContent}
+    >
       <View style={[s.header, isDesktop && s.headerDesktop]}>
         {restaurant?.name ? (
           <Text style={s.restaurantName}>{restaurant.name}</Text>
@@ -1131,7 +1156,7 @@ export default function CheckoutScreen({ navigation }) {
           <ActivityIndicator size="large" color={theme.colors.brand} />
           <Text style={s.loadingText}>Preparing checkout…</Text>
         </View>
-      ) : piError && !clientSecret ? (
+      ) : !piLoading && piError && !clientSecret ? (
         <View style={s.errorPage}>
           <Text style={s.errorMsg}>{piError}</Text>
         </View>
@@ -1366,21 +1391,55 @@ function makeFormStyles(theme) {
       gap: 10,
     },
     toggleBtn: {
-      flex: 1,
+      flexGrow: 0,
+      flexShrink: 0,
+      alignSelf: 'flex-start',
       borderWidth: 1.5,
       borderColor: '#e3e8ee',
-      borderRadius: 8,
-      paddingVertical: 11,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 8,
+      minHeight: 36,
       alignItems: 'center',
+      justifyContent: 'center',
+      ...Platform.select({
+        web: { width: 'fit-content', display: 'inline-flex' },
+        default: {},
+      }),
+    },
+    toggleBtnMobile: {
+      alignSelf: 'stretch',
+      width: '100%',
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingTop: 14,
+      paddingBottom: 14,
+      minHeight: 48,
+      ...Platform.select({
+        web: { width: '100%', display: 'flex' },
+        default: {},
+      }),
     },
     toggleText: {
       fontSize: 15,
       fontWeight: '600',
       color: '#697386',
+      lineHeight: 20,
+      ...Platform.select({
+        android: { includeFontPadding: false },
+        default: {},
+      }),
     },
 
+    timeScroll: {
+      marginTop: 8,
+      flexGrow: 0,
+      flexShrink: 0,
+    },
     timeRow: {
       flexDirection: 'row',
+      alignItems: 'center',
       gap: 8,
       paddingRight: 16,
     },
@@ -1389,12 +1448,21 @@ function makeFormStyles(theme) {
       borderColor: '#e3e8ee',
       borderRadius: 20,
       paddingHorizontal: 16,
-      paddingVertical: 8,
+      paddingTop: 8,
+      paddingBottom: 8,
+      minHeight: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     timeChipText: {
       fontSize: 14,
       fontWeight: '500',
       color: '#697386',
+      lineHeight: 18,
+      ...Platform.select({
+        android: { includeFontPadding: false },
+        default: {},
+      }),
     },
     scheduleBtn: {
       marginTop: 8,

@@ -15,8 +15,11 @@ import CateringScreen from '../screens/customer/CateringScreen';
 import ReviewScreen from '../screens/customer/ReviewScreen';
 import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
+import ViewCartBar, { VIEW_CART_BAR_PADDING } from '../components/ViewCartBar';
 import { usePickupLocation } from '../context/PickupLocationContext';
+import { useCartContext } from '../context/CartContext';
 import { NavbarCollapseProvider } from '../context/NavbarCollapseContext';
+import { useMobileBottomSheet } from '../components/BottomSheet';
 
 // JS stack on web: native-stack keeps prior routes in document flow in static
 // Expo exports, which stacked a second CustomerNavbar under Home.
@@ -28,13 +31,18 @@ function ScreenChrome({
   route,
   currentRoute,
   withCart = false,
+  withViewCart = false,
   children,
 }) {
   const [cartOpen, setCartOpen] = useState(false);
   const { hasSelection, needsChoice } = usePickupLocation();
+  const { itemCount } = useCartContext();
+  const mobileSheet = useMobileBottomSheet();
 
   const openCart = useCallback(() => setCartOpen(true), []);
   const closeCart = useCallback(() => setCartOpen(false), []);
+
+  const showViewCartBar = withViewCart && mobileSheet && itemCount > 0 && !cartOpen;
 
   useEffect(() => {
     if (withCart && route.params?.openCart) {
@@ -56,7 +64,12 @@ function ScreenChrome({
         currentRoute={currentRoute}
         onOpenCart={withCart ? openCart : undefined}
       />
-      <View style={styles.body}>{children}</View>
+      <View style={[styles.body, showViewCartBar && { paddingBottom: VIEW_CART_BAR_PADDING }]}>
+        {children}
+      </View>
+      {showViewCartBar ? (
+        <ViewCartBar itemCount={itemCount} onPress={openCart} />
+      ) : null}
       {withCart ? (
         <CartDrawer
           visible={cartOpen}
@@ -78,7 +91,7 @@ function HomeScreenWithCart({ navigation, route }) {
 
 function MenuScreenWithCart({ navigation, route }) {
   return (
-    <ScreenChrome navigation={navigation} route={route} currentRoute="Menu" withCart>
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Menu" withCart withViewCart>
       <MenuScreen />
     </ScreenChrome>
   );
@@ -178,6 +191,7 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     minHeight: '100%',
+    position: 'relative',
   },
   body: {
     flex: 1,

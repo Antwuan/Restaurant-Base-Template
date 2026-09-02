@@ -22,8 +22,6 @@ import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
-const STAFF_WARNING =
-  'This email is registered for admin access. Please sign in at /admin instead.';
 
 export default function CustomerSignInModal({ visible, onClose }) {
   const { restaurant } = useRestaurantContext();
@@ -35,7 +33,6 @@ export default function CustomerSignInModal({ visible, onClose }) {
     signUp,
     signOut,
     linkCustomer,
-    isStaffUser,
     refreshCustomerProfile,
     isCustomerAuthenticated,
     roleLoading,
@@ -190,10 +187,6 @@ export default function CustomerSignInModal({ visible, onClose }) {
   const showCardError = (text) => setCardMessage({ type: 'error', text });
   const showCardInfo = (text) => setCardMessage({ type: 'info', text });
 
-  const showStaffWarning = () => {
-    setCardMessage({ type: 'warning', text: STAFF_WARNING });
-  };
-
   const handleSignIn = async () => {
     if (!restaurant?.id) {
       showCardError('Restaurant is still loading. Please try again in a moment.');
@@ -216,13 +209,6 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
       if (!signedInUser) {
         showCardError('Could not sign in. Please try again.');
-        return;
-      }
-
-      const isStaff = await isStaffUser(signedInUser.id);
-      if (isStaff) {
-        await signOut();
-        showStaffWarning();
         return;
       }
 
@@ -318,16 +304,6 @@ export default function CustomerSignInModal({ visible, onClose }) {
         switchMode('signin', { keepMessage: true });
         showCardInfo('This email is already registered. Confirm your email if needed, then sign in.');
         return;
-      }
-
-      // Only check staff when a session was created (user is actually signed in)
-      if (result.session) {
-        const isStaff = await isStaffUser(signedInUser.id);
-        if (isStaff) {
-          await signOut();
-          showStaffWarning();
-          return;
-        }
       }
 
       // With email confirmation there is often no JWT, so RLS insert cannot run.

@@ -434,7 +434,7 @@ export default function HomeScreen({ navigation }) {
                 </Text>
                 <PressableScale
                   onPress={handleExploreMenu}
-                  style={[styles.linkBtn, { borderColor: brandColor }]}
+                  style={[styles.linkBtn, !isWide && styles.linkBtnMobile, { borderColor: brandColor }]}
                   scale={0.97}
                 >
                   <Text style={[styles.linkBtnText, { color: brandColor }]}>Explore Our Menu</Text>
@@ -732,6 +732,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignSelf: 'flex-start',
     marginTop: 4,
+  },
+  linkBtnMobile: {
+    marginBottom: 20,
   },
   linkBtnText: {
     fontSize: 14,

@@ -56,7 +56,7 @@ export default function MenuScreen() {
     refetch,
   } = useMenu(restaurant?.id, 'regular');
 
-  const { addItem, hydrateImages } = useCartContext();
+  const { addItem, hydrateImages, getQuantityForMenuItem } = useCartContext();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const { setCollapsed: setNavbarCollapsed } = useNavbarCollapse();
@@ -589,6 +589,7 @@ export default function MenuScreen() {
                     items={itemsForCategory(category.id)}
                     onAddToCart={handleAddToCart}
                     onItemPress={handleItemPress}
+                    getQuantityForMenuItem={getQuantityForMenuItem}
                     sectionRef={(ref) => {
                       if (ref) sectionRefs.current[category.id] = ref;
                     }}

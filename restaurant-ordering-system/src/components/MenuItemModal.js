@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Pressable,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
@@ -118,7 +119,12 @@ export default function MenuItemModal({
   const [modifierError, setModifierError] = useState('');
   const [signInVisible, setSignInVisible] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [addSuccess, setAddSuccess] = useState(false);
+  const addTimersRef = useRef([]);
+
+  const clearAddTimers = () => {
+    addTimersRef.current.forEach(clearTimeout);
+    addTimersRef.current = [];
+  };
 
   // Entrance animation — scale + fade
   const cardScale = useRef(new Animated.Value(0.88)).current;
@@ -129,12 +135,12 @@ export default function MenuItemModal({
 
   useEffect(() => {
     if (visible) {
+      clearAddTimers();
       setQuantity(1);
       setSpecialInstructions('');
       setSelectedSuggestionIds(new Set());
       setModifierError('');
       setAdding(false);
-      setAddSuccess(false);
       setSignInVisible(false);
 
       const defaults = {};
@@ -162,9 +168,13 @@ export default function MenuItemModal({
           friction: 18,
         }),
       ]).start();
+    } else {
+      clearAddTimers();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, item?.id]);
+
+  useEffect(() => () => clearAddTimers(), []);
 
   if (!item) return null;
 
@@ -254,26 +264,25 @@ export default function MenuItemModal({
   };
 
   const handleAdd = () => {
-    if (isUnavailable || adding || addSuccess) return;
+    if (isUnavailable || adding) return;
     const err = validateModifiers();
     if (err) {
       setModifierError(err);
       return;
     }
     setAdding(true);
-    setAddSuccess(true);
     setModifierError('');
 
-    // Brief success state on the button, then commit + close
-    setTimeout(() => {
-      onAddToCart(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
-      suggestedItems
-        .filter((s) => selectedSuggestionIds.has(s.id) && !itemRequiresCustomization(s))
-        .forEach((s) => onAddToCart(s, 1, '', menuType, [], Number(s.price ?? 0)));
-      onClose();
-      setAdding(false);
-      setAddSuccess(false);
-    }, 420);
+    addTimersRef.current.push(
+      setTimeout(() => {
+        onAddToCart(item, quantity, specialInstructions, menuType, selectedModifiers, unitPrice);
+        suggestedItems
+          .filter((s) => selectedSuggestionIds.has(s.id) && !itemRequiresCustomization(s))
+          .forEach((s) => onAddToCart(s, 1, '', menuType, [], Number(s.price ?? 0)));
+        onClose();
+        setAdding(false);
+      }, 420),
+    );
   };
 
   const hasSuggestions = suggestedItems.length > 0;
@@ -519,38 +528,19 @@ export default function MenuItemModal({
               <TouchableOpacity
                 style={[
                   styles.addBtn,
-                  {
-                    backgroundColor: addSuccess
-                      ? (theme.colors.brandDark || theme.colors.brand)
-                      : theme.colors.brand,
-                  },
-                  (adding || addSuccess) && styles.addBtnDisabled,
+                  { backgroundColor: theme.colors.brand },
+                  adding && styles.addBtnLoading,
+                  adding && styles.addBtnDisabled,
                 ]}
                 onPress={handleAdd}
                 activeOpacity={0.85}
-                disabled={adding || addSuccess}
+                disabled={adding}
               >
-                {addSuccess ? (
-                  <>
-                    <View style={styles.addBtnSuccessRow}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={20}
-                        color={theme.colors.brandText || '#fff'}
-                      />
-                      <Text style={styles.addBtnText}>Added to cart</Text>
-                    </View>
-                    <View style={styles.addBtnPricePill}>
-                      <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
-                        ${totalPrice}
-                      </Text>
-                    </View>
-                  </>
+                {adding ? (
+                  <ActivityIndicator color={theme.colors.brandText || '#fff'} />
                 ) : (
                   <>
-                    <Text style={styles.addBtnText}>
-                      {adding ? 'Adding…' : 'Add to cart'}
-                    </Text>
+                    <Text style={styles.addBtnText}>Add to cart</Text>
                     <View style={styles.addBtnPricePill}>
                       <Text style={[styles.addBtnPrice, { color: theme.colors.brand }]}>
                         ${totalPrice}
@@ -856,6 +846,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderRadius: 12,
   },
+  addBtnLoading: {
+    justifyContent: 'center',
+  },
   addBtnDisabled: {
     opacity: 0.65,
   },
@@ -863,11 +856,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
-  },
-  addBtnSuccessRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   addBtnPricePill: {
     flexDirection: 'row',

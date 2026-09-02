@@ -1,13 +1,11 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   Animated,
   StyleSheet,
   Platform,
-  AccessibilityInfo,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme';
@@ -17,17 +15,22 @@ import { itemRequiresCustomization } from '../utils/menuCustomization';
  * Menu card layout:
  * - Bordered, rounded card with the image flush to the right edge.
  * - Left column: name, price, and description.
- * - Right column: full-height image with a white, rounded action button
- *   floating over the bottom-right corner (add or customize).
+ * - Right column: full-height image with a floating action button
+ *   (plus, or a brand-filled count in the same box when the item is already in the cart).
  * - Hover: card lifts (web shadow + translateY). Image subtly zooms.
- * - Press action: quick-add when no required modifiers; otherwise open customize.
- *   Spring pop only on successful quick-add.
+ * - Press action: card body and plus both open the item modal.
  */
 const CARD_HEIGHT_DEFAULT = 150;
 const CARD_HEIGHT_CATERING = 180;
 const MEDIA_WIDTH = '42%';
 
-const MenuItem = ({ item, onAddToCart, onItemPress, variant = 'default' }) => {
+const MenuItem = ({
+  item,
+  onAddToCart,
+  onItemPress,
+  variant = 'default',
+  cartQuantity = 0,
+}) => {
   const { theme } = useTheme();
   const c = theme.colors;
   const isUnavailable = !item.is_available;
@@ -37,11 +40,7 @@ const MenuItem = ({ item, onAddToCart, onItemPress, variant = 'default' }) => {
   const cardShadowY = useRef(new Animated.Value(0)).current;
   const imageScale = useRef(new Animated.Value(1)).current;
   const [hovered, setHovered] = useState(false);
-
-  // "+" → check feedback (fade, brand colors)
-  const iconOpacity = useRef(new Animated.Value(1)).current;
-  const [showAddedCheck, setShowAddedCheck] = useState(false);
-  const addedResetTimer = useRef(null);
+  const inCart = cartQuantity > 0;
 
   const animateHoverIn = () => {
     setHovered(true);
@@ -59,41 +58,6 @@ const MenuItem = ({ item, onAddToCart, onItemPress, variant = 'default' }) => {
     ]).start();
   };
 
-  const playAddedCheck = () => {
-    clearTimeout(addedResetTimer.current);
-    Animated.timing(iconOpacity, {
-      toValue: 0,
-      duration: 120,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (!finished) return;
-      setShowAddedCheck(true);
-      Animated.timing(iconOpacity, {
-        toValue: 1,
-        duration: 140,
-        useNativeDriver: true,
-      }).start();
-    });
-
-    addedResetTimer.current = setTimeout(() => {
-      Animated.timing(iconOpacity, {
-        toValue: 0,
-        duration: 120,
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (!finished) return;
-        setShowAddedCheck(false);
-        Animated.timing(iconOpacity, {
-          toValue: 1,
-          duration: 140,
-          useNativeDriver: true,
-        }).start();
-      });
-    }, 900);
-  };
-
-  useEffect(() => () => clearTimeout(addedResetTimer.current), []);
-
   const handlePress = () => {
     if (isUnavailable) return;
     if (onItemPress) onItemPress(item);
@@ -103,19 +67,8 @@ const MenuItem = ({ item, onAddToCart, onItemPress, variant = 'default' }) => {
   const handleAddPress = (e) => {
     if (e?.stopPropagation) e.stopPropagation();
     if (isUnavailable) return;
-
-    // Required customizations must go through the modal — never bypass via "+".
-    if (itemRequiresCustomization(item)) {
-      if (onItemPress) onItemPress(item);
-      else if (onAddToCart) onAddToCart(item);
-      return;
-    }
-
-    playAddedCheck();
-    if (onAddToCart) {
-      onAddToCart(item);
-      AccessibilityInfo.announceForAccessibility?.(`${item.name} added to cart`);
-    } else if (onItemPress) onItemPress(item);
+    if (onItemPress) onItemPress(item);
+    else if (onAddToCart) onAddToCart(item);
   };
 
   const needsCustomize = itemRequiresCustomization(item);
@@ -238,42 +191,41 @@ const MenuItem = ({ item, onAddToCart, onItemPress, variant = 'default' }) => {
             <View
               style={[
                 styles.addButton,
-                showAddedCheck && {
+                inCart && {
                   backgroundColor: c.brand,
                   borderColor: c.brand,
+                  width: 40,
+                  minWidth: 40,
+                  paddingHorizontal: 0,
                 },
               ]}
             >
               <TouchableOpacity
                 onPress={handleAddPress}
                 accessibilityLabel={
-                  needsCustomize
-                    ? `Choose options for ${item.name}`
+                  inCart
+                    ? `${item.name}, ${cartQuantity} in cart`
                     : `Add ${item.name} to cart`
                 }
-                accessibilityHint={
-                  needsCustomize
-                    ? 'Opens the item so you can pick required options'
-                    : 'Adds this item to your cart'
-                }
+                accessibilityHint="Opens the item so you can choose options and add to cart"
                 accessibilityRole="button"
                 activeOpacity={0.8}
-                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={styles.addButtonHit}
               >
-                <Animated.View style={{ opacity: iconOpacity }}>
-                  <Ionicons
-                    name={
-                      showAddedCheck
-                        ? 'checkmark'
-                        : needsCustomize
-                          ? 'options-outline'
-                          : 'add'
-                    }
-                    size={needsCustomize && !showAddedCheck ? 18 : 22}
-                    color={showAddedCheck ? (c.brandText || '#fff') : c.textPrimary}
-                  />
-                </Animated.View>
+                {inCart ? (
+                  <Text
+                    style={[
+                      styles.cartCountText,
+                      { color: c.brandText || '#fff' },
+                      cartQuantity >= 10 && styles.cartCountTextCompact,
+                    ]}
+                  >
+                    {cartQuantity}
+                  </Text>
+                ) : (
+                  <Ionicons name="add" size={22} color={c.textPrimary} />
+                )}
               </TouchableOpacity>
             </View>
           )}
@@ -371,7 +323,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 12,
     right: 12,
-    width: 40,
+    minWidth: 40,
     height: 40,
     borderRadius: 12,
     backgroundColor: '#fff',
@@ -386,10 +338,21 @@ const styles = StyleSheet.create({
     }),
   },
   addButtonHit: {
-    width: '100%',
+    minWidth: '100%',
     height: '100%',
+    paddingHorizontal: 4,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cartCountText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#fff',
+    lineHeight: 18,
+  },
+  cartCountTextCompact: {
+    fontSize: 12,
+    lineHeight: 14,
   },
   textMuted: {
     color: '#aaa',
