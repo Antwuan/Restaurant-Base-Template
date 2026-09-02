@@ -8,10 +8,10 @@ export const VIEW_CART_BAR_PADDING = 96;
 export default function ViewCartBar({ itemCount, onPress }) {
   const { theme } = useTheme();
   const count = Number(itemCount) || 0;
-  const label = `View Cart — ${count} ${count === 1 ? 'Item' : 'Items'}`;
+  const label = `View cart · ${count} ${count === 1 ? 'Item' : 'Items'}`;
 
   return (
-    <View style={styles.bar}>
+    <View style={styles.bar} pointerEvents="box-none">
       <TouchableOpacity
         style={[styles.button, { backgroundColor: theme.colors.brand }]}
         onPress={onPress}
@@ -37,21 +37,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: Platform.OS === 'ios' ? 34 : 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    backgroundColor: 'transparent',
     ...Platform.select({
       web: {
         paddingBottom: 'max(16px, env(safe-area-inset-bottom, 0px))',
-        boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
       },
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-      },
-      android: { elevation: 8 },
     }),
   },
   button: {
@@ -60,6 +50,18 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+      },
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.22,
+        shadowRadius: 8,
+      },
+      android: { elevation: 8 },
+    }),
   },
   label: {
     color: '#fff',
