@@ -83,7 +83,12 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     ...Platform.select({
-      web: { minHeight: '100vh' },
+      web: {
+        height: '100dvh',
+        minHeight: '100dvh',
+        maxHeight: '100dvh',
+        overflow: 'hidden',
+      },
     }),
   },
   center: {
