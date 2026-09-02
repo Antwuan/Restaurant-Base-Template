@@ -21,6 +21,8 @@ import { usePickupLocation } from '../../context/PickupLocationContext';
 import { useMenu } from '../../hooks/useMenu';
 import { useCartContext } from '../../context/CartContext';
 import { useTheme } from '../../theme';
+import { useMobileBottomSheet } from '../../components/BottomSheet';
+import { VIEW_CART_BAR_PADDING } from '../../components/ViewCartBar';
 import { useNavbarCollapse } from '../../context/NavbarCollapseContext';
 import CategorySection from '../../components/CategorySection';
 import MenuItemModal from '../../components/MenuItemModal';
@@ -56,7 +58,9 @@ export default function MenuScreen() {
     refetch,
   } = useMenu(restaurant?.id, 'regular');
 
-  const { addItem, hydrateImages, getQuantityForMenuItem } = useCartContext();
+  const { addItem, hydrateImages, getQuantityForMenuItem, itemCount } = useCartContext();
+  const mobileSheet = useMobileBottomSheet();
+  const showViewCartBar = mobileSheet && itemCount > 0;
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const { setCollapsed: setNavbarCollapsed } = useNavbarCollapse();
@@ -307,7 +311,10 @@ export default function MenuScreen() {
     <View style={styles.container}>
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={isEmpty ? styles.scrollEmpty : undefined}
+        contentContainerStyle={[
+          isEmpty ? styles.scrollEmpty : undefined,
+          showViewCartBar && { paddingBottom: VIEW_CART_BAR_PADDING },
+        ]}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         refreshControl={(

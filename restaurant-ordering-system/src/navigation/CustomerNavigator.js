@@ -15,7 +15,7 @@ import CateringScreen from '../screens/customer/CateringScreen';
 import ReviewScreen from '../screens/customer/ReviewScreen';
 import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
-import ViewCartBar, { VIEW_CART_BAR_PADDING } from '../components/ViewCartBar';
+import ViewCartBar from '../components/ViewCartBar';
 import { usePickupLocation } from '../context/PickupLocationContext';
 import { useCartContext } from '../context/CartContext';
 import { NavbarCollapseProvider } from '../context/NavbarCollapseContext';
@@ -64,7 +64,7 @@ function ScreenChrome({
         currentRoute={currentRoute}
         onOpenCart={withCart ? openCart : undefined}
       />
-      <View style={[styles.body, showViewCartBar && { paddingBottom: VIEW_CART_BAR_PADDING }]}>
+      <View style={styles.body}>
         {children}
       </View>
       {showViewCartBar ? (
