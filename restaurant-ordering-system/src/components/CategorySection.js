@@ -7,7 +7,14 @@ const DESKTOP_BREAKPOINT = 768;
 const GUTTER = 12;
 const HALF_GUTTER = GUTTER / 2;
 
-const CategorySection = ({ category, items, onAddToCart, onItemPress, sectionRef }) => {
+const CategorySection = ({
+  category,
+  items,
+  onAddToCart,
+  onItemPress,
+  sectionRef,
+  getQuantityForMenuItem,
+}) => {
   const { width } = useWindowDimensions();
   const { theme } = useTheme();
   const isDesktop = width >= DESKTOP_BREAKPOINT;
@@ -32,6 +39,7 @@ const CategorySection = ({ category, items, onAddToCart, onItemPress, sectionRef
               item={item}
               onAddToCart={onAddToCart}
               onItemPress={onItemPress}
+              cartQuantity={getQuantityForMenuItem ? getQuantityForMenuItem(item.id) : 0}
             />
           </View>
         ))}

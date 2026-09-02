@@ -293,7 +293,7 @@ export default function ConfirmationScreen({ route, navigation }) {
       ) : null}
 
       {mapEmbedUrl ? (
-        <View style={styles.mapWrap}>
+        <View style={[styles.mapWrap, isDesktop && styles.mapWrapDesktop]}>
           {Platform.OS === 'web' ? (
             <iframe
               src={mapEmbedUrl}
@@ -549,6 +549,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#eee',
     marginBottom: 10,
+  },
+  mapWrapDesktop: {
+    height: 440,
   },
   mapPlaceholder: {
     flex: 1,

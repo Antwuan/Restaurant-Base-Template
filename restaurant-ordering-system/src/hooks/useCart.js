@@ -265,6 +265,21 @@ export const useCart = (restaurantId) => {
     [regularItems, cateringItems, taxRate]
   );
 
+  const getQuantityForMenuItem = useCallback(
+    (menuItemId, menuType = 'regular') => {
+      if (menuItemId == null) return 0;
+      const type = normalizeMenuType(menuType);
+      const lines = type === 'catering' ? cateringItems : regularItems;
+      const target = String(menuItemId);
+      return lines.reduce((sum, line) => {
+        if (String(line.id) !== target) return sum;
+        const q = Number(line.quantity);
+        return sum + (Number.isFinite(q) && q > 0 ? q : 0);
+      }, 0);
+    },
+    [regularItems, cateringItems]
+  );
+
   const regularTotals = computeTotals(regularItems, taxRate);
   const cateringTotals = computeTotals(cateringItems, taxRate);
 
@@ -302,6 +317,7 @@ export const useCart = (restaurantId) => {
     cateringTotal: cateringTotals.total,
 
     getCart,
+    getQuantityForMenuItem,
     addItem,
     removeItem,
     updateQuantity,

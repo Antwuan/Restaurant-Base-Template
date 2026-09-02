@@ -40,7 +40,7 @@ import PickupLocationPicker, {
   isPickupLocationReady,
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
-import BottomSheet, { useMobileBottomSheet } from '../../components/BottomSheet';
+import ViewCartBar, { VIEW_CART_BAR_PADDING } from '../../components/ViewCartBar';
 import { createPaymentIntent, getPaymentMethodSummary, getOrCreateIdempotencyKey, writeCheckoutAttempt, readCheckoutAttempt, clearCheckoutAttempt, isConnectOnboardingError, retrievePaymentIntent, getPaymentReturnUrl, serializeCheckoutItems, loadStripeForCheckout } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
@@ -832,15 +832,18 @@ export default function CateringScreen({ navigation }) {
   const { categoriesWithItems, menuByCategory, allItems, loading } = useMenu(restaurant?.id, 'catering');
   const {
     cateringItems: cartItems,
+    cateringItemCount,
     cateringSubtotal: cartSubtotal,
     addItem,
     removeItem,
     updateQuantity,
     hydrateImages,
+    getQuantityForMenuItem,
   } = useCartContext();
   const { theme } = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BP;
+  const mobileSheet = useMobileBottomSheet();
   const { isCustomerAuthenticated, user, customerProfile } = useAuth();
 
   const brandColor = theme.colors.brand;
@@ -999,6 +1002,15 @@ export default function CateringScreen({ navigation }) {
   const handleItemPress = useCallback((item) => {
     setSelectedItem(item);
     setModalVisible(true);
+  }, []);
+
+  const scrollToCateringOrder = useCallback(() => {
+    if (typeof document !== 'undefined') {
+      document.getElementById('catering-order-panel')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }
   }, []);
 
   const handleAddToCart = useCallback((item, quantity = 1, specialInstructions = '', menuType = 'catering', selectedModifiers = [], unitPrice) => {
@@ -1244,9 +1256,15 @@ export default function CateringScreen({ navigation }) {
   }
 
   // ── Menu phase ─────────────────────────────────────────
+  const showCateringViewCart = mobileSheet && cateringItemCount > 0;
+
   return (
     <View style={s.root}>
-      <ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={s.scroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={showCateringViewCart ? { paddingBottom: VIEW_CART_BAR_PADDING } : undefined}
+      >
 
         {/* ── Location meta (navbar handles brand / sign-in) ── */}
         <View style={s.header}>
@@ -1311,7 +1329,7 @@ export default function CateringScreen({ navigation }) {
                             item={item}
                             variant="catering"
                             onItemPress={handleItemPress}
-                            onAddToCart={handleItemPress}
+                            cartQuantity={getQuantityForMenuItem(item.id, 'catering')}
                           />
                         </View>
                       ))}
@@ -1323,7 +1341,10 @@ export default function CateringScreen({ navigation }) {
           </View>
 
           {/* Right: Your Order panel */}
-          <View style={[s.orderCol, isDesktop && s.orderColDesktop]}>
+          <View
+            nativeID="catering-order-panel"
+            style={[s.orderCol, isDesktop && s.orderColDesktop]}
+          >
             <Text style={s.orderHeading}>Your Order</Text>
 
             <View style={s.pickupOnlyBadge}>
@@ -1468,6 +1489,9 @@ export default function CateringScreen({ navigation }) {
         selectedSlot={selectedSlot}
         onSelect={setSelectedSlot}
       />
+      {showCateringViewCart ? (
+        <ViewCartBar itemCount={cateringItemCount} onPress={scrollToCateringOrder} />
+      ) : null}
     </View>
   );
 }
