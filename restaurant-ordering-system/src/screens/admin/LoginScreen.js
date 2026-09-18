@@ -1,6 +1,6 @@
 // Admin login screen using AuthContext's `useAuth` hook. Handles email/password
-// sign-in, loading and error states, and lets AuthContext control post-login
-// navigation/redirects.
+// sign-in, password recovery, loading and error states, and lets AuthContext
+// control post-login navigation/redirects.
 import React, { useState } from 'react';
 import {
   View,
@@ -11,66 +11,124 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
 import { isStaffForRestaurant } from '../../services/authService';
 
-function showAlert(title, message) {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    window.alert(message ? `${title}\n\n${message}` : title);
-    return;
-  }
-  Alert.alert(title, message);
-}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginScreen({ navigation }) {
+  const [mode, setMode] = useState('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, signOut } = useAuth();
+  const [notice, setNotice] = useState(null);
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false);
+  const { signIn, signOut, resetPasswordForEmail, resendSignupEmail } = useAuth();
   const { restaurant, adminLoginError, setAdminLoginError } = useRestaurantContext();
   const { theme } = useTheme();
   const brandColor = theme.colors.brand;
 
   const notAdminMessage = `This account is not an admin for ${restaurant?.name || 'this restaurant'}.`;
+  // One banner slot: the context-level "not an admin" message wins over local copy.
+  const banner = adminLoginError ? { type: 'error', text: adminLoginError } : notice;
+
+  const clearMessages = () => {
+    if (adminLoginError) setAdminLoginError(null);
+    setNotice(null);
+    setCanResendConfirmation(false);
+  };
 
   const handleEmailChange = (value) => {
     setEmail(value);
-    if (adminLoginError) setAdminLoginError(null);
+    clearMessages();
   };
 
   const handlePasswordChange = (value) => {
     setPassword(value);
-    if (adminLoginError) setAdminLoginError(null);
+    clearMessages();
+  };
+
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setPassword('');
+    clearMessages();
   };
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      showAlert('Error', 'Please enter your email and password.');
+    if (!email.trim() || !password) {
+      setNotice({ type: 'error', text: 'Enter your email and password.' });
       return;
     }
 
+    clearMessages();
     setLoading(true);
     try {
-      const data = await signIn(email, password);
+      const data = await signIn(email.trim(), password);
       const userId = data?.user?.id;
       if (userId) {
         const staffHere = await isStaffForRestaurant(userId, restaurant?.id);
         if (!staffHere) {
           setAdminLoginError(notAdminMessage);
           await signOut();
-          showAlert('Not an admin account', notAdminMessage);
           return;
         }
       }
     } catch (error) {
-      showAlert(
-        'Login Failed',
-        error.message || 'Invalid email or password. Please try again.',
-      );
+      setNotice({ type: 'error', text: error.message || 'Sign in failed. Please try again.' });
+      if (error.code === 'email_not_confirmed') setCanResendConfirmation(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendResetLink = async () => {
+    const trimmedEmail = email.trim();
+    if (!EMAIL_RE.test(trimmedEmail)) {
+      setNotice({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+
+    clearMessages();
+    setLoading(true);
+    try {
+      await resetPasswordForEmail(trimmedEmail);
+      setNotice({
+        type: 'info',
+        text: 'If an account exists for that email, we sent a reset link. Check your inbox and spam folder.',
+      });
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error.message || 'Could not send the reset email. Please try again.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const trimmedEmail = email.trim();
+    if (!EMAIL_RE.test(trimmedEmail)) {
+      setNotice({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await resendSignupEmail(trimmedEmail);
+      setCanResendConfirmation(false);
+      setNotice({
+        type: 'info',
+        text: 'We sent a new confirmation link. Check your inbox and spam folder.',
+      });
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error.message || 'Could not resend the confirmation email. Please try again.',
+      });
     } finally {
       setLoading(false);
     }
@@ -82,15 +140,29 @@ export default function LoginScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={[styles.card, { borderTopColor: brandColor }]}>
-        <Text style={styles.title}>Admin Login</Text>
-        <Text style={[styles.subtitle, adminLoginError && styles.subtitleWithBanner]}>
-          Sign in to manage your restaurant
+        <Text style={styles.title}>{mode === 'forgot' ? 'Reset Password' : 'Admin Login'}</Text>
+        <Text style={[styles.subtitle, banner && styles.subtitleWithBanner]}>
+          {mode === 'forgot'
+            ? 'Enter your admin email and we will send you a link to set a new password.'
+            : 'Sign in to manage your restaurant'}
         </Text>
 
-        {adminLoginError ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{adminLoginError}</Text>
+        {banner ? (
+          <View style={[styles.errorBanner, banner.type === 'info' && styles.infoBanner]}>
+            <Text style={[styles.errorBannerText, banner.type === 'info' && styles.infoBannerText]}>
+              {banner.text}
+            </Text>
           </View>
+        ) : null}
+
+        {canResendConfirmation ? (
+          <TouchableOpacity
+            style={styles.resendLink}
+            onPress={handleResendConfirmation}
+            disabled={loading}
+          >
+            <Text style={[styles.resendText, { color: brandColor }]}>Resend confirmation email</Text>
+          </TouchableOpacity>
         ) : null}
 
         <TextInput
@@ -104,29 +176,39 @@ export default function LoginScreen({ navigation }) {
           autoCorrect={false}
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor="#999"
-          value={password}
-          onChangeText={handlePasswordChange}
-          secureTextEntry
-        />
+        {mode === 'signin' ? (
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            placeholderTextColor="#999"
+            value={password}
+            onChangeText={handlePasswordChange}
+            secureTextEntry
+          />
+        ) : null}
 
         <TouchableOpacity
           style={[styles.button, { backgroundColor: brandColor }, loading && styles.buttonDisabled]}
-          onPress={handleLogin}
+          onPress={mode === 'signin' ? handleLogin : handleSendResetLink}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color={theme.colors.brandText || '#fff'} />
           ) : (
-            <Text style={styles.buttonText}>Sign In</Text>
+            <Text style={styles.buttonText}>
+              {mode === 'signin' ? 'Sign In' : 'Send reset link'}
+            </Text>
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.forgotLink}>
-          <Text style={[styles.forgotText, { color: brandColor }]}>Forgot Password?</Text>
+        <TouchableOpacity
+          style={styles.forgotLink}
+          onPress={() => switchMode(mode === 'signin' ? 'forgot' : 'signin')}
+          disabled={loading}
+        >
+          <Text style={[styles.forgotText, { color: brandColor }]}>
+            {mode === 'signin' ? 'Forgot Password?' : 'Back to sign in'}
+          </Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -181,6 +263,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     lineHeight: 20,
+  },
+  infoBanner: {
+    backgroundColor: '#f8f8f8',
+    borderColor: '#e0e0e0',
+  },
+  infoBannerText: {
+    color: '#333',
+    fontWeight: '500',
+  },
+  resendLink: {
+    alignSelf: 'flex-start',
+    marginTop: -8,
+    marginBottom: 14,
+  },
+  resendText: {
+    fontSize: 13,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   input: {
     borderWidth: 1,

@@ -36,6 +36,8 @@ const RESERVED_PATH_SEGMENTS = new Set([
   'tracker',
   'review',
   'admin',
+  'reset-password',
+  'cookies',
 ]);
 
 function isLocalhost(hostname) {

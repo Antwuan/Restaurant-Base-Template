@@ -32,6 +32,8 @@ export default function CustomerSignInModal({ visible, onClose }) {
     signIn,
     signUp,
     signOut,
+    resetPasswordForEmail,
+    resendSignupEmail,
     linkCustomer,
     refreshCustomerProfile,
     isCustomerAuthenticated,
@@ -50,6 +52,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
   const [cardMessage, setCardMessage] = useState(null);
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false);
   const [confirmingSignOut, setConfirmingSignOut] = useState(false);
   const mobileSheet = useMobileBottomSheet();
 
@@ -73,9 +76,15 @@ export default function CustomerSignInModal({ visible, onClose }) {
       setMode('signin');
       setLoading(false);
       setCardMessage(null);
+      setCanResendConfirmation(false);
       setConfirmingSignOut(false);
     }
   }, [visible]);
+
+  const clearCardMessage = () => {
+    setCardMessage(null);
+    setCanResendConfirmation(false);
+  };
 
   const clearFieldError = (field) => {
     setErrors((prev) => {
@@ -107,6 +116,8 @@ export default function CustomerSignInModal({ visible, onClose }) {
     } else if (!EMAIL_RE.test(trimmedEmail)) {
       errs.email = 'Enter a valid email address';
     }
+
+    if (forMode === 'forgot') return errs;
 
     if (!password) {
       errs.password = 'Password is required';
@@ -142,13 +153,13 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
   const handleEmailChange = (value) => {
     setEmail(value);
-    setCardMessage(null);
+    clearCardMessage();
     if (touched.email) clearFieldError('email');
   };
 
   const handlePasswordChange = (value) => {
     setPassword(value);
-    setCardMessage(null);
+    clearCardMessage();
     if (touched.password) clearFieldError('password');
     if (touched.confirmPassword && confirmPassword && value === confirmPassword) {
       clearFieldError('confirmPassword');
@@ -176,16 +187,23 @@ export default function CustomerSignInModal({ visible, onClose }) {
     setErrors({});
     setTouched({});
     setConfirmPassword('');
-    if (!keepMessage) setCardMessage(null);
-    if (nextMode === 'signin') {
+    if (!keepMessage) clearCardMessage();
+    if (nextMode !== 'signup') {
       setFirstName('');
       setLastName('');
       setPhone('');
     }
+    if (nextMode === 'forgot') setPassword('');
   };
 
-  const showCardError = (text) => setCardMessage({ type: 'error', text });
-  const showCardInfo = (text) => setCardMessage({ type: 'info', text });
+  const showCardError = (text) => {
+    setCardMessage({ type: 'error', text });
+    setCanResendConfirmation(false);
+  };
+  const showCardInfo = (text) => {
+    setCardMessage({ type: 'info', text });
+    setCanResendConfirmation(false);
+  };
 
   const handleSignIn = async () => {
     if (!restaurant?.id) {
@@ -200,7 +218,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       return;
     }
     setErrors({});
-    setCardMessage(null);
+    clearCardMessage();
 
     setLoading(true);
     try {
@@ -256,7 +274,8 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
       onClose();
     } catch (error) {
-      showCardError(error.message || 'Invalid email or password.');
+      showCardError(error.message || 'Incorrect email or password.');
+      if (error.code === 'email_not_confirmed') setCanResendConfirmation(true);
     } finally {
       setLoading(false);
     }
@@ -282,7 +301,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       return;
     }
     setErrors({});
-    setCardMessage(null);
+    clearCardMessage();
 
     const trimmedFirst = firstName.trim();
     const trimmedLast = lastName.trim();
@@ -303,6 +322,7 @@ export default function CustomerSignInModal({ visible, onClose }) {
       if (!result.session && Array.isArray(signedInUser.identities) && signedInUser.identities.length === 0) {
         switchMode('signin', { keepMessage: true });
         showCardInfo('This email is already registered. Confirm your email if needed, then sign in.');
+        setCanResendConfirmation(true);
         return;
       }
 
@@ -373,12 +393,53 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
       onClose();
     } catch (error) {
-      const msg = String(error?.message || '');
-      if (/rate limit/i.test(msg)) {
-        showCardError('Too many confirmation emails were sent. Wait a few minutes, then try again.');
-      } else {
-        showCardError(msg || 'Could not create account.');
+      // AuthContext.signUp already routes Supabase errors through mapAuthError.
+      if (error.code === 'user_exists') {
+        switchMode('signin', { keepMessage: true });
       }
+      showCardError(error.message || 'Could not create your account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const validationErrors = validate('forgot');
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setTouched({ email: true });
+      return;
+    }
+    setErrors({});
+    clearCardMessage();
+
+    setLoading(true);
+    try {
+      await resetPasswordForEmail(email.trim());
+      switchMode('signin', { keepMessage: true });
+      showCardInfo(
+        'If an account exists for that email, we sent a reset link. Check your inbox and spam folder.',
+      );
+    } catch (error) {
+      showCardError(error.message || 'Could not send the reset email. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const trimmedEmail = email.trim();
+    if (!EMAIL_RE.test(trimmedEmail)) {
+      showCardError('Enter a valid email address.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await resendSignupEmail(trimmedEmail);
+      showCardInfo('We sent a new confirmation link. Check your inbox and spam folder.');
+    } catch (error) {
+      showCardError(error.message || 'Could not resend the confirmation email. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -402,6 +463,11 @@ export default function CustomerSignInModal({ visible, onClose }) {
   const brandLight = theme.colors.brandLight;
   const displayEmail = customerProfile?.email || user?.email || '';
 
+  const submitLabel =
+    mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Send reset link';
+  const handleSubmit =
+    mode === 'signin' ? handleSignIn : mode === 'signup' ? handleSignUp : handleForgotPassword;
+
   const cardInner = (
     <>
           {/* Close button */}
@@ -411,16 +477,22 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>
-              {signedInAsCustomer ? 'Your account' : 'Customer account'}
+              {signedInAsCustomer
+                ? 'Your account'
+                : mode === 'forgot'
+                  ? 'Reset password'
+                  : 'Customer account'}
             </Text>
             <Text style={styles.subtitle}>
               {signedInAsCustomer
                 ? confirmingSignOut
                   ? 'Are you sure you want to sign out?'
                   : 'Manage your account or sign out below.'
-                : restaurant?.name
-                  ? `Sign in to order from ${restaurant.name}`
-                  : 'Sign in or create an account'}
+                : mode === 'forgot'
+                  ? 'Enter your email and we will send you a link to set a new password.'
+                  : restaurant?.name
+                    ? `Sign in to order from ${restaurant.name}`
+                    : 'Sign in or create an account'}
             </Text>
 
             {cardMessage ? (
@@ -458,6 +530,18 @@ export default function CustomerSignInModal({ visible, onClose }) {
                   {cardMessage.text}
                 </Text>
               </View>
+            ) : null}
+
+            {canResendConfirmation && !signedInAsCustomer ? (
+              <TouchableOpacity
+                style={styles.inlineLink}
+                onPress={handleResendConfirmation}
+                disabled={loading}
+              >
+                <Text style={[styles.inlineLinkText, { color: brandColor }]}>
+                  Resend confirmation email
+                </Text>
+              </TouchableOpacity>
             ) : null}
 
             {signedInAsCustomer ? (
@@ -509,44 +593,46 @@ export default function CustomerSignInModal({ visible, onClose }) {
               </View>
             ) : (
               <>
-                <View style={styles.tabs}>
-                  <TouchableOpacity
-                    style={[
-                      styles.tab,
-                      mode === 'signin' && styles.tabActive,
-                      mode === 'signin' && { backgroundColor: brandLight },
-                    ]}
-                    onPress={() => switchMode('signin')}
-                  >
-                    <Text
+                {mode === 'forgot' ? null : (
+                  <View style={styles.tabs}>
+                    <TouchableOpacity
                       style={[
-                        styles.tabText,
-                        mode === 'signin' && styles.tabTextActive,
-                        mode === 'signin' && { color: brandColor },
+                        styles.tab,
+                        mode === 'signin' && styles.tabActive,
+                        mode === 'signin' && { backgroundColor: brandLight },
                       ]}
+                      onPress={() => switchMode('signin')}
                     >
-                      Sign in
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.tab,
-                      mode === 'signup' && styles.tabActive,
-                      mode === 'signup' && { backgroundColor: brandLight },
-                    ]}
-                    onPress={() => switchMode('signup')}
-                  >
-                    <Text
+                      <Text
+                        style={[
+                          styles.tabText,
+                          mode === 'signin' && styles.tabTextActive,
+                          mode === 'signin' && { color: brandColor },
+                        ]}
+                      >
+                        Sign in
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       style={[
-                        styles.tabText,
-                        mode === 'signup' && styles.tabTextActive,
-                        mode === 'signup' && { color: brandColor },
+                        styles.tab,
+                        mode === 'signup' && styles.tabActive,
+                        mode === 'signup' && { backgroundColor: brandLight },
                       ]}
+                      onPress={() => switchMode('signup')}
                     >
-                      Create account
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                      <Text
+                        style={[
+                          styles.tabText,
+                          mode === 'signup' && styles.tabTextActive,
+                          mode === 'signup' && { color: brandColor },
+                        ]}
+                      >
+                        Create account
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {mode === 'signup' ? (
                   <>
@@ -611,18 +697,22 @@ export default function CustomerSignInModal({ visible, onClose }) {
                 />
                 {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
 
-                <TextInput
-                  style={[styles.input, errors.password && styles.inputError]}
-                  placeholder="Password"
-                  placeholderTextColor="#999"
-                  value={password}
-                  onChangeText={handlePasswordChange}
-                  onBlur={() => handleBlur('password')}
-                  secureTextEntry
-                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                  textContentType={mode === 'signup' ? 'newPassword' : 'password'}
-                />
-                {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+                {mode === 'forgot' ? null : (
+                  <>
+                    <TextInput
+                      style={[styles.input, errors.password && styles.inputError]}
+                      placeholder="Password"
+                      placeholderTextColor="#999"
+                      value={password}
+                      onChangeText={handlePasswordChange}
+                      onBlur={() => handleBlur('password')}
+                      secureTextEntry
+                      autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                      textContentType={mode === 'signup' ? 'newPassword' : 'password'}
+                    />
+                    {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+                  </>
+                )}
 
                 {mode === 'signup' ? (
                   <>
@@ -670,17 +760,39 @@ export default function CustomerSignInModal({ visible, onClose }) {
 
                 <TouchableOpacity
                   style={[styles.button, { backgroundColor: brandColor }, loading && styles.buttonDisabled]}
-                  onPress={mode === 'signin' ? handleSignIn : handleSignUp}
+                  onPress={handleSubmit}
                   disabled={loading}
                 >
                   {loading ? (
                     <ActivityIndicator color={theme.colors.brandText || '#fff'} />
                   ) : (
-                    <Text style={styles.buttonText}>
-                      {mode === 'signin' ? 'Sign in' : 'Create account'}
-                    </Text>
+                    <Text style={styles.buttonText}>{submitLabel}</Text>
                   )}
                 </TouchableOpacity>
+
+                {mode === 'signin' ? (
+                  <TouchableOpacity
+                    style={styles.modeLink}
+                    onPress={() => switchMode('forgot')}
+                    disabled={loading}
+                  >
+                    <Text style={[styles.modeLinkText, { color: brandColor }]}>
+                      Forgot password?
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {mode === 'forgot' ? (
+                  <TouchableOpacity
+                    style={styles.modeLink}
+                    onPress={() => switchMode('signin')}
+                    disabled={loading}
+                  >
+                    <Text style={[styles.modeLinkText, { color: brandColor }]}>
+                      Back to sign in
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </>
             )}
           </ScrollView>
@@ -901,6 +1013,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  modeLink: {
+    marginTop: 14,
+    alignItems: 'center',
+  },
+  modeLinkText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  inlineLink: {
+    marginTop: -6,
+    marginBottom: 14,
+    alignSelf: 'flex-start',
+  },
+  inlineLinkText: {
+    fontSize: 13,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   nameRow: {
     flexDirection: 'row',

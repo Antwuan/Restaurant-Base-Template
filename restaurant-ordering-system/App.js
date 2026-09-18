@@ -7,9 +7,12 @@ import { RestaurantProvider, useRestaurantContext } from './src/context/Restaura
 import { AuthProvider } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
 import { PickupLocationProvider } from './src/context/PickupLocationContext';
+import { CookieConsentProvider } from './src/context/CookieConsentContext';
 import { ThemeProvider, useTheme, buildPaperTheme, readBrandCache, NEUTRAL_THEME_COLOR } from './src/theme';
 import RootNavigator from './src/navigation/RootNavigator';
 import { GlobalConfirmModal } from './src/components/ConfirmModal';
+import CookieConsentBanner from './src/components/CookieConsentBanner';
+import CookiePreferencesModal from './src/components/CookiePreferencesModal';
 
 // Inner app wrapper that has access to theme + restaurant context
 const AppContent = () => {
@@ -45,12 +48,16 @@ const AppContent = () => {
   return (
     <View style={styles.root}>
       <PaperProvider theme={paperTheme}>
-        <CartProvider restaurantId={restaurant?.id}>
-          <PickupLocationProvider>
-            <RootNavigator />
-            <GlobalConfirmModal />
-          </PickupLocationProvider>
-        </CartProvider>
+        <CookieConsentProvider>
+          <CartProvider restaurantId={restaurant?.id}>
+            <PickupLocationProvider>
+              <RootNavigator />
+              <GlobalConfirmModal />
+              <CookieConsentBanner />
+              <CookiePreferencesModal />
+            </PickupLocationProvider>
+          </CartProvider>
+        </CookieConsentProvider>
       </PaperProvider>
     </View>
   );

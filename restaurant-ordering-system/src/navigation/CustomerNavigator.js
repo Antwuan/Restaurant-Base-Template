@@ -13,6 +13,8 @@ import ProfileScreen from '../screens/customer/ProfileScreen';
 import HiringScreen from '../screens/customer/HiringScreen';
 import CateringScreen from '../screens/customer/CateringScreen';
 import ReviewScreen from '../screens/customer/ReviewScreen';
+import ResetPasswordScreen from '../screens/customer/ResetPasswordScreen';
+import CookiesScreen from '../screens/customer/CookiesScreen';
 import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
 import ViewCartBar from '../components/ViewCartBar';
@@ -161,6 +163,24 @@ function ReviewScreenWithNav({ navigation, route }) {
   );
 }
 
+// Recovery links can land here from either storefront or /admin, so this screen
+// renders without customer chrome.
+function ResetPasswordScreenWithNav({ navigation, route }) {
+  return (
+    <View style={styles.screen}>
+      <ResetPasswordScreen navigation={navigation} route={route} />
+    </View>
+  );
+}
+
+function CookiesScreenWithNav({ navigation, route }) {
+  return (
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Cookies">
+      <CookiesScreen navigation={navigation} />
+    </ScreenChrome>
+  );
+}
+
 export default function CustomerNavigator() {
   return (
     <NavbarCollapseProvider>
@@ -182,6 +202,8 @@ export default function CustomerNavigator() {
         <Stack.Screen name="Confirmation" component={ConfirmationScreenWithNav} />
         <Stack.Screen name="OrderTracker" component={TrackerScreenWithNav} />
         <Stack.Screen name="Review" component={ReviewScreenWithNav} />
+        <Stack.Screen name="ResetPassword" component={ResetPasswordScreenWithNav} />
+        <Stack.Screen name="Cookies" component={CookiesScreenWithNav} />
       </Stack.Navigator>
     </NavbarCollapseProvider>
   );

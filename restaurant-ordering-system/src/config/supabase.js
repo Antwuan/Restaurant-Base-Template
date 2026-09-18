@@ -12,5 +12,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     storageKey: 'restaurant-auth',
     storage: window.localStorage, // Use localStorage for web
+    // Recovery / confirmation links arrive with the token in the URL hash;
+    // this consumes it and emits PASSWORD_RECOVERY. Default is true — pinned
+    // because /reset-password depends on it.
+    detectSessionInUrl: true,
   },
 });
