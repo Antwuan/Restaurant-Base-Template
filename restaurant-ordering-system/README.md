@@ -58,7 +58,10 @@ This adds:
 
 4. **Auth settings** (Dashboard → Authentication → URL Configuration):
    - Add the custom domain customers use to **Site URL** and the **redirect URL allowlist** (include `www` and/or apex as needed). Signup sets `emailRedirectTo` to `window.location.origin`.
-   - Email confirmation on/off affects customer sign-up UX (app shows a message if confirmation is required).
+   - **Password reset** sends `redirectTo = window.location.origin + '/reset-password'`, so the allowlist also needs that exact path for every origin in use — e.g. `https://example.com/reset-password`, `https://www.example.com/reset-password`, and `http://localhost:8081/reset-password` for local dev. Wildcards work too (`https://example.com/**`). Without it Supabase falls back to Site URL and the recovery link lands on the homepage, where the token is never consumed.
+   - **Reset password email template** (Dashboard → Authentication → Email Templates → *Reset Password*) must keep the default `{{ .ConfirmationURL }}` link. The app reads the recovery token that Supabase appends to that URL and reacts to the `PASSWORD_RECOVERY` event; a template that links anywhere else will break the flow.
+   - Email confirmation on/off affects customer sign-up UX (app shows a message if confirmation is required). Unconfirmed sign-in attempts offer a **Resend confirmation email** action, which is subject to the Auth email rate limits (Dashboard → Authentication → Rate Limits).
+   - Admins use the same `/reset-password` screen; `/admin` has no separate recovery URL, so no extra allowlist entry is needed for it.
    - Optional backfill if confirm-email signups never got a `restaurant_customers` row: `supabase/migrations/20260803_backfill_restaurant_customers.sql`.
    - Canonical host: set `restaurants.domain` to the host customers actually use (`www` vs apex). Auth JWT is stored in `localStorage` per origin; the app redirects the other host to that canonical domain.
 

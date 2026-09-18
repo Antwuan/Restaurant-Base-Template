@@ -41,6 +41,7 @@ import PickupLocationPicker, {
   resolvePickupLocation,
 } from '../../components/PickupLocationPicker';
 import ViewCartBar, { VIEW_CART_BAR_PADDING } from '../../components/ViewCartBar';
+import BottomSheet, { useMobileBottomSheet } from '../../components/BottomSheet';
 import { createPaymentIntent, getPaymentMethodSummary, getOrCreateIdempotencyKey, writeCheckoutAttempt, readCheckoutAttempt, clearCheckoutAttempt, isConnectOnboardingError, retrievePaymentIntent, getPaymentReturnUrl, serializeCheckoutItems, loadStripeForCheckout } from '../../services/stripeApi';
 import { createOrder, getBookedCateringSlots } from '../../services/orderService';
 import { awardPoints } from '../../services/rewardsService';
@@ -1467,9 +1468,19 @@ export default function CateringScreen({ navigation }) {
         </View>
 
         {/* Footer */}
-        <Text style={s.footerCopy}>
-          © {new Date().getFullYear()} {restaurant?.name || 'Restaurant'}
-        </Text>
+        <View style={{ paddingHorizontal: 24, paddingVertical: 24, gap: 6 }}>
+          <TouchableOpacity
+            onPress={() => navigation?.navigate('Cookies')}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '600', color: brandColor }}>
+              Privacy &amp; Cookies
+            </Text>
+          </TouchableOpacity>
+          <Text style={[s.footerCopy, { paddingHorizontal: 0, paddingVertical: 0 }]}>
+            © {new Date().getFullYear()} {restaurant?.name || 'Restaurant'}
+          </Text>
+        </View>
       </ScrollView>
 
       {/* Modals */}

@@ -35,6 +35,8 @@ const linking = {
       Checkout: 'checkout',
       Confirmation: 'confirmation',
       OrderTracker: 'tracker',
+      ResetPassword: 'reset-password',
+      Cookies: 'cookies',
       Review: {
         path: 'review',
         parse: {

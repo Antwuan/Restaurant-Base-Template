@@ -88,7 +88,7 @@ export default function AdminMenuItem({
           <Text
             style={[
               styles.description,
-              { color: c.brand },
+              { color: c.textSecondary },
               isUnavailable && { color: c.textDisabled },
             ]}
             numberOfLines={3}

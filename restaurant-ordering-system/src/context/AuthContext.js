@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../config/supabase';
 import * as customerService from '../services/customerService';
+import * as authService from '../services/authService';
 
 const AuthContext = createContext(null);
 
@@ -12,6 +13,9 @@ export const AuthProvider = ({ children }) => {
   const [isStaff, setIsStaff] = useState(false);
   // True while isStaffUser is in flight for a present user; false when resolved or no user.
   const [roleLoading, setRoleLoading] = useState(false);
+  // Set when Supabase parses a recovery link out of the URL. ResetPasswordScreen
+  // uses it to tell "arrived from an email link" from "opened /reset-password".
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   // Track auth user id so same-user events (e.g. TOKEN_REFRESHED) do not
   // flip roleLoading — AdminNavigator would otherwise stick on the spinner.
   const userIdRef = useRef(null);
@@ -78,7 +82,8 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true);
       applyUser(session?.user ?? null);
     });
 
@@ -127,7 +132,7 @@ export const AuthProvider = ({ children }) => {
 
   const signIn = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    if (error) throw authService.mapAuthError(error, 'signin');
     if (data?.session) {
       await supabase.auth.setSession(data.session);
     }
@@ -151,7 +156,7 @@ export const AuthProvider = ({ children }) => {
           : undefined,
       },
     });
-    if (error) throw error;
+    if (error) throw authService.mapAuthError(error, 'signup');
     // Ensure the client JWT is set before any RLS inserts (linkCustomer).
     if (data?.session) {
       await supabase.auth.setSession(data.session);
@@ -167,7 +172,22 @@ export const AuthProvider = ({ children }) => {
     if (error) throw error;
     // Clear state immediately so UI switches to login without waiting for
     // the onAuthStateChange event (which can be delayed on web).
+    setPasswordRecovery(false);
     applyUser(null);
+  };
+
+  /** Emails a recovery link pointing at /reset-password. Never reveals whether the account exists. */
+  const resetPasswordForEmail = (email) => authService.resetPasswordForEmail(email);
+
+  /** Re-sends the sign-up confirmation email for an unconfirmed account. */
+  const resendSignupEmail = (email) => authService.resendSignupEmail(email);
+
+  /** Sets a new password on the current (usually recovery) session. */
+  const updatePassword = async (newPassword) => {
+    const updatedUser = await authService.updatePassword(newPassword);
+    setPasswordRecovery(false);
+    if (updatedUser) applyUser(updatedUser);
+    return updatedUser;
   };
 
   const getRestaurantForUser = async (userId) => {
@@ -252,6 +272,10 @@ export const AuthProvider = ({ children }) => {
         signIn,
         signUp,
         signOut,
+        resetPasswordForEmail,
+        resendSignupEmail,
+        updatePassword,
+        passwordRecovery,
         getRestaurantForUser,
         isStaffUser,
         getCustomerProfile,

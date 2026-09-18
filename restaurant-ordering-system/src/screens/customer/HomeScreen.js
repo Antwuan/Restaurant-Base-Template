@@ -17,6 +17,7 @@ import {
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { useCookieConsent } from '../../context/CookieConsentContext';
 import { useCarousel } from '../../hooks/useCarousel';
 import { useGallery } from '../../hooks/useGallery';
 import { useTheme } from '../../theme';
@@ -318,6 +319,7 @@ export default function HomeScreen({ navigation }) {
   const { slides, loading: carouselLoading } = useCarousel(restaurant?.id);
   const { images: galleryImages } = useGallery(restaurant?.id);
   const { theme } = useTheme();
+  const { openPreferences } = useCookieConsent();
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
   const [heroMediaReady, setHeroMediaReady] = useState(false);
@@ -520,9 +522,19 @@ export default function HomeScreen({ navigation }) {
             </TouchableOpacity>
           ) : null}
           <View style={styles.footerDivider} />
-          <TouchableOpacity onPress={() => navigation.navigate('Hiring')}>
-            <Text style={[styles.footerMeta, { color: brandColor }]}>Careers</Text>
-          </TouchableOpacity>
+          <View style={styles.footerLinks}>
+            <TouchableOpacity onPress={() => navigation.navigate('Hiring')}>
+              <Text style={[styles.footerMeta, { color: brandColor }]}>Careers</Text>
+            </TouchableOpacity>
+            <Text style={styles.footerLinkDot}>·</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Cookies')}>
+              <Text style={[styles.footerMeta, { color: brandColor }]}>Privacy &amp; Cookies</Text>
+            </TouchableOpacity>
+            <Text style={styles.footerLinkDot}>·</Text>
+            <TouchableOpacity onPress={openPreferences}>
+              <Text style={[styles.footerMeta, { color: brandColor }]}>Cookie preferences</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.footerDivider} />
           <Text style={styles.footerCopy}>
             © {new Date().getFullYear()} {restaurant?.name || 'Restaurant'}. All rights reserved.
@@ -882,6 +894,18 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.2)',
     marginVertical: 16,
+  },
+  footerLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  footerLinkDot: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.35)',
+    marginBottom: 4,
   },
   footerCopy: {
     fontSize: 12,
