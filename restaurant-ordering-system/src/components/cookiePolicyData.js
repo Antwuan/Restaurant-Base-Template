@@ -110,7 +110,7 @@ export const STORAGE_INVENTORY = [
     key: 'restaurant_brand:<hostname>',
     store: 'localStorage',
     purpose:
-      'The site colours and name, cached so the page does not flash the wrong brand while loading. No personal data.',
+      'The site colours, name, and whether this is a booking or ordering site, cached so the page does not flash the wrong brand or navigation while loading. No personal data.',
     retention: 'Until the restaurant changes its branding.',
   },
   {

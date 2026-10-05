@@ -23,6 +23,9 @@ const linking = {
     screens: {
       Admin: 'admin',
       Home: { path: '' },
+      Book: 'book',
+      Appointments: 'appointments',
+      AppointmentConfirmation: 'booking',
       Menu: {
         path: 'menu',
         parse: {

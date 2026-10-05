@@ -21,6 +21,7 @@ import { useTheme } from '../../theme';
 import CustomerNavbar from '../../components/CustomerNavbar';
 import CustomerSignInModal from '../../components/CustomerSignInModal';
 import RewardCodesList from '../../components/RewardCodesList';
+import { isAppointmentBusiness } from '../../utils/businessType';
 import * as customerService from '../../services/customerService';
 import * as rewardsService from '../../services/rewardsService';
 import { syncMarketingContact } from '../../services/emailApi';
@@ -115,7 +116,7 @@ export default function ProfileScreen({ navigation }) {
       }
       if (restaurant?.id) {
         refreshCustomerProfile(restaurant.id);
-        loadCodes();
+        if (!isAppointmentBusiness(restaurant)) loadCodes();
       }
       return undefined;
     }, [isCustomerAuthenticated, restaurant?.id, refreshCustomerProfile, loadCodes]),
@@ -290,6 +291,7 @@ export default function ProfileScreen({ navigation }) {
               </View>
             </View>
 
+            {isAppointmentBusiness(restaurant) ? null : (
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: c.textPrimary }]}>My reward codes</Text>
               <RewardCodesList
@@ -298,6 +300,7 @@ export default function ProfileScreen({ navigation }) {
                 brandColor={brandColor}
               />
             </View>
+            )}
           </>
         )}
       </ScrollView>

@@ -32,7 +32,7 @@ import { confirmAsync } from '../../utils/confirm';
 
 const BENEFIT_TYPES = promoService.BENEFIT_TYPES;
 
-function benefitLabel(row) {
+export function benefitLabel(row) {
   if (row.benefit_type === 'percent_off') return `${Number(row.discount_value)}% off`;
   if (row.benefit_type === 'amount_off') return `$${Number(row.discount_value).toFixed(2)} off`;
   if (row.benefit_type === 'free_item') {
@@ -448,7 +448,7 @@ function OfferForm({ offer, brandColor, menuItems, onSave, onCancel }) {
   );
 }
 
-function PromoForm({ promo, brandColor, menuItems, emailReady, onSave, onCancel }) {
+export function PromoForm({ promo, brandColor, menuItems, emailReady, onSave, onCancel }) {
   const { theme } = useTheme();
   const c = theme.colors;
   const isCreate = !promo;

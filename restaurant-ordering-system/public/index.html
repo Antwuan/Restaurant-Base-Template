@@ -46,7 +46,11 @@
           if (!data || !data.primary) return;
           var meta = document.querySelector('meta[name="theme-color"]');
           if (meta) meta.setAttribute('content', data.primary);
-          if (data.name) document.title = data.name + ' \u2014 Order Online';
+          if (data.name) {
+            document.title = data.businessType === 'appointment'
+              ? data.name + ' \u2014 Book'
+              : data.name + ' \u2014 Order Online';
+          }
         } catch (e) {}
       })();
     </script>

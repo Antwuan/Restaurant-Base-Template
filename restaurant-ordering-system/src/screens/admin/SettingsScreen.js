@@ -29,6 +29,7 @@ import {
   DAY_LABELS,
   resolveHours,
 } from '../../utils/hoursUtils';
+import { isAppointmentBusiness } from '../../utils/businessType';
 
 // Time options in 15-min increments
 const TIME_OPTIONS = [];
@@ -171,6 +172,9 @@ export default function SettingsScreen() {
   const [editingLocId, setEditingLocId] = useState(null);
   const [editLocName, setEditLocName] = useState('');
   const [editLocAddress, setEditLocAddress] = useState('');
+  const [capacityInput, setCapacityInput] = useState(
+    String(restaurant?.appointment_capacity ?? 1),
+  );
 
   useEffect(() => {
     setDomainStatus(restaurant?.email_domain_status ?? 'pending');
@@ -182,6 +186,10 @@ export default function SettingsScreen() {
     if (!Number.isFinite(n)) return;
     setTaxRateInput(String(Number((n * 100).toFixed(4))));
   }, [restaurant?.tax_rate]);
+
+  useEffect(() => {
+    setCapacityInput(String(restaurant?.appointment_capacity ?? 1));
+  }, [restaurant?.appointment_capacity]);
 
   const loadLocations = async () => {
     if (!restaurant?.id) return;
@@ -216,20 +224,29 @@ export default function SettingsScreen() {
       return;
     }
     const taxRate = Math.round(parsedPercent * 10000) / 1000000;
+    const updates = {
+      phone,
+      email,
+      address,
+      is_accepting_orders: acceptingOrders,
+      hours_of_operation: hours,
+      tax_rate: taxRate,
+    };
+    if (isAppointmentBusiness(restaurant)) {
+      const appointmentCapacity = Number.parseInt(String(capacityInput).trim(), 10);
+      if (!Number.isInteger(appointmentCapacity) || appointmentCapacity < 1) {
+        Alert.alert('Invalid capacity', 'Enter how many appointments can overlap at once. Use 1 or more.');
+        return;
+      }
+      updates.appointment_capacity = appointmentCapacity;
+    }
     setSaving(true);
     try {
-      await restaurantService.updateRestaurant(restaurant.id, {
-        phone,
-        email,
-        address,
-        is_accepting_orders: acceptingOrders,
-        hours_of_operation: hours,
-        tax_rate: taxRate,
-      });
+      await restaurantService.updateRestaurant(restaurant.id, updates);
       // Main store is always offered from restaurants.address at checkout —
       // do not auto-seed it into restaurant_locations (avoids duplicates).
       await refreshRestaurant();
-      Alert.alert('Saved', 'Restaurant settings updated successfully.');
+      Alert.alert('Saved', 'Settings updated successfully.');
     } catch (e) {
       Alert.alert('Error', 'Could not save settings. Please try again.');
     } finally {
@@ -466,6 +483,7 @@ export default function SettingsScreen() {
   };
 
   const c = theme.colors;
+  const appointmentMode = isAppointmentBusiness(restaurant);
   const statusColor =
     domainStatus === 'verified' ? '#155724' :
     domainStatus === 'failed' ? '#721C24' : '#856404';
@@ -478,7 +496,37 @@ export default function SettingsScreen() {
       style={[styles.container, { backgroundColor: c.background }]}
       contentContainerStyle={styles.content}
     >
+      {appointmentMode ? (
+      <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={[styles.sectionTitle, { color: c.textSecondary, marginBottom: 0 }]}>Booking</Text>
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: c.brand }, saving && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveBtnText}>Save</Text>}
+          </TouchableOpacity>
+        </View>
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: c.textSecondary }]}>Overlapping appointments</Text>
+          <TextInput
+            style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+            value={capacityInput}
+            onChangeText={setCapacityInput}
+            keyboardType="number-pad"
+            placeholder="1"
+            placeholderTextColor={c.textDisabled}
+          />
+          <Text style={[styles.rowSub, { color: c.textSecondary, marginTop: 4 }]}>
+            How many confirmed appointments can happen at the same time.
+          </Text>
+        </View>
+      </View>
+      ) : null}
+
       {/* ── Order Settings (ops-critical — leads) ─────────── */}
+      {appointmentMode ? null : (
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
         <View style={styles.sectionHeaderRow}>
           <Text style={[styles.sectionTitle, { color: c.textSecondary, marginBottom: 0 }]}>Order Settings</Text>
@@ -518,6 +566,7 @@ export default function SettingsScreen() {
           </Text>
         </View>
       </View>
+      )}
 
       {/* ── Restaurant Info ───────────────────────────────── */}
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
@@ -576,6 +625,7 @@ export default function SettingsScreen() {
       </View>
 
       {/* ── Pickup Locations ─────────────────────────────── */}
+      {appointmentMode ? null : (
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
         <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Additional Pickup Locations</Text>
         <Text style={[styles.sectionSub, { color: c.textSecondary }]}>
@@ -687,6 +737,7 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
       </View>
+      )}
 
       {/* ── Hours of Service ──────────────────────────────── */}
       <View style={[styles.section, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
