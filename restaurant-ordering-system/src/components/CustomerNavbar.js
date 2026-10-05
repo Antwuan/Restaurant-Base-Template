@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../context/RestaurantContext';
+import { isAppointmentBusiness } from '../utils/businessType';
+import { readBrandCache } from '../theme/brandCache';
 import { useCartContext } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme';
@@ -127,7 +129,7 @@ function MenuRow({ icon, label, onPress, destructive = false, disabled = false }
 }
 
 export default function CustomerNavbar({ navigation, currentRoute, onOpenCart }) {
-  const { restaurant } = useRestaurantContext();
+  const { restaurant, loading: restaurantLoading } = useRestaurantContext();
   const { itemCount } = useCartContext();
   const {
     user,
@@ -274,18 +276,34 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
 
   const isSignedIn = isCustomerAuthenticated;
   const points = customerProfile?.points_balance ?? 0;
+  const cachedType = readBrandCache()?.businessType ?? null;
+  const storefrontMode = restaurant
+    ? (isAppointmentBusiness(restaurant) ? 'appointment' : 'restaurant')
+    : (restaurantLoading && (cachedType === 'appointment' || cachedType === 'restaurant')
+      ? cachedType
+      : null);
+  const typeKnown = storefrontMode != null;
+  const appointment = storefrontMode === 'appointment';
+  const showPoints = typeKnown && !appointment;
+  const navLinks = !typeKnown
+    ? []
+    : appointment
+      ? [{ label: 'Book', route: 'Book' }]
+      : NAV_LINKS;
+  const accountMenu = !typeKnown
+    ? [{ label: 'Profile', route: 'Profile', icon: 'person-outline' }]
+    : appointment
+      ? [
+          { label: 'Profile', route: 'Profile', icon: 'person-outline' },
+          { label: 'Appointments', route: 'Appointments', icon: 'calendar-outline' },
+        ]
+      : ACCOUNT_MENU;
 
   const handleNavPress = (route) => {
     closeMobileMenu();
     setAccountMenuOpen(false);
     if (!navigation) return;
-    if (route === 'Menu') navigation.navigate('Menu');
-    else if (route === 'Home') navigation.navigate('Home');
-    else if (route === 'OrderTracker') navigation.navigate('OrderTracker');
-    else if (route === 'Catering') navigation.navigate('Catering');
-    else if (route === 'Rewards') navigation.navigate('Rewards');
-    else if (route === 'Hiring') navigation.navigate('Hiring');
-    else if (route === 'Profile') navigation.navigate('Profile');
+    navigation.navigate(route);
   };
 
   const handleSignInPress = () => {
@@ -333,16 +351,20 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
       style={[styles.pointsPill, isSignedIn && styles.pointsPillActive]}
       onPress={handleAccountToggle}
       activeOpacity={0.75}
-      accessibilityLabel={isSignedIn ? `${points} points, open account menu` : 'Sign in'}
+      accessibilityLabel={
+        isSignedIn
+          ? (showPoints ? `${points} points, open account menu` : 'Open account menu')
+          : 'Sign in'
+      }
     >
       <Ionicons
-        name={isSignedIn ? 'gift' : 'person-outline'}
+        name={showPoints && isSignedIn ? 'gift' : 'person-outline'}
         size={16}
         color="#fff"
         style={{ marginRight: 5 }}
       />
       <Text style={styles.pointsPillText}>
-        {isSignedIn ? `${points} pts` : 'Sign in'}
+        {isSignedIn ? (showPoints ? `${points} pts` : 'Account') : 'Sign in'}
       </Text>
       {isSignedIn ? (
         <Ionicons
@@ -365,7 +387,7 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
       <Pressable style={styles.dropdownBackdrop} onPress={() => setAccountMenuOpen(false)}>
         <View style={styles.dropdownAnchor}>
           <Pressable style={styles.dropdown} onPress={(e) => e.stopPropagation?.()}>
-            {ACCOUNT_MENU.map((item) => (
+            {accountMenu.map((item) => (
               <MenuRow
                 key={item.route}
                 icon={item.icon}
@@ -426,7 +448,7 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
 
           {!isMobile && (
             <View style={styles.navLinks}>
-              {NAV_LINKS.map((link) => (
+              {navLinks.map((link) => (
                 <NavLink
                   key={link.route}
                   label={link.label}
@@ -487,21 +509,21 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
                 style={[styles.pointsPill, styles.pointsPillOnLight, isSignedIn && styles.pointsPillActiveOnLight]}
                 onPress={handleAccountToggle}
                 activeOpacity={0.75}
-                accessibilityLabel={isSignedIn ? `${points} points, open account menu` : 'Sign in'}
+                accessibilityLabel={isSignedIn ? (showPoints ? `${points} points, open account menu` : 'Account') : 'Sign in'}
               >
                 <Ionicons
-                  name={isSignedIn ? 'gift' : 'person-outline'}
+                  name={showPoints && isSignedIn ? 'gift' : 'person-outline'}
                   size={16}
                   color={theme.colors.brand}
                   style={{ marginRight: 5 }}
                 />
                 <Text style={[styles.pointsPillText, { color: theme.colors.brand }]}>
-                  {isSignedIn ? `${points} pts` : 'Sign in'}
+                  {isSignedIn ? (showPoints ? `${points} pts` : 'Account') : 'Sign in'}
                 </Text>
               </TouchableOpacity>
             </View>
             {isSignedIn
-              ? ACCOUNT_MENU.map((item) => (
+              ? accountMenu.map((item) => (
                   <MenuRow
                     key={item.route}
                     icon={item.icon}
@@ -523,7 +545,7 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
               </>
             ) : null}
             <View style={styles.dropdownDivider} />
-            {NAV_LINKS.map((link) => (
+            {navLinks.map((link) => (
               <MenuRow
                 key={link.route}
                 label={link.label}

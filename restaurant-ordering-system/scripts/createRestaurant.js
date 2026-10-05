@@ -33,7 +33,7 @@ const __dirname = path.dirname(__filename);
 
 // ─── Parse CLI args ───────────────────────────────────────────────────────────
 const argv = minimist(process.argv.slice(2), {
-  string: ['name', 'slug', 'phone', 'email', 'address', 'notification-email', 'domain'],
+  string: ['name', 'slug', 'phone', 'email', 'address', 'notification-email', 'domain', 'business-type', 'appointment-capacity'],
   boolean: ['help'],
   alias: { h: 'help' },
 });
@@ -52,6 +52,8 @@ Optional:
   --address           Street address           (e.g. "123 Main St, Springfield")
   --notification-email  Email to receive new order alerts
   --domain            Production domain        (e.g. "order.pizzapalace.com")
+  --business-type     restaurant (default) or appointment
+  --appointment-capacity  Overlapping appointments allowed (default 1)
   -h, --help          Show this help message
 `);
   process.exit(0);
@@ -61,6 +63,21 @@ Optional:
 if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(argv.slug)) {
   console.error('❌  --slug must be lowercase letters, numbers, and hyphens only (e.g. "pizza-palace")');
   process.exit(1);
+}
+
+const businessType = argv['business-type'] || 'restaurant';
+if (businessType !== 'restaurant' && businessType !== 'appointment') {
+  console.error('❌  --business-type must be "restaurant" or "appointment"');
+  process.exit(1);
+}
+
+let appointmentCapacity = 1;
+if (argv['appointment-capacity'] != null && argv['appointment-capacity'] !== '') {
+  appointmentCapacity = Number.parseInt(argv['appointment-capacity'], 10);
+  if (!Number.isInteger(appointmentCapacity) || appointmentCapacity < 1) {
+    console.error('❌  --appointment-capacity must be an integer of 1 or more');
+    process.exit(1);
+  }
 }
 
 // ─── Supabase client (service role — scripts only, never ship to client) ─────
@@ -108,11 +125,17 @@ async function main() {
     primary_color: colors.primary,
     secondary_color: colors.secondary,
     is_accepting_orders: true,
+    business_type: businessType,
+    appointment_capacity: appointmentCapacity,
   };
 
   console.log('\n🍽️  Creating restaurant...\n');
   console.log('  Name:               ', restaurantData.name);
   console.log('  Slug:               ', restaurantData.slug);
+  console.log('  Business type:      ', restaurantData.business_type);
+  if (restaurantData.business_type === 'appointment') {
+    console.log('  Appointment capacity:', restaurantData.appointment_capacity);
+  }
   console.log('  Domain:             ', restaurantData.domain ?? '(none — slug-based routing)');
   console.log('  Notification email: ', restaurantData.notification_email ?? '(none set)');
   console.log('  Primary color:      ', restaurantData.primary_color);
@@ -169,11 +192,16 @@ export default restaurantConfig;
   // ── Print next steps ───────────────────────────────────────────────────────
   console.log('─'.repeat(60));
   console.log('📋  Next steps:\n');
-  console.log(`  1. Add menu categories for this restaurant in Supabase:`);
-  console.log(`       Table: menu_categories  |  restaurant_id: ${data.id}\n`);
-  console.log(`  2. Add menu items under each category.\n`);
-  console.log(`  3. Connect a Stripe account:`);
-  console.log(`       Update restaurants.stripe_account_id for id: ${data.id}\n`);
+  if (data.business_type === 'appointment') {
+    console.log(`  1. Add services in Admin → Services for restaurant_id: ${data.id}\n`);
+    console.log(`  2. Set hours and overlapping capacity in Admin → Settings.\n`);
+  } else {
+    console.log(`  1. Add menu categories for this restaurant in Supabase:`);
+    console.log(`       Table: menu_categories  |  restaurant_id: ${data.id}\n`);
+    console.log(`  2. Add menu items under each category.\n`);
+    console.log(`  3. Connect a Stripe account:`);
+    console.log(`       Update restaurants.stripe_account_id for id: ${data.id}\n`);
+  }
   console.log(`  4. Set up Resend sending domain (Admin → Settings → Transactional email):`);
   console.log(`       Create subdomain (e.g. mail.${argv.domain || argv.slug + '.com'}), add DNS, Verify.`);
   console.log(`       Required before order / marketing / review emails send.\n`);

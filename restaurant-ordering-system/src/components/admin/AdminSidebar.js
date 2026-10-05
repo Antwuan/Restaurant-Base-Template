@@ -11,17 +11,29 @@ import { useTheme } from '../../theme';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import AdminHoverTab from './AdminHoverTab';
 
+import { isAppointmentBusiness } from '../../utils/businessType';
+
 export const NAV_ITEMS = [
-  { key: 'Orders',       label: 'Orders',       icon: 'receipt',          iconOutline: 'receipt-outline'          },
-  { key: 'Analytics',    label: 'Analytics',    icon: 'bar-chart',        iconOutline: 'bar-chart-outline'        },
-  { key: 'Menu',         label: 'Menu',         icon: 'restaurant',       iconOutline: 'restaurant-outline'       },
+  { key: 'Appointments', label: 'Appointments', icon: 'calendar',         iconOutline: 'calendar-outline',        appointmentOnly: true },
+  { key: 'Services',     label: 'Services',     icon: 'layers',           iconOutline: 'layers-outline',          appointmentOnly: true },
+  { key: 'Orders',       label: 'Orders',       icon: 'receipt',          iconOutline: 'receipt-outline',         restaurantOnly: true },
+  { key: 'Analytics',    label: 'Analytics',    icon: 'bar-chart',        iconOutline: 'bar-chart-outline',       restaurantOnly: true },
+  { key: 'Menu',         label: 'Menu',         icon: 'restaurant',       iconOutline: 'restaurant-outline',      restaurantOnly: true },
   { key: 'HomePage',     label: 'Home Page',    icon: 'home',             iconOutline: 'home-outline'             },
-  { key: 'Rewards',      label: 'Rewards',      icon: 'gift',             iconOutline: 'gift-outline'             },
-  { key: 'Applications', label: 'Applications', icon: 'document-text',    iconOutline: 'document-text-outline'    },
-  { key: 'Reviews',      label: 'Reviews',      icon: 'star',             iconOutline: 'star-outline'             },
+  { key: 'Rewards',      label: 'Rewards',      icon: 'gift',             iconOutline: 'gift-outline',            restaurantOnly: true },
+  { key: 'Applications', label: 'Applications', icon: 'document-text',    iconOutline: 'document-text-outline',   restaurantOnly: true },
+  { key: 'Reviews',      label: 'Reviews',      icon: 'star',             iconOutline: 'star-outline',            restaurantOnly: true },
   { key: 'Marketing',    label: 'Marketing',    icon: 'megaphone',        iconOutline: 'megaphone-outline'        },
   { key: 'Settings',     label: 'Settings',     icon: 'settings',         iconOutline: 'settings-outline'        },
 ];
+
+export function navItemsForRestaurant(restaurant) {
+  const appointment = isAppointmentBusiness(restaurant);
+  return NAV_ITEMS.filter((item) => {
+    if (appointment) return !item.restaurantOnly;
+    return !item.appointmentOnly;
+  });
+}
 
 export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
   const { theme } = useTheme();
@@ -39,7 +51,7 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
       {/* Brand header */}
       <View style={[styles.brandHeader, { borderBottomColor: theme.colors.border }]}>
         <View style={[styles.brandIcon, { backgroundColor: theme.colors.brand }]}>
-          <Ionicons name="restaurant" size={18} color="#fff" />
+          <Ionicons name={isAppointmentBusiness(restaurant) ? 'calendar' : 'restaurant'} size={18} color="#fff" />
         </View>
         {!collapsed && (
           <View style={styles.brandText}>
@@ -55,7 +67,7 @@ export default function AdminSidebar({ activeSection, onNavigate, collapsed }) {
 
       {/* Navigation items */}
       <View style={styles.navList}>
-        {NAV_ITEMS.map((item) => {
+        {navItemsForRestaurant(restaurant).map((item) => {
           const isActive = activeSection === item.key;
 
           return (

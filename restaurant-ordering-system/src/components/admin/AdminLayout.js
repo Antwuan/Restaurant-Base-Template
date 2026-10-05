@@ -8,10 +8,12 @@ import {
   Text,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AdminSidebar from './AdminSidebar';
+import AdminSidebar, { navItemsForRestaurant } from './AdminSidebar';
 import { useTheme } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
+import { useRestaurantContext } from '../../context/RestaurantContext';
 import { confirmAsync } from '../../utils/confirm';
+import { isAppointmentBusiness } from '../../utils/businessType';
 
 import OrdersScreen from '../../screens/admin/OrdersScreen';
 import MenuEditorScreen from '../../screens/admin/MenuEditorScreen';
@@ -22,8 +24,12 @@ import AdminRewardsScreen from '../../screens/admin/RewardsScreen';
 import ApplicationsScreen from '../../screens/admin/ApplicationsScreen';
 import ReviewsScreen from '../../screens/admin/ReviewsScreen';
 import MarketingScreen from '../../screens/admin/MarketingScreen';
+import AppointmentsScreen from '../../screens/admin/AppointmentsScreen';
+import ServicesScreen from '../../screens/admin/ServicesScreen';
 
 const SCREENS = {
+  Appointments: AppointmentsScreen,
+  Services:     ServicesScreen,
   Orders:       OrdersScreen,
   Analytics:    AnalyticsScreen,
   Menu:         MenuEditorScreen,
@@ -46,8 +52,18 @@ export default function AdminLayout() {
   const { width } = useWindowDimensions();
   const { theme } = useTheme();
   const { signOut } = useAuth();
+  const { restaurant } = useRestaurantContext();
 
-  const [activeSection, setActiveSection] = useState('Orders');
+  const [activeSection, setActiveSection] = useState(() => (
+    isAppointmentBusiness(restaurant) ? 'Appointments' : 'Orders'
+  ));
+
+  useEffect(() => {
+    const allowed = navItemsForRestaurant(restaurant).map((item) => item.key);
+    if (!allowed.includes(activeSection)) {
+      setActiveSection(allowed[0] || 'Settings');
+    }
+  }, [restaurant?.business_type, activeSection, restaurant]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const signOutGuardUntilRef = useRef(0);
   const signOutInFlightRef = useRef(false);
@@ -92,7 +108,7 @@ export default function AdminLayout() {
     setMobileMenuOpen(false);
   }, [signOut]);
 
-  const ActiveScreen = SCREENS[activeSection] ?? OrdersScreen;
+  const ActiveScreen = SCREENS[activeSection] ?? SCREENS[navItemsForRestaurant(restaurant)[0]?.key] ?? OrdersScreen;
 
   const sectionTitle =
     activeSection === 'HomePage' ? 'Home Page' : activeSection;

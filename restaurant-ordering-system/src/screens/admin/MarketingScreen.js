@@ -19,6 +19,8 @@ import { useRestaurantContext } from '../../context/RestaurantContext';
 import { listEmailBroadcasts } from '../../services/emailApi';
 import { getReviewOutreachCounts } from '../../services/reviewService';
 import * as restaurantService from '../../services/restaurantService';
+import { isAppointmentBusiness } from '../../utils/businessType';
+import PromoCodesSection from '../../components/admin/PromoCodesSection';
 
 function formatDateTime(iso) {
   if (!iso) return '—';
@@ -48,6 +50,7 @@ export default function MarketingScreen() {
   const { theme } = useTheme();
   const { restaurant, refreshRestaurant } = useRestaurantContext();
   const c = theme.colors;
+  const appointment = isAppointmentBusiness(restaurant);
 
   const [autoReview, setAutoReview] = useState(restaurant?.auto_review_emails ?? true);
   const [reviewUrl, setReviewUrl] = useState(restaurant?.review_url ?? '');
@@ -116,6 +119,8 @@ export default function MarketingScreen() {
       style={[styles.container, { backgroundColor: c.background }]}
       contentContainerStyle={styles.content}
     >
+      {appointment ? <PromoCodesSection /> : null}
+
       {/* Review outreach */}
       <View style={[styles.card, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
         <Text style={[styles.sectionTitle, { color: c.textSecondary }]}>Review outreach</Text>
@@ -205,7 +210,9 @@ export default function MarketingScreen() {
           <ActivityIndicator color={c.brand} style={{ marginVertical: 16 }} />
         ) : broadcasts.length === 0 ? (
           <Text style={[styles.emptyHistory, { color: c.textDisabled }]}>
-            No broadcasts yet. Send from Rewards when creating a promo.
+            {appointment
+              ? 'No broadcasts yet. Create a promo above to email customers.'
+              : 'No broadcasts yet. Send from Rewards when creating a promo.'}
           </Text>
         ) : (
           broadcasts.map((b) => {

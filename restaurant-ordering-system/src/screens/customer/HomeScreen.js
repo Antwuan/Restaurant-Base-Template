@@ -17,6 +17,7 @@ import {
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
+import { isAppointmentBusiness } from '../../utils/businessType';
 import { useCookieConsent } from '../../context/CookieConsentContext';
 import { useCarousel } from '../../hooks/useCarousel';
 import { useGallery } from '../../hooks/useGallery';
@@ -43,7 +44,7 @@ function galleryColumnCount(layout, width) {
 }
 
 /** Home gallery: equal grids from curated gallery images. */
-function HomeGallery({ items, brandColor, width, layout = 'grid_2' }) {
+function HomeGallery({ items, brandColor, width, layout = 'grid_2', title = 'From the kitchen' }) {
   const [lightboxItem, setLightboxItem] = useState(null);
   if (!items.length) return null;
 
@@ -53,7 +54,7 @@ function HomeGallery({ items, brandColor, width, layout = 'grid_2' }) {
   return (
     <View style={[styles.section, styles.gallerySection]}>
       <Text style={[styles.sectionEyebrow, { color: brandColor }]}>Gallery</Text>
-      <Text style={styles.sectionTitle}>From the kitchen</Text>
+      <Text style={styles.sectionTitle}>{title}</Text>
       <View style={styles.galleryGrid}>
         {items.map((item) => (
           <View
@@ -255,7 +256,7 @@ function HeroBackground({ slides, onMediaReady }) {
 }
 
 /** Staggered entrance for the hero headline, subtitle, and CTA. */
-function HeroContent({ restaurantName, description, brandColor, onOrderNow }) {
+function HeroContent({ restaurantName, description, brandColor, onOrderNow, ctaLabel = 'Order Now' }) {
   const titleOpacity = useRef(new Animated.Value(0)).current;
   const titleY = useRef(new Animated.Value(30)).current;
   const subtitleOpacity = useRef(new Animated.Value(0)).current;
@@ -307,7 +308,7 @@ function HeroContent({ restaurantName, description, brandColor, onOrderNow }) {
           style={[styles.ctaPrimary, { backgroundColor: brandColor }]}
           scale={0.95}
         >
-          <Text style={styles.ctaPrimaryText}>Order Now</Text>
+          <Text style={styles.ctaPrimaryText}>{ctaLabel}</Text>
         </PressableScale>
       </Animated.View>
     </View>
@@ -349,8 +350,11 @@ export default function HomeScreen({ navigation }) {
     setHeroMediaReady(true);
   }, []);
 
-  const handleOrderNow = () => navigation.navigate('Menu');
-  const handleExploreMenu = () => navigation.navigate('Menu');
+  const appointment = isAppointmentBusiness(restaurant);
+  const handleOrderNow = () => navigation.navigate(appointment ? 'Book' : 'Menu');
+  const handleExploreMenu = () => navigation.navigate(appointment ? 'Book' : 'Menu');
+  const primaryCta = appointment ? 'Book Now' : 'Order Now';
+  const secondaryCta = appointment ? 'View services' : 'Explore Our Menu';
   const handleCallPress = () => {
     if (restaurant?.phone) Linking.openURL(`tel:${restaurant.phone}`);
   };
@@ -389,6 +393,7 @@ export default function HomeScreen({ navigation }) {
                 description={restaurant?.description}
                 brandColor={brandColor}
                 onOrderNow={handleOrderNow}
+                ctaLabel={primaryCta}
               />
             ) : null}
           </View>
@@ -407,7 +412,9 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.heroFallbackSubtitle}>{restaurant.description}</Text>
             ) : (
               <Text style={styles.heroFallbackSubtitle}>
-                Fresh food, made with care — ready for you.
+                {appointment
+                  ? 'Book a time that works for you.'
+                  : 'Fresh food, made with care — ready for you.'}
               </Text>
             )}
             <PressableScale
@@ -415,7 +422,7 @@ export default function HomeScreen({ navigation }) {
               style={styles.ctaWhite}
               scale={0.95}
             >
-              <Text style={[styles.ctaWhiteText, { color: brandColor }]}>Order Now</Text>
+              <Text style={[styles.ctaWhiteText, { color: brandColor }]}>{primaryCta}</Text>
             </PressableScale>
           </View>
         )}
@@ -432,14 +439,16 @@ export default function HomeScreen({ navigation }) {
                 </Text>
                 <Text style={styles.sectionBody}>
                   {restaurant?.description ||
-                    "We're passionate about serving fresh, high-quality food that keeps you coming back for more. Whether you're a local, a visitor, a busy professional, or a family looking for a satisfying meal — we've got you covered."}
+                    (appointment
+                      ? 'Pick a service and a time. We’ll hold it for you.'
+                      : "We're passionate about serving fresh, high-quality food that keeps you coming back for more. Whether you're a local, a visitor, a busy professional, or a family looking for a satisfying meal — we've got you covered.")}
                 </Text>
                 <PressableScale
                   onPress={handleExploreMenu}
                   style={[styles.linkBtn, !isWide && styles.linkBtnMobile, { borderColor: brandColor }]}
                   scale={0.97}
                 >
-                  <Text style={[styles.linkBtnText, { color: brandColor }]}>Explore Our Menu</Text>
+                  <Text style={[styles.linkBtnText, { color: brandColor }]}>{secondaryCta}</Text>
                   <Ionicons name="arrow-forward" size={16} color={brandColor} />
                 </PressableScale>
               </View>
@@ -472,11 +481,13 @@ export default function HomeScreen({ navigation }) {
               brandColor={brandColor}
               width={width}
               layout={galleryLayout}
+              title={appointment ? 'Our work' : 'From the kitchen'}
             />
           </ScrollReveal>
         ) : null}
 
-        {/* ── REWARDS CTA ──────────────────────────────────────── */}
+        {/* ── REWARDS CTA (ordering sites only) ───────────────── */}
+        {appointment ? null : (
         <ScrollReveal delay={60}>
           <View style={[styles.rewardsBanner, { backgroundColor: brandColor }]}>
             <Ionicons name="gift-outline" size={36} color="#fff" style={{ marginBottom: 12 }} />
@@ -495,6 +506,7 @@ export default function HomeScreen({ navigation }) {
             </PressableScale>
           </View>
         </ScrollReveal>
+        )}
 
         {/* ── LOCATION & HOURS ─────────────────────────────────── */}
         <ScrollReveal delay={80}>

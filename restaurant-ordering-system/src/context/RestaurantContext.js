@@ -18,6 +18,7 @@ import { restaurantService } from '../services/restaurantService';
 import { useAuth } from './AuthContext';
 import { isStaffForRestaurant } from '../services/authService';
 import { writeBrandCache } from '../theme/brandCache';
+import { isAppointmentBusiness } from '../utils/businessType';
 
 const RestaurantContext = createContext(null);
 
@@ -38,6 +39,9 @@ const RESERVED_PATH_SEGMENTS = new Set([
   'admin',
   'reset-password',
   'cookies',
+  'book',
+  'appointments',
+  'booking',
 ]);
 
 function isLocalhost(hostname) {
@@ -214,16 +218,20 @@ export function RestaurantProvider({ children }) {
         persistSlug(identifier.value);
       }
 
-      if (data.primary_color) {
-        writeBrandCache({ primary: data.primary_color, name: data.name });
-      }
+      writeBrandCache({
+        primary: data.primary_color,
+        name: data.name,
+        businessType: isAppointmentBusiness(data) ? 'appointment' : 'restaurant',
+      });
 
       const themeColorMeta = document.querySelector('meta[name="theme-color"]');
       if (themeColorMeta && data.primary_color) {
         themeColorMeta.setAttribute('content', data.primary_color);
       }
       if (data.name) {
-        document.title = `${data.name} — Order Online`;
+        document.title = isAppointmentBusiness(data)
+          ? `${data.name} — Book`
+          : `${data.name} — Order Online`;
       }
 
       // Domain/slug always wins. Staff-anywhere sessions that are not staff

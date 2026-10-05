@@ -15,9 +15,14 @@ import CateringScreen from '../screens/customer/CateringScreen';
 import ReviewScreen from '../screens/customer/ReviewScreen';
 import ResetPasswordScreen from '../screens/customer/ResetPasswordScreen';
 import CookiesScreen from '../screens/customer/CookiesScreen';
+import BookScreen from '../screens/customer/BookScreen';
+import AppointmentConfirmationScreen from '../screens/customer/AppointmentConfirmationScreen';
+import MyAppointmentsScreen from '../screens/customer/MyAppointmentsScreen';
 import CustomerNavbar from '../components/CustomerNavbar';
 import CartDrawer from '../components/CartDrawer';
 import ViewCartBar from '../components/ViewCartBar';
+import { useRestaurantContext } from '../context/RestaurantContext';
+import { isAppointmentBusiness } from '../utils/businessType';
 import { usePickupLocation } from '../context/PickupLocationContext';
 import { useCartContext } from '../context/CartContext';
 import { NavbarCollapseProvider } from '../context/NavbarCollapseContext';
@@ -28,6 +33,25 @@ import { useMobileBottomSheet } from '../components/BottomSheet';
 const Stack =
   Platform.OS === 'web' ? createStackNavigator() : createNativeStackNavigator();
 
+const ORDERING_ROUTES = new Set([
+  'Menu',
+  'Catering',
+  'Rewards',
+  'Hiring',
+  'Checkout',
+  'Confirmation',
+  'OrderTracker',
+]);
+
+function useOrderingRedirect(navigation, routeName) {
+  const { restaurant, loading } = useRestaurantContext();
+  const blocked = !loading && isAppointmentBusiness(restaurant) && ORDERING_ROUTES.has(routeName);
+  useEffect(() => {
+    if (blocked) navigation.replace('Book');
+  }, [blocked, navigation]);
+  return blocked;
+}
+
 function ScreenChrome({
   navigation,
   route,
@@ -36,6 +60,9 @@ function ScreenChrome({
   withViewCart = false,
   children,
 }) {
+  const { restaurant } = useRestaurantContext();
+  const appointment = isAppointmentBusiness(restaurant);
+  const cartEnabled = withCart && !appointment;
   const [cartOpen, setCartOpen] = useState(false);
   const { hasSelection, needsChoice } = usePickupLocation();
   const { itemCount } = useCartContext();
@@ -44,7 +71,7 @@ function ScreenChrome({
   const openCart = useCallback(() => setCartOpen(true), []);
   const closeCart = useCallback(() => setCartOpen(false), []);
 
-  const showViewCartBar = withViewCart && mobileSheet && itemCount > 0 && !cartOpen;
+  const showViewCartBar = cartEnabled && withViewCart && mobileSheet && itemCount > 0 && !cartOpen;
 
   useEffect(() => {
     if (withCart && route.params?.openCart) {
@@ -64,7 +91,7 @@ function ScreenChrome({
       <CustomerNavbar
         navigation={navigation}
         currentRoute={currentRoute}
-        onOpenCart={withCart ? openCart : undefined}
+        onOpenCart={cartEnabled ? openCart : undefined}
       />
       <View style={styles.body}>
         {children}
@@ -72,7 +99,7 @@ function ScreenChrome({
       {showViewCartBar ? (
         <ViewCartBar itemCount={itemCount} onPress={openCart} />
       ) : null}
-      {withCart ? (
+      {cartEnabled ? (
         <CartDrawer
           visible={cartOpen}
           onClose={closeCart}
@@ -92,6 +119,8 @@ function HomeScreenWithCart({ navigation, route }) {
 }
 
 function MenuScreenWithCart({ navigation, route }) {
+  const blocked = useOrderingRedirect(navigation, 'Menu');
+  if (blocked) return null;
   return (
     <ScreenChrome navigation={navigation} route={route} currentRoute="Menu" withCart withViewCart>
       <MenuScreen />
@@ -100,6 +129,8 @@ function MenuScreenWithCart({ navigation, route }) {
 }
 
 function CheckoutScreenWithNav({ navigation, route }) {
+  const blocked = useOrderingRedirect(navigation, 'Checkout');
+  if (blocked) return null;
   return (
     <ScreenChrome navigation={navigation} route={route} currentRoute="Checkout">
       <CheckoutScreen navigation={navigation} />
@@ -108,6 +139,8 @@ function CheckoutScreenWithNav({ navigation, route }) {
 }
 
 function ConfirmationScreenWithNav({ navigation, route }) {
+  const blocked = useOrderingRedirect(navigation, 'Confirmation');
+  if (blocked) return null;
   return (
     <ScreenChrome navigation={navigation} route={route} currentRoute="Confirmation">
       <ConfirmationScreen navigation={navigation} route={route} />
@@ -116,6 +149,8 @@ function ConfirmationScreenWithNav({ navigation, route }) {
 }
 
 function TrackerScreenWithNav({ navigation }) {
+  const blocked = useOrderingRedirect(navigation, 'OrderTracker');
+  if (blocked) return null;
   return (
     <View style={styles.screen}>
       <TrackerScreen navigation={navigation} />
@@ -124,6 +159,8 @@ function TrackerScreenWithNav({ navigation }) {
 }
 
 function RewardsScreenWithNav({ navigation }) {
+  const blocked = useOrderingRedirect(navigation, 'Rewards');
+  if (blocked) return null;
   return (
     <View style={styles.screen}>
       <RewardsScreen navigation={navigation} />
@@ -140,6 +177,8 @@ function ProfileScreenWithNav({ navigation }) {
 }
 
 function HiringScreenWithNav({ navigation, route }) {
+  const blocked = useOrderingRedirect(navigation, 'Hiring');
+  if (blocked) return null;
   return (
     <ScreenChrome navigation={navigation} route={route} currentRoute="Hiring">
       <HiringScreen navigation={navigation} />
@@ -148,6 +187,8 @@ function HiringScreenWithNav({ navigation, route }) {
 }
 
 function CateringScreenWithNav({ navigation, route }) {
+  const blocked = useOrderingRedirect(navigation, 'Catering');
+  if (blocked) return null;
   return (
     <ScreenChrome navigation={navigation} route={route} currentRoute="Catering">
       <CateringScreen navigation={navigation} route={route} />
@@ -173,6 +214,30 @@ function ResetPasswordScreenWithNav({ navigation, route }) {
   );
 }
 
+function BookScreenWithNav({ navigation, route }) {
+  return (
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Book">
+      <BookScreen navigation={navigation} />
+    </ScreenChrome>
+  );
+}
+
+function AppointmentConfirmationWithNav({ navigation, route }) {
+  return (
+    <ScreenChrome navigation={navigation} route={route} currentRoute="AppointmentConfirmation">
+      <AppointmentConfirmationScreen navigation={navigation} route={route} />
+    </ScreenChrome>
+  );
+}
+
+function MyAppointmentsWithNav({ navigation, route }) {
+  return (
+    <ScreenChrome navigation={navigation} route={route} currentRoute="Appointments">
+      <MyAppointmentsScreen navigation={navigation} />
+    </ScreenChrome>
+  );
+}
+
 function CookiesScreenWithNav({ navigation, route }) {
   return (
     <ScreenChrome navigation={navigation} route={route} currentRoute="Cookies">
@@ -193,6 +258,9 @@ export default function CustomerNavigator() {
         }}
       >
         <Stack.Screen name="Home" component={HomeScreenWithCart} />
+        <Stack.Screen name="Book" component={BookScreenWithNav} />
+        <Stack.Screen name="Appointments" component={MyAppointmentsWithNav} />
+        <Stack.Screen name="AppointmentConfirmation" component={AppointmentConfirmationWithNav} />
         <Stack.Screen name="Menu" component={MenuScreenWithCart} />
         <Stack.Screen name="Catering" component={CateringScreenWithNav} />
         <Stack.Screen name="Rewards" component={RewardsScreenWithNav} />
