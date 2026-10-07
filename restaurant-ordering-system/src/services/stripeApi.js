@@ -421,3 +421,38 @@ export async function getPaymentMethodSummary(paymentIntentId, {
     return null;
   }
 }
+
+async function postAppointmentFunction(path, body) {
+  if (!BACKEND_URL) {
+    throw new Error(
+      'Payment backend URL is not configured. Set EXPO_PUBLIC_BACKEND_URL or EXPO_PUBLIC_SUPABASE_URL in .env',
+    );
+  }
+  const response = await fetch(`${BACKEND_URL}/${path}`, {
+    method: 'POST',
+    headers: await getFunctionHeaders({ useUserJwt: true }),
+    body: JSON.stringify(body),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    throw new Error(payload.error || 'Payment request failed');
+  }
+  return payload;
+}
+
+export function createAppointmentCheckout(appointmentId, returnUrl) {
+  return postAppointmentFunction('create-appointment-checkout', { appointmentId, returnUrl });
+}
+
+export function chargeAppointmentNoShow(appointmentId) {
+  return postAppointmentFunction('charge-appointment-no-show', { appointmentId });
+}
+
+export function refundAppointment(appointmentId) {
+  return postAppointmentFunction('refund-appointment', { appointmentId });
+}

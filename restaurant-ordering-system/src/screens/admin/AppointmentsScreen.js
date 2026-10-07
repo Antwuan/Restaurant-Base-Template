@@ -17,11 +17,15 @@ import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
 import { confirmAsync } from '../../utils/confirm';
 import * as appointmentService from '../../services/appointmentService';
+import { chargeAppointmentNoShow } from '../../services/stripeApi';
+import ChairsPanel from '../../components/admin/ChairsPanel';
+import BottomSheet, { useMobileBottomSheet } from '../../components/BottomSheet';
 import {
   addDays,
   clockInZone,
   formatAppointmentWhen,
   formatDateInZone,
+  formatServicePrice,
   formatTimeInZone,
   monthLabel,
   restaurantTimeZone,
@@ -97,11 +101,12 @@ function hourLabel(hour) {
   return `${h} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
-function colorForService(id) {
-  const key = String(id || '');
-  let n = 0;
-  for (let i = 0; i < key.length; i += 1) n = (n + key.charCodeAt(i) * (i + 1)) % PALETTE.length;
-  return PALETTE[n];
+function colorForChair(row) {
+  const bg = row.appointment_chairs?.color;
+  const match = PALETTE.find((item) => item.bg.toLowerCase() === String(bg || '').toLowerCase());
+  if (match) return match;
+  if (bg) return { bg, text: '#1f2937' };
+  return PALETTE[0];
 }
 
 function gridBounds(hoursOfOperation, dates, rows, timeZone) {
@@ -159,6 +164,69 @@ function layoutDay(rows, timeZone) {
   });
 }
 
+function AppointmentDetail({
+  selected,
+  colors,
+  timeZone,
+  cancellingId,
+  noShowId,
+  onCancel,
+  onNoShow,
+  onClose,
+}) {
+  return (
+    <>
+      <Text style={[styles.detailTitle, { color: colors.textPrimary }]}>{selected.service_name}</Text>
+      <Text style={[styles.detailLine, { color: colors.textPrimary }]}>{customerLabel(selected)}</Text>
+      {selected.appointment_chairs?.name ? (
+        <Text style={[styles.detailLine, { color: colors.textSecondary }]}>
+          {selected.appointment_chairs.name}
+        </Text>
+      ) : null}
+      <Text style={[styles.detailLine, { color: colors.textSecondary }]}>
+        {formatAppointmentWhen(selected.starts_at, timeZone)}
+      </Text>
+      <Text style={[styles.detailLine, { color: colors.textSecondary }]}>
+        {selected.duration_minutes} min · {formatServicePrice(selected.price_cents)}
+      </Text>
+      <Text style={[styles.detailLine, { color: colors.textSecondary }]}>
+        {selected.status === 'no_show'
+          ? 'No-show'
+          : selected.payment_choice === 'card_on_file'
+            ? `Card saved · no-show fee ${formatServicePrice(selected.no_show_fee_cents)}`
+            : 'Paid in advance'}
+      </Text>
+      <View style={styles.detailActions}>
+        {selected.status === 'confirmed' ? (
+          <TouchableOpacity
+            onPress={() => onNoShow(selected)}
+            disabled={noShowId === selected.id}
+            style={styles.cancelBtn}
+          >
+            <Text style={styles.cancelText}>
+              {noShowId === selected.id ? 'Working…' : 'No-show'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+        {selected.status === 'confirmed' ? (
+          <TouchableOpacity
+            onPress={() => onCancel(selected)}
+            disabled={cancellingId === selected.id}
+            style={styles.cancelBtn}
+          >
+            <Text style={styles.cancelText}>
+              {cancellingId === selected.id ? 'Cancelling…' : 'Cancel appointment'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity onPress={onClose}>
+          <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Close</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+}
+
 function Panes({ wide, children }) {
   if (wide) {
     return <View style={styles.panesRow}>{children}</View>;
@@ -177,6 +245,7 @@ export default function AppointmentsScreen() {
   const c = theme.colors;
   const tz = restaurantTimeZone(restaurant);
   const wide = width >= WIDE_BREAKPOINT;
+  const mobileSheet = useMobileBottomSheet();
   const today = todayInZone(tz);
 
   const [anchor, setAnchor] = useState(() => todayInZone(tz));
@@ -184,7 +253,9 @@ export default function AppointmentsScreen() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const [gridHeight, setGridHeight] = useState(0);
   const [cancellingId, setCancellingId] = useState(null);
+  const [noShowId, setNoShowId] = useState(null);
 
   const weekStart = startOfWeek(anchor);
   const dates = useMemo(() => weekDates(weekStart), [weekStart]);
@@ -237,6 +308,9 @@ export default function AppointmentsScreen() {
 
   const hours = [];
   for (let hour = bounds.startHour; hour < bounds.endHour; hour += 1) hours.push(hour);
+  const hourHeight = hours.length > 0 && gridHeight > 0
+    ? Math.max(HOUR_HEIGHT, gridHeight / hours.length)
+    : HOUR_HEIGHT;
 
   const shiftWeek = (days) => {
     const next = addDays(weekStart, days);
@@ -247,9 +321,12 @@ export default function AppointmentsScreen() {
   const jumpTo = (date) => setAnchor(date);
 
   const handleCancel = async (row) => {
+    const prepaid = row.payment_choice === 'prepaid' && row.stripe_payment_intent_id && !row.stripe_refund_id;
     const confirmed = await confirmAsync({
       title: 'Cancel appointment',
-      message: `Cancel ${customerLabel(row)} — ${row.service_name} at ${formatTimeInZone(row.starts_at, tz)}?`,
+      message: prepaid
+        ? `Cancel ${customerLabel(row)} — ${row.service_name} at ${formatTimeInZone(row.starts_at, tz)}? The payment will be refunded.`
+        : `Cancel ${customerLabel(row)} — ${row.service_name} at ${formatTimeInZone(row.starts_at, tz)}?`,
       confirmText: 'Cancel appointment',
       destructive: true,
     });
@@ -266,7 +343,61 @@ export default function AppointmentsScreen() {
     }
   };
 
+  const handleNoShow = async (row) => {
+    const charge = row.payment_choice === 'card_on_file' && Number(row.no_show_fee_cents) > 0;
+    const fee = formatServicePrice(row.no_show_fee_cents);
+    const confirmed = await confirmAsync({
+      title: 'Mark no-show',
+      message: charge
+        ? `Mark ${customerLabel(row)} as a no-show and charge ${fee}?`
+        : `Mark ${customerLabel(row)} as a no-show?`,
+      confirmText: charge ? `Charge ${fee}` : 'Mark no-show',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setNoShowId(row.id);
+    try {
+      await chargeAppointmentNoShow(row.id);
+      setSelected(null);
+      await load();
+    } catch (e) {
+      Alert.alert('Could not mark no-show', e.message || 'Please try again.');
+    } finally {
+      setNoShowId(null);
+    }
+  };
+
   const monthCursor = monthStart(visibleMonth);
+
+  const weekCards = useMemo(
+    () => [...weekRows].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at)),
+    [weekRows],
+  );
+
+  const renderAppointmentCard = (row) => {
+    const color = colorForChair(row);
+    return (
+      <TouchableOpacity
+        key={row.id}
+        onPress={() => setSelected(row)}
+        style={[styles.upcomingCard, { borderColor: c.border, backgroundColor: c.backgroundCard }]}
+      >
+        <View style={[styles.upcomingSwatch, { backgroundColor: color.bg }]} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.upcomingName, { color: c.textPrimary }]} numberOfLines={1}>
+            {customerLabel(row)}
+          </Text>
+          <Text style={[styles.upcomingMeta, { color: c.textSecondary }]} numberOfLines={1}>
+            {row.service_name}
+            {row.appointment_chairs?.name ? ` · ${row.appointment_chairs.name}` : ''}
+          </Text>
+          <Text style={[styles.upcomingMeta, { color: c.textSecondary }]}>
+            {formatAppointmentWhen(row.starts_at, tz)}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={[styles.page, { backgroundColor: c.background }]}>
@@ -345,18 +476,15 @@ export default function AppointmentsScreen() {
               );
             })}
           </View>
+          <ChairsPanel fill={wide} />
         </View>
 
-        <View style={[styles.weekPane, !wide && styles.weekPaneStacked, { backgroundColor: c.background }]}>
+        {wide ? (
+        <View style={[styles.weekPane, { backgroundColor: c.background }]}>
           {loading ? (
             <ActivityIndicator color={c.brand} style={{ marginTop: 24 }} />
           ) : (
-            <ScrollView
-              horizontal={!wide}
-              style={styles.weekScroll}
-              contentContainerStyle={wide ? styles.weekScrollFill : styles.weekScrollWide}
-            >
-              <View style={[styles.weekInner, !wide && styles.weekInnerMin]}>
+            <View style={styles.weekFill}>
                 <View style={[styles.dayHeaderRow, { borderBottomColor: c.border }]}>
                   <View style={styles.gutter} />
                   {dates.map((date) => {
@@ -374,11 +502,24 @@ export default function AppointmentsScreen() {
                     );
                   })}
                 </View>
-                <ScrollView style={styles.gridScroll} contentContainerStyle={styles.gridScrollContent}>
-                  <View style={styles.gridBody}>
+                <View
+                  style={styles.gridScroll}
+                  onLayout={(event) => {
+                    const next = event.nativeEvent.layout.height;
+                    setGridHeight((current) => (Math.abs(current - next) < 1 ? current : next));
+                  }}
+                >
+                <ScrollView
+                  style={styles.gridScrollFill}
+                  contentContainerStyle={[
+                    styles.gridScrollContent,
+                    gridHeight > 0 && { minHeight: gridHeight },
+                  ]}
+                >
+                  <View style={[styles.gridBody, { minHeight: hours.length * hourHeight }]}>
                     <View style={styles.gutter}>
                       {hours.map((hour) => (
-                        <View key={hour} style={styles.hourLabelWrap}>
+                        <View key={hour} style={[styles.hourLabelWrap, { height: hourHeight }]}>
                           <Text style={[styles.hourLabel, { color: c.textSecondary }]}>{hourLabel(hour)}</Text>
                         </View>
                       ))}
@@ -392,17 +533,17 @@ export default function AppointmentsScreen() {
                           key={date}
                           style={[
                             styles.dayCol,
-                            { borderLeftColor: c.border, height: hours.length * HOUR_HEIGHT },
+                            { borderLeftColor: c.border, height: hours.length * hourHeight },
                             isToday && { backgroundColor: c.brandLight || `${c.brand}14` },
                           ]}
                         >
                           {hours.map((hour) => (
-                            <View key={hour} style={[styles.hourLine, { borderBottomColor: c.border }]} />
+                            <View key={hour} style={[styles.hourLine, { height: hourHeight, borderBottomColor: c.border }]} />
                           ))}
                           {placed.map(({ row, start, lane, laneCount }) => {
-                            const color = colorForService(row.service_id || row.service_name);
-                            const top = ((start - bounds.startHour * 60) / 60) * HOUR_HEIGHT;
-                            const height = Math.max(22, ((Number(row.duration_minutes) || 30) / 60) * HOUR_HEIGHT - 3);
+                            const color = colorForChair(row);
+                            const top = ((start - bounds.startHour * 60) / 60) * hourHeight;
+                            const height = Math.max(22, ((Number(row.duration_minutes) || 30) / 60) * hourHeight - 3);
                             const widthPct = 100 / laneCount;
                             return (
                               <TouchableOpacity
@@ -436,85 +577,88 @@ export default function AppointmentsScreen() {
                     })}
                   </View>
                 </ScrollView>
-              </View>
-            </ScrollView>
+                </View>
+            </View>
           )}
         </View>
+        ) : (
+          <View style={[styles.mobileCards, { backgroundColor: c.background }]}>
+            <Text style={[styles.upcomingTitle, { color: c.textPrimary }]}>This week</Text>
+            {loading ? (
+              <ActivityIndicator color={c.brand} style={{ marginTop: 24 }} />
+            ) : weekCards.length === 0 ? (
+              <Text style={[styles.upcomingEmpty, { color: c.textSecondary }]}>Nothing this week.</Text>
+            ) : (
+              weekCards.map(renderAppointmentCard)
+            )}
+          </View>
+        )}
 
-        <View style={[styles.upcomingPane, { borderLeftColor: c.border, backgroundColor: c.backgroundCard }, !wide && styles.paneStacked]}>
-          <Text style={[styles.upcomingTitle, { color: c.textPrimary }]}>Upcoming</Text>
-          {upcoming.length === 0 ? (
-            <Text style={[styles.upcomingEmpty, { color: c.textSecondary }]}>Nothing coming up.</Text>
-          ) : (
-            upcoming.map((row) => {
-              const color = colorForService(row.service_id || row.service_name);
-              return (
-                <TouchableOpacity
-                  key={row.id}
-                  onPress={() => setSelected(row)}
-                  style={[styles.upcomingCard, { borderColor: c.border }]}
-                >
-                  <View style={[styles.upcomingSwatch, { backgroundColor: color.bg }]} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.upcomingName, { color: c.textPrimary }]} numberOfLines={1}>
-                      {customerLabel(row)}
-                    </Text>
-                    <Text style={[styles.upcomingMeta, { color: c.textSecondary }]} numberOfLines={1}>
-                      {row.service_name}
-                    </Text>
-                    <Text style={[styles.upcomingMeta, { color: c.textSecondary }]}>
-                      {formatAppointmentWhen(row.starts_at, tz)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })
-          )}
-        </View>
+        {wide ? (
+          <View style={[styles.upcomingPane, { borderLeftColor: c.border, backgroundColor: c.backgroundCard }]}>
+            <Text style={[styles.upcomingTitle, { color: c.textPrimary }]}>Upcoming</Text>
+            {upcoming.length === 0 ? (
+              <Text style={[styles.upcomingEmpty, { color: c.textSecondary }]}>Nothing coming up.</Text>
+            ) : (
+              upcoming.map(renderAppointmentCard)
+            )}
+          </View>
+        ) : null}
       </Panes>
 
-      <Modal
-        visible={!!selected}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelected(null)}
-      >
-        <View style={styles.detailOverlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelected(null)} />
+      {mobileSheet ? (
+        <BottomSheet
+          visible={!!selected}
+          onClose={() => setSelected(null)}
+          style={{ backgroundColor: c.backgroundCard }}
+        >
           {selected ? (
-            <View style={[styles.detailCard, { backgroundColor: c.backgroundCard }]}>
-              <Text style={[styles.detailTitle, { color: c.textPrimary }]}>{selected.service_name}</Text>
-              <Text style={[styles.detailLine, { color: c.textPrimary }]}>{customerLabel(selected)}</Text>
-              <Text style={[styles.detailLine, { color: c.textSecondary }]}>
-                {formatAppointmentWhen(selected.starts_at, tz)}
-              </Text>
-              <Text style={[styles.detailLine, { color: c.textSecondary }]}>
-                {selected.duration_minutes} min
-              </Text>
-              <View style={styles.detailActions}>
-                <TouchableOpacity
-                  onPress={() => handleCancel(selected)}
-                  disabled={cancellingId === selected.id}
-                  style={styles.cancelBtn}
-                >
-                  <Text style={styles.cancelText}>
-                    {cancellingId === selected.id ? 'Cancelling…' : 'Cancel appointment'}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setSelected(null)}>
-                  <Text style={{ color: c.textSecondary, fontWeight: '600' }}>Close</Text>
-                </TouchableOpacity>
-              </View>
+            <View style={styles.detailSheet}>
+              <AppointmentDetail
+                selected={selected}
+                colors={c}
+                timeZone={tz}
+                cancellingId={cancellingId}
+                noShowId={noShowId}
+                onCancel={handleCancel}
+                onNoShow={handleNoShow}
+                onClose={() => setSelected(null)}
+              />
             </View>
           ) : null}
-        </View>
-      </Modal>
+        </BottomSheet>
+      ) : (
+        <Modal
+          visible={!!selected}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSelected(null)}
+        >
+          <View style={styles.detailOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelected(null)} />
+            {selected ? (
+              <View style={[styles.detailCard, { backgroundColor: c.backgroundCard }]}>
+                <AppointmentDetail
+                  selected={selected}
+                  colors={c}
+                  timeZone={tz}
+                  cancellingId={cancellingId}
+                  noShowId={noShowId}
+                  onCancel={handleCancel}
+                  onNoShow={handleNoShow}
+                  onClose={() => setSelected(null)}
+                />
+              </View>
+            ) : null}
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1 },
+  page: { flex: 1, minHeight: 0 },
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -532,8 +676,7 @@ const styles = StyleSheet.create({
   panesRow: { flex: 1, flexDirection: 'row', minHeight: 0 },
   stackScroll: { flex: 1 },
   panesStacked: { flexDirection: 'column' },
-  weekPaneStacked: { flexGrow: 0, flexBasis: 'auto', height: 520 },
-  monthPane: { width: 232, borderRightWidth: 1, padding: 12 },
+  monthPane: { width: 232, borderRightWidth: 1, padding: 12, minHeight: 0, overflow: 'hidden' },
   paneStacked: { width: '100%', borderRightWidth: 0, borderLeftWidth: 0 },
   monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   monthLabel: { fontSize: 13, fontWeight: '700' },
@@ -543,20 +686,18 @@ const styles = StyleSheet.create({
   miniCell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
   miniDay: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   miniDayText: { fontSize: 12 },
-  weekPane: { flex: 1, minWidth: 0, minHeight: 360 },
-  weekScroll: { flex: 1 },
-  weekScrollFill: { flexGrow: 1 },
-  weekScrollWide: { flexGrow: 1 },
-  weekInner: { flex: 1 },
-  weekInnerMin: { minWidth: 720, flex: undefined },
+  weekPane: { flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' },
+  weekFill: { flex: 1, minHeight: 0 },
+  mobileCards: { padding: 14, gap: 8 },
   dayHeaderRow: { flexDirection: 'row', borderBottomWidth: 1, paddingVertical: 8 },
   gutter: { width: 56 },
   dayHeader: { flex: 1, alignItems: 'center', gap: 2 },
   dayName: { fontSize: 11, fontWeight: '600' },
   dayBadge: { minWidth: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   dayNum: { fontSize: 14, fontWeight: '700' },
-  gridScroll: { flex: 1 },
-  gridScrollContent: { paddingBottom: 24 },
+  gridScroll: { flex: 1, minHeight: 0 },
+  gridScrollFill: { flex: 1 },
+  gridScrollContent: { flexGrow: 1 },
   gridBody: { flexDirection: 'row' },
   hourLabelWrap: { height: HOUR_HEIGHT, justifyContent: 'flex-start' },
   hourLabel: { fontSize: 11, marginTop: -6, paddingRight: 6, textAlign: 'right' },
@@ -592,6 +733,7 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
+  detailSheet: { paddingHorizontal: 18, paddingBottom: 28 },
   detailCard: {
     width: '100%',
     maxWidth: 380,
