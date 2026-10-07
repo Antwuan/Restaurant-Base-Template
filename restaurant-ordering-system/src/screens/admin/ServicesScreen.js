@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
+  useWindowDimensions,
   Switch,
   ActivityIndicator,
   Alert,
@@ -14,6 +15,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantContext } from '../../context/RestaurantContext';
 import { useTheme } from '../../theme';
+import BottomSheet, { useMobileBottomSheet } from '../../components/BottomSheet';
+import ServiceCategoryFilter, {
+  ALL_SERVICES,
+  SERVICE_DESKTOP_BREAKPOINT,
+  filterServices,
+  serviceCategories,
+  ServiceSearchEmpty,
+} from '../../components/ServiceCategoryFilter';
 import { confirmAsync } from '../../utils/confirm';
 import { formatServicePrice } from '../../utils/appointmentTime';
 import * as appointmentService from '../../services/appointmentService';
@@ -22,11 +31,45 @@ const EMPTY_FORM = {
   id: null,
   name: '',
   description: '',
-  duration: '30',
+  category: '',
+  duration: '60',
   price: '0.00',
   is_active: true,
   sort_order: 0,
+  addonIds: [],
 };
+
+const EMPTY_ADDON = {
+  id: null,
+  name: '',
+  duration: '60',
+  price: '0.00',
+  is_active: true,
+};
+
+function EditorSheet({ visible, onClose, mobile, colors, children }) {
+  if (mobile) {
+    return (
+      <BottomSheet
+        visible={visible}
+        onClose={onClose}
+        expand
+        keyboard
+        style={{ backgroundColor: colors.backgroundCard }}
+      >
+        <ScrollView
+          style={styles.sheetScroll}
+          contentContainerStyle={styles.sheetFormScroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          {children}
+        </ScrollView>
+      </BottomSheet>
+    );
+  }
+  if (!visible) return null;
+  return children;
+}
 
 function dollarsToCents(value) {
   const n = Number(String(value).replace(/[^0-9.]/g, ''));
@@ -38,16 +81,29 @@ export default function ServicesScreen() {
   const { restaurant } = useRestaurantContext();
   const { theme } = useTheme();
   const c = theme.colors;
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= SERVICE_DESKTOP_BREAKPOINT;
+  const mobileSheet = useMobileBottomSheet();
   const [services, setServices] = useState([]);
+  const [addons, setAddons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
+  const [addonForm, setAddonForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [activeCategory, setActiveCategory] = useState(ALL_SERVICES);
 
   const load = useCallback(async () => {
     if (!restaurant?.id) return;
     setLoading(true);
     try {
-      setServices(await appointmentService.listServices(restaurant.id));
+      const [serviceRows, addonRows] = await Promise.all([
+        appointmentService.listServices(restaurant.id),
+        appointmentService.listAddons(restaurant.id),
+      ]);
+      setServices(serviceRows);
+      setAddons(addonRows);
     } catch {
       Alert.alert('Could not load services', 'Please try again.');
     } finally {
@@ -57,16 +113,42 @@ export default function ServicesScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => setForm({ ...EMPTY_FORM, sort_order: services.length });
-  const openEdit = (service) => setForm({
+  const categories = useMemo(() => serviceCategories(services), [services]);
+
+  useEffect(() => {
+    if (activeCategory !== ALL_SERVICES && !categories.includes(activeCategory)) {
+      setActiveCategory(ALL_SERVICES);
+    }
+  }, [categories, activeCategory]);
+
+  const filteredServices = useMemo(
+    () => filterServices(services, searchQuery, activeCategory),
+    [services, searchQuery, activeCategory],
+  );
+
+  const clearServiceSearch = () => {
+    setSearchQuery('');
+    setActiveCategory(ALL_SERVICES);
+  };
+
+  const openNew = () => {
+    if (mobileSheet) setAddonForm(null);
+    setForm({ ...EMPTY_FORM, sort_order: services.length });
+  };
+  const openEdit = (service) => {
+    if (mobileSheet) setAddonForm(null);
+    setForm({
     id: service.id,
     name: service.name,
     description: service.description || '',
+    category: service.category || '',
     duration: String(service.duration_minutes),
     price: (Number(service.price_cents || 0) / 100).toFixed(2),
     is_active: service.is_active !== false,
     sort_order: service.sort_order || 0,
-  });
+    addonIds: (service.addons || []).map((addon) => addon.id),
+    });
+  };
 
   const handleSave = async () => {
     if (!restaurant?.id || !form) return;
@@ -81,21 +163,73 @@ export default function ServicesScreen() {
       return;
     }
     if (priceCents == null) {
-      Alert.alert('Invalid price', 'Enter a price of zero or more. It is shown only and is not charged.');
+      Alert.alert('Invalid price', 'Enter a price of zero or more.');
       return;
     }
     setSaving(true);
     try {
-      await appointmentService.saveService(restaurant.id, {
+      const saved = await appointmentService.saveService(restaurant.id, {
         id: form.id,
         name: form.name,
         description: form.description,
+        category: form.category,
         duration_minutes: duration,
         price_cents: priceCents,
         is_active: form.is_active,
         sort_order: form.sort_order,
       });
+      await appointmentService.setServiceAddons(saved.id, form.addonIds);
       setForm(null);
+      await load();
+    } catch (e) {
+      Alert.alert('Could not save', e.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleAddon = (addonId) => {
+    setForm((current) => {
+      if (!current) return current;
+      const has = current.addonIds.includes(addonId);
+      return {
+        ...current,
+        addonIds: has
+          ? current.addonIds.filter((id) => id !== addonId)
+          : [...current.addonIds, addonId],
+      };
+    });
+  };
+
+  const handleSaveAddon = async () => {
+    if (!restaurant?.id || !addonForm) return;
+    const duration = Number.parseInt(String(addonForm.duration).trim(), 10);
+    const priceCents = dollarsToCents(addonForm.price);
+    if (!addonForm.name.trim()) {
+      Alert.alert('Name required', 'Enter an add-on name.');
+      return;
+    }
+    if (!Number.isInteger(duration) || duration < 1 || duration > 480) {
+      Alert.alert('Invalid duration', 'Enter a duration from 1 to 480 minutes.');
+      return;
+    }
+    if (priceCents == null) {
+      Alert.alert('Invalid price', 'Enter a price of zero or more.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await appointmentService.saveAddon(restaurant.id, {
+        id: addonForm.id,
+        name: addonForm.name,
+        duration_minutes: duration,
+        price_cents: priceCents,
+        is_active: addonForm.is_active,
+        sort_order: addonForm.id
+          ? addons.find((row) => row.id === addonForm.id)?.sort_order || 0
+          : addons.length,
+      });
+      setAddonForm(null);
       await load();
     } catch (e) {
       Alert.alert('Could not save', e.message || 'Please try again.');
@@ -136,18 +270,49 @@ export default function ServicesScreen() {
     <ScrollView style={[styles.page, { backgroundColor: c.background }]} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={[styles.intro, { color: c.textSecondary }]}>
-          Customers book one service at a time. Price is displayed and is not charged.
+          Customers book one service and any add-ons you attach. The visit price is the sum, and they can pay it now or save a card.
         </Text>
         <TouchableOpacity style={[styles.addBtn, { backgroundColor: c.brand }]} onPress={openNew}>
           <Text style={styles.addBtnText}>Add service</Text>
         </TouchableOpacity>
       </View>
 
+      <View style={[styles.browse, isDesktop && services.length > 0 && styles.browseDesktop]}>
+      {services.length > 0 ? (
+        <ServiceCategoryFilter
+          colors={c}
+          query={searchQuery}
+          onChangeQuery={setSearchQuery}
+          focused={searchFocused}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
+          categories={categories}
+          activeCategory={activeCategory}
+          onSelectCategory={setActiveCategory}
+          bleed={16}
+        />
+      ) : null}
+      <View style={[styles.browseMain, isDesktop && services.length > 0 && styles.browseMainDesktop]}>
+
+      <EditorSheet
+        visible={!!form}
+        onClose={() => setForm(null)}
+        mobile={mobileSheet}
+        colors={c}
+      >
       {form ? (
-        <View style={[styles.card, { backgroundColor: c.backgroundCard, borderColor: c.border }]}>
+        <View style={[styles.card, { backgroundColor: c.backgroundCard, borderColor: c.border }, mobileSheet && styles.sheetCard]}>
           <Text style={[styles.cardTitle, { color: c.textPrimary }]}>
             {form.id ? 'Edit service' : 'New service'}
           </Text>
+          <Text style={[styles.label, { color: c.textSecondary }]}>Category</Text>
+          <TextInput
+            style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+            value={form.category}
+            onChangeText={(category) => setForm((f) => ({ ...f, category }))}
+            placeholder="Color"
+            placeholderTextColor={c.textDisabled}
+          />
           <Text style={[styles.label, { color: c.textSecondary }]}>Name</Text>
           <TextInput
             style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
@@ -174,7 +339,7 @@ export default function ServicesScreen() {
             placeholder="30"
             placeholderTextColor={c.textDisabled}
           />
-          <Text style={[styles.label, { color: c.textSecondary }]}>Price shown ($)</Text>
+          <Text style={[styles.label, { color: c.textSecondary }]}>Price ($)</Text>
           <TextInput
             style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
             value={form.price}
@@ -183,6 +348,32 @@ export default function ServicesScreen() {
             placeholder="0.00"
             placeholderTextColor={c.textDisabled}
           />
+          {addons.length > 0 ? (
+            <View style={{ marginTop: 12 }}>
+              <Text style={[styles.label, { color: c.textSecondary, marginTop: 0 }]}>Add-ons offered with this service</Text>
+              {addons.map((addon) => {
+                const selected = form.addonIds.includes(addon.id);
+                return (
+                  <TouchableOpacity
+                    key={addon.id}
+                    onPress={() => toggleAddon(addon.id)}
+                    style={styles.addonPick}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected }}
+                  >
+                    <Ionicons
+                      name={selected ? 'checkbox' : 'square-outline'}
+                      size={20}
+                      color={selected ? c.brand : c.textSecondary}
+                    />
+                    <Text style={{ color: c.textPrimary, flex: 1 }}>
+                      {addon.name} · {addon.duration_minutes} min · {formatServicePrice(addon.price_cents)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
           <View style={styles.switchRow}>
             <Text style={{ color: c.textPrimary }}>Active</Text>
             <Switch value={form.is_active} onValueChange={(is_active) => setForm((f) => ({ ...f, is_active }))} />
@@ -197,13 +388,16 @@ export default function ServicesScreen() {
           </View>
         </View>
       ) : null}
+      </EditorSheet>
 
       {loading ? (
         <ActivityIndicator color={c.brand} style={{ marginTop: 24 }} />
       ) : services.length === 0 ? (
         <Text style={[styles.empty, { color: c.textSecondary }]}>No services yet.</Text>
+      ) : filteredServices.length === 0 ? (
+        <ServiceSearchEmpty colors={c} query={searchQuery} onClear={clearServiceSearch} />
       ) : (
-        services.map((service) => (
+        filteredServices.map((service) => (
           <View
             key={service.id}
             style={[
@@ -222,6 +416,9 @@ export default function ServicesScreen() {
               >
                 {service.name}
               </Text>
+              {service.category ? (
+                <Text style={[styles.meta, { color: c.textSecondary }]}>{service.category}</Text>
+              ) : null}
               <Text
                 style={[
                   styles.price,
@@ -233,6 +430,11 @@ export default function ServicesScreen() {
               <Text style={[styles.meta, { color: c.textSecondary }]}>
                 {service.duration_minutes} min
               </Text>
+              {service.addons?.length ? (
+                <Text style={[styles.meta, { color: c.textSecondary }]}>
+                  Add-ons: {service.addons.map((addon) => addon.name).join(', ')}
+                </Text>
+              ) : null}
               {service.description ? (
                 <Text
                   style={[styles.description, { color: c.textSecondary }]}
@@ -288,6 +490,108 @@ export default function ServicesScreen() {
           </View>
         ))
       )}
+      </View>
+      </View>
+
+      <View style={styles.header}>
+        <Text style={[styles.cardTitle, { color: c.textPrimary, marginBottom: 0 }]}>Add-ons</Text>
+        <TouchableOpacity
+          style={[styles.addBtn, { backgroundColor: c.brand }]}
+          onPress={() => {
+            if (mobileSheet) setForm(null);
+            setAddonForm({ ...EMPTY_ADDON });
+          }}
+        >
+          <Text style={styles.addBtnText}>Add add-on</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={[styles.intro, { color: c.textSecondary }]}>
+        Add-ons are optional extras on a service. Their time and price are added to the visit. Set real prices before you go live — only the consultation is priced from the sample menu.
+      </Text>
+      <EditorSheet
+        visible={!!addonForm}
+        onClose={() => setAddonForm(null)}
+        mobile={mobileSheet}
+        colors={c}
+      >
+      {addonForm ? (
+        <View style={[styles.card, { backgroundColor: c.backgroundCard, borderColor: c.border }, mobileSheet && styles.sheetCard]}>
+          <Text style={[styles.cardTitle, { color: c.textPrimary }]}>
+            {addonForm.id ? 'Edit add-on' : 'New add-on'}
+          </Text>
+          <Text style={[styles.label, { color: c.textSecondary }]}>Name</Text>
+          <TextInput
+            style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+            value={addonForm.name}
+            onChangeText={(name) => setAddonForm((current) => ({ ...current, name }))}
+            placeholder="Blow dry"
+            placeholderTextColor={c.textDisabled}
+          />
+          <Text style={[styles.label, { color: c.textSecondary }]}>Duration (minutes)</Text>
+          <TextInput
+            style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+            value={addonForm.duration}
+            onChangeText={(duration) => setAddonForm((current) => ({ ...current, duration }))}
+            keyboardType="number-pad"
+            placeholderTextColor={c.textDisabled}
+          />
+          <Text style={[styles.label, { color: c.textSecondary }]}>Price ($)</Text>
+          <TextInput
+            style={[styles.input, { color: c.textPrimary, backgroundColor: c.backgroundSunken, borderColor: c.border }]}
+            value={addonForm.price}
+            onChangeText={(price) => setAddonForm((current) => ({ ...current, price }))}
+            keyboardType="decimal-pad"
+            placeholderTextColor={c.textDisabled}
+          />
+          <View style={styles.switchRow}>
+            <Text style={{ color: c.textPrimary }}>Active</Text>
+            <Switch
+              value={addonForm.is_active}
+              onValueChange={(is_active) => setAddonForm((current) => ({ ...current, is_active }))}
+            />
+          </View>
+          <View style={styles.formActions}>
+            <TouchableOpacity style={[styles.saveBtn, { backgroundColor: c.brand }]} onPress={handleSaveAddon} disabled={saving}>
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setAddonForm(null)} style={styles.cancelForm}>
+              <Text style={{ color: c.textSecondary }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+      </EditorSheet>
+      {addons.map((addon) => (
+        <View
+          key={addon.id}
+          style={[styles.serviceCard, { backgroundColor: c.backgroundCard, borderColor: c.border }, !addon.is_active && styles.serviceCardInactive]}
+        >
+          <View style={styles.serviceInfo}>
+            <Text style={[styles.name, { color: addon.is_active ? c.textPrimary : c.textDisabled }]}>{addon.name}</Text>
+            <Text style={[styles.meta, { color: c.textSecondary }]}>
+              {addon.duration_minutes} min · {formatServicePrice(addon.price_cents)}
+            </Text>
+          </View>
+          <View style={styles.serviceActions}>
+            <TouchableOpacity
+              onPress={() => {
+                if (mobileSheet) setForm(null);
+                setAddonForm({
+                  id: addon.id,
+                  name: addon.name,
+                  duration: String(addon.duration_minutes),
+                  price: (Number(addon.price_cents || 0) / 100).toFixed(2),
+                  is_active: addon.is_active !== false,
+                });
+              }}
+              accessibilityLabel={`Edit ${addon.name}`}
+              style={[styles.editButton, { backgroundColor: c.brand }]}
+            >
+              <Ionicons name="pencil" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
     </ScrollView>
   );
 }
@@ -295,11 +599,18 @@ export default function ServicesScreen() {
 const styles = StyleSheet.create({
   page: { flex: 1 },
   content: { padding: 16, paddingBottom: 48, gap: 12 },
+  browse: { width: '100%' },
+  browseDesktop: { flexDirection: 'row', alignItems: 'flex-start' },
+  browseMain: { width: '100%', gap: 12 },
+  browseMainDesktop: { flex: 1, minWidth: 0, paddingLeft: 24 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   intro: { flex: 1, fontSize: 13, lineHeight: 18 },
   addBtn: { borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },
   addBtnText: { color: '#fff', fontWeight: '700' },
   card: { borderWidth: 1, borderRadius: 12, padding: 14 },
+  sheetCard: { borderWidth: 0, paddingHorizontal: 4 },
+  sheetScroll: { flex: 1 },
+  sheetFormScroll: { padding: 16, paddingBottom: 32 },
   cardTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '600', marginBottom: 4, marginTop: 8 },
   input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 10, fontSize: 14 },
@@ -362,4 +673,5 @@ const styles = StyleSheet.create({
     }),
   },
   deleteBtn: { padding: 6 },
+  addonPick: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
 });

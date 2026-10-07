@@ -116,6 +116,18 @@ export function formatServicePrice(cents) {
   return `$${dollars.toFixed(2)}`;
 }
 
+/** No-show fee is 20% of the booked price plus $5. The salon does not change this. */
+export function noShowFeeCents(priceCents) {
+  const n = Number(priceCents);
+  const base = Number.isFinite(n) && n > 0 ? n : 0;
+  return Math.round(base * 0.2) + 500;
+}
+
+export function addonNames(snapshot) {
+  if (!Array.isArray(snapshot)) return [];
+  return snapshot.map((item) => item?.name).filter(Boolean);
+}
+
 export function monthLabel(dateStr, timeZone) {
   const noon = zonedDateTimeToUtc(dateStr, '12:00', timeZone);
   return new Intl.DateTimeFormat('en-US', {
