@@ -168,6 +168,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
+    authService.clearAdminSession();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     // Clear state immediately so UI switches to login without waiting for
@@ -190,15 +191,18 @@ export const AuthProvider = ({ children }) => {
     return updatedUser;
   };
 
-  const getRestaurantForUser = async (userId) => {
-    const { data, error } = await supabase
+  const getRestaurantForUser = async (userId, restaurantId) => {
+    let query = supabase
       .from('restaurant_staff')
       .select('restaurant_id, role, restaurants(*)')
-      .eq('auth_user_id', userId)
-      .single();
+      .eq('auth_user_id', userId);
+    if (restaurantId) query = query.eq('restaurant_id', restaurantId);
 
+    const { data, error } = await query.limit(1);
     if (error) throw error;
-    return data;
+    const row = data?.[0];
+    if (!row) throw new Error('No restaurant found for this account.');
+    return row;
   };
 
   const getCustomerProfile = async (restaurantId) => {
@@ -209,6 +213,12 @@ export const AuthProvider = ({ children }) => {
   const linkCustomer = useCallback(async (restaurantId, email, authUser, extras = {}) => {
     const userId = authUser?.id ?? user?.id;
     if (!userId) return null;
+
+    if (await authService.isStaffForRestaurant(userId, restaurantId)) {
+      const staffError = new Error('This account is an admin for this business.');
+      staffError.code = 'staff_of_restaurant';
+      throw staffError;
+    }
     const firstName = extras.firstName ?? null;
     const lastName = extras.lastName ?? null;
     const phone = extras.phone ?? null;

@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useRestaurantContext } from '../context/RestaurantContext';
-import { isStaffForRestaurant } from '../services/authService';
+import { isStaffForRestaurant, markAdminSession } from '../services/authService';
 import { useTheme } from '../theme';
 import AdminLayout from '../components/admin/AdminLayout';
 import LoginScreen from '../screens/admin/LoginScreen';
@@ -29,6 +29,7 @@ const AdminNavigator = () => {
     setTenantCheckLoading(true);
     isStaffForRestaurant(user.id, restaurant.id).then((ok) => {
       if (!cancelled) {
+        if (ok) markAdminSession();
         setStaffForRestaurant(ok);
         setTenantCheckLoading(false);
       }

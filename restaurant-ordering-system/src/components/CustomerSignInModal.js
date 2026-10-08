@@ -18,6 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../theme';
 import { syncMarketingContact } from '../services/emailApi';
 import * as customerService from '../services/customerService';
+import { isStaffForRestaurant } from '../services/authService';
 import BottomSheet, { useMobileBottomSheet } from './BottomSheet';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -230,10 +231,21 @@ export default function CustomerSignInModal({ visible, onClose }) {
         return;
       }
 
+      if (await isStaffForRestaurant(signedInUser.id, restaurant.id)) {
+        try { await signOut(); } catch { /* session already cleared */ }
+        showCardError(`This account manages ${restaurant.name}. Sign in from the admin page.`);
+        return;
+      }
+
       let profile;
       try {
         profile = await linkCustomer(restaurant.id, email.trim(), signedInUser);
       } catch (linkError) {
+        if (linkError.code === 'staff_of_restaurant') {
+          try { await signOut(); } catch { /* session already cleared */ }
+          showCardError(`This account manages ${restaurant.name}. Sign in from the admin page.`);
+          return;
+        }
         showCardError(linkError.message || 'Could not load your customer profile.');
         return;
       }
@@ -394,6 +406,11 @@ export default function CustomerSignInModal({ visible, onClose }) {
       onClose();
     } catch (error) {
       // AuthContext.signUp already routes Supabase errors through mapAuthError.
+      if (error.code === 'staff_of_restaurant') {
+        try { await signOut(); } catch { /* session already cleared */ }
+        showCardError(`This account manages ${restaurant.name}. Sign in from the admin page.`);
+        return;
+      }
       if (error.code === 'user_exists') {
         switchMode('signin', { keepMessage: true });
       }

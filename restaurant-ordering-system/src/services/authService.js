@@ -164,7 +164,35 @@ export async function resendSignupEmail(email) {
   return true;
 }
 
+const ADMIN_SESSION_KEY = 'ordering_admin_session';
+
+/** Remember that this browser signed into the admin dashboard. */
+export function markAdminSession() {
+  try {
+    localStorage.setItem(ADMIN_SESSION_KEY, '1');
+  } catch {
+    // storage unavailable
+  }
+}
+
+export function clearAdminSession() {
+  try {
+    localStorage.removeItem(ADMIN_SESSION_KEY);
+  } catch {
+    // storage unavailable
+  }
+}
+
+export function hasAdminSession() {
+  try {
+    return localStorage.getItem(ADMIN_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export async function signOut() {
+  clearAdminSession();
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
@@ -188,25 +216,32 @@ export async function isStaffForRestaurant(userId, restaurantId) {
   return true;
 }
 
-export async function getRestaurantForUser(userId) {
-  const { data, error } = await supabase
+/**
+ * Staff row for this user. Pass restaurantId when the account is linked to
+ * more than one business — a single-row lookup fails in that case.
+ */
+export async function getRestaurantForUser(userId, restaurantId) {
+  let query = supabase
     .from('restaurant_staff')
     .select(`
       role,
       restaurant_id,
       restaurants (*)
     `)
-    .eq('auth_user_id', userId)
-    .single();
+    .eq('auth_user_id', userId);
 
-  if (error) {
-    if (error.code === 'PGRST116') throw new Error('No restaurant found for this account.');
-    throw error;
-  }
+  if (restaurantId) query = query.eq('restaurant_id', restaurantId);
+
+  const { data, error } = await query.limit(1);
+  if (error) throw error;
+
+  const row = data?.[0];
+  if (!row) throw new Error('No restaurant found for this account.');
 
   return {
-    role: data.role,
-    restaurant: data.restaurants
+    role: row.role,
+    restaurant: row.restaurants,
+    restaurant_id: row.restaurant_id,
   };
 }
 

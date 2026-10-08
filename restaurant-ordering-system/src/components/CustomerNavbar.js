@@ -18,6 +18,7 @@ import { isAppointmentBusiness } from '../utils/businessType';
 import { readBrandCache } from '../theme/brandCache';
 import { useCartContext } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { isStaffForRestaurant, signOut as endSession } from '../services/authService';
 import { useTheme } from '../theme';
 import { useNavbarCollapse } from '../context/NavbarCollapseContext';
 import CustomerSignInModal from './CustomerSignInModal';
@@ -152,8 +153,21 @@ export default function CustomerNavbar({ navigation, currentRoute, onOpenCart })
   const prevItemCount = useRef(itemCount);
 
   useEffect(() => {
+    if (!user?.id || !restaurant?.id) return undefined;
+    let cancelled = false;
+    isStaffForRestaurant(user.id, restaurant.id).then((staffHere) => {
+      if (!cancelled && staffHere) endSession().catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, restaurant?.id]);
+
+  useEffect(() => {
     if (!isCustomerAuthenticated || !user?.id || !restaurant?.id || customerProfile) return;
-    linkCustomer(restaurant.id, user.email, user).catch(() => {});
+    linkCustomer(restaurant.id, user.email, user).catch((error) => {
+      if (error?.code === 'staff_of_restaurant') endSession().catch(() => {});
+    });
   }, [isCustomerAuthenticated, user?.id, user?.email, restaurant?.id, customerProfile, linkCustomer]);
 
   useEffect(() => {
