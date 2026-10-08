@@ -128,14 +128,20 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'restaurantId does not match signup metadata' }, 403);
     }
 
-    // Skip staff accounts
-    const { data: staff } = await supabase
+    // Block only an admin of this business. The same account can be a
+    // customer of every other business it is not linked to as staff.
+    const { data: staffRows, error: staffErr } = await supabase
       .from('restaurant_staff')
       .select('id')
       .eq('auth_user_id', uid)
-      .maybeSingle();
-    if (staff) {
-      return json({ skipped: true, reason: 'staff_account' });
+      .eq('restaurant_id', metaRestaurantId)
+      .limit(1);
+    if (staffErr) {
+      console.error('ensure-customer-profile staff lookup:', staffErr);
+      return json({ error: 'Could not verify this account' }, 500);
+    }
+    if (staffRows && staffRows.length > 0) {
+      return json({ error: 'This account is an admin for this business.' }, 403);
     }
 
     const profileSelect =
